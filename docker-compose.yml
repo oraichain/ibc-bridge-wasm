@@ -3,36 +3,46 @@ services:
   earth:
     image: alpine:3.12
     tty: true
-    ports:
-      - 1317:1317
-      - 26656:26656
-      - 26657:26657
     env_file:
       - .env
     environment:
       - DENOM=earth
       - CHAIN_ID=Earth
+    working_dir: /workspace
     volumes:
       - ./.earth:/workspace/.earth
       - ./scripts:/workspace/scripts
       - ./build:/usr/local/bin
+      - ./ibc-proxy:/workspace/ibc
 
   mars:
     image: alpine:3.12
     tty: true
-    ports:
-      - 1318:1317
-      - 26658:26656
-      - 26659:26657
     env_file:
       - .env
     environment:
       - DENOM=mars
       - CHAIN_ID=Mars
+    working_dir: /workspace
     volumes:
       - ./.mars:/workspace/.mars
       - ./scripts:/workspace/scripts
       - ./build:/usr/local/bin
+      - ./ibc-proxy:/workspace/ibc
+
+  ibc:
+    image: node:16.3.0-alpine3.13
+    working_dir: /workspace
+    tty: true
+    ports:
+      - 80:80
+    volumes:
+      - ./ibc-proxy/:/workspace
+      - ./ibc-proxy/.ibc-setup:/root/.ibc-setup
+    # command: yarn ibc-setup init --src earth --dest mars
+    command: yarn start
+    environment:
+      - PORT=80
 
   build:
     image: orai/orai:alpine-wasm

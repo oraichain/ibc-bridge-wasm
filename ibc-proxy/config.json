@@ -1,0 +1,8 @@
+{
+    "hostMap": {
+        "lcd.earth": "earth:1317",
+        "rpc.earth": "earth:26657",
+        "lcd.mars": "mars:1317",
+        "rpc.mars": "mars:26657"
+    }
+}

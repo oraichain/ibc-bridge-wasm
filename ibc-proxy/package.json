@@ -1,0 +1,14 @@
+{
+  "name": "ibc-proxy",
+  "license": "MIT",
+  "scripts": {
+    "start": "yarn && node index.js"
+  },
+  "dependencies": {
+    "@confio/relayer": "^0.2.0",
+    "@oraichain/cosmosjs": "0.0.62",
+    "express": "^4.17.1",
+    "http-proxy": "^1.18.1",
+    "yargs": "^17.0.1"
+  }
+}
