@@ -1,0 +1,41 @@
+version: '3.3'
+services:
+  earth:
+    image: alpine:3.12
+    tty: true
+    ports:
+      - 1317:1317
+      - 26656:26656
+      - 26657:26657
+    env_file:
+      - .env
+    environment:
+      - DENOM=earth
+      - CHAIN_ID=Earth
+    volumes:
+      - ./.earth:/workspace/.earth
+      - ./scripts:/workspace/scripts
+      - ./build:/usr/local/bin
+
+  mars:
+    image: alpine:3.12
+    tty: true
+    ports:
+      - 1318:1317
+      - 26658:26656
+      - 26659:26657
+    env_file:
+      - .env
+    environment:
+      - DENOM=mars
+      - CHAIN_ID=Mars
+    volumes:
+      - ./.mars:/workspace/.mars
+      - ./scripts:/workspace/scripts
+      - ./build:/usr/local/bin
+
+  build:
+    image: orai/orai:alpine-wasm
+    tty: true
+    volumes:
+      - ./:/workspace
