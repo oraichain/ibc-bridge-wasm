@@ -2,7 +2,8 @@
   "name": "ibc-proxy",
   "license": "MIT",
   "scripts": {
-    "start": "yarn && node index.js"
+    "start": "yarn && node index.js",
+    "oraicli": "node oraicli"
   },
   "dependencies": {
     "@confio/relayer": "^0.2.0",

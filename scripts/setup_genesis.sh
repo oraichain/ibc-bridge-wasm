@@ -1,8 +1,12 @@
 #!/bin/sh
 #set -o errexit -o nounset -o pipefail
 
-echo -n "Enter passphrase:"
-read -s PASSWORD
+if [ -z "$PASSWORD" ]
+then
+    echo -n "Enter passphrase:"
+    read -s PASSWORD
+fi 
+
 CHAIN_ID=${CHAIN_ID:-Oraichain}
 USER=${USER:-tupt}
 MONIKER=${MONIKER:-node001}
@@ -27,4 +31,6 @@ oraid validate-genesis
 # cat $PWD/.oraid/config/genesis.json | jq .app_state.genutil.gen_txs[0] -c > "$MONIKER"_validators.txt
 
 echo "The genesis initiation process has finished ..."
+
+oraid start --rpc.laddr tcp://0.0.0.0:26657
 

@@ -9,6 +9,7 @@ services:
       - DENOM=earth
       - CHAIN_ID=Earth
     working_dir: /workspace
+    command: /workspace/scripts/setup_genesis.sh
     volumes:
       - ./.earth:/workspace/.earth
       - ./scripts:/workspace/scripts
@@ -24,6 +25,7 @@ services:
       - DENOM=mars
       - CHAIN_ID=Mars
     working_dir: /workspace
+    command: /workspace/scripts/setup_genesis.sh
     volumes:
       - ./.mars:/workspace/.mars
       - ./scripts:/workspace/scripts
@@ -39,14 +41,14 @@ services:
     volumes:
       - ./ibc-proxy/:/workspace
       - ./ibc-proxy/.ibc-setup:/root/.ibc-setup
-    # command: yarn ibc-setup init --src earth --dest mars
+      - ./smart-contracts:/root/contracts
     command: yarn start
     environment:
       - PORT=80
 
-  build:
-    image: orai/orai:alpine-wasm
-    tty: true
-    # command: wget https://github.com/CosmWasm/wasmvm/releases/download/v0.14.0/libwasmvm_muslc.a -O /lib/libwasmvm_muslc.a
-    volumes:
-      - ./:/workspace
+  # build:
+  #   image: orai/orai:alpine-wasm
+  #   tty: true
+  #   # command: wget https://github.com/CosmWasm/wasmvm/releases/download/v0.14.0/libwasmvm_muslc.a -O /lib/libwasmvm_muslc.a
+  #   volumes:
+  #     - ./:/workspace
