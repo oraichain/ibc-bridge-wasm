@@ -1,5 +1,8 @@
 const httpProxy = require('http-proxy');
 const express = require('express');
+const path = require('path');
+const getAccount = require('./get-account');
+const cors = require('cors');
 const { hostMap } = require('./config.json');
 
 const proxy = httpProxy.createProxyServer({ timeout: 10000 });
@@ -10,19 +13,17 @@ const app = express();
 
 const port = process.env.PORT || 80;
 app
+  .use(cors())
+  .get('/favicon.ico', (req, res) => {
+    res.sendFile(path.resolve('swagger-ui/favicon-32x32.png'));
+  })
+  .get('/accounts', async (req, res) => {
+    const accounts = await getAccount('accounts');
+    res.json(accounts);
+  })
+  .use('/swagger', express.static('swagger-ui'))
   .all('*', (req, res) => {
-    // cors processing
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header(
-      'Access-Control-Allow-Headers',
-      'Content-Type,Content-Length, Authorization, Accept,X-Requested-With'
-    );
-    res.header('Access-Control-Allow-Methods', 'PUT,POST,GET,DELETE,OPTIONS');
-    res.header('Access-Control-Allow-Credentials', true);
-    res.setHeader('X-Powered-By', 'LCD API');
-    if (req.method === 'OPTIONS') return res.sendStatus(200);
-
-    const target = hostMap[req.headers.host];
+    const target = hostMap[req.headers.host.split(':')[0]];
     if (!target) return res.end();
     proxy.web(req, res, { target: `http://${target}` });
   })
