@@ -22,6 +22,7 @@ app
     res.json(accounts);
   })
   .use('/swagger', express.static('swagger-ui'))
+  .use('/frontend', express.static('frontend'))
   .all('*', (req, res) => {
     const target = hostMap[req.headers.host.split(':')[0]];
     if (!target) return res.end();
