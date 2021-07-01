@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Wasm from './wasm';
 
 const parseDenom = (denom) => {
   switch (denom) {
@@ -10,6 +11,9 @@ const parseDenom = (denom) => {
       return denom;
   }
 };
+
+const marketplaceContract = process.env.REACT_APP_MARKETPLACE_CONTRACT;
+const nftContract = process.env.REACT_APP_NFT_CONTRACT;
 
 const port = process.env.REACT_APP_SERVER_PORT
   ? ':' + process.env.REACT_APP_SERVER_PORT
@@ -52,6 +56,21 @@ const Header = () => {
     getAccounts();
   }, []);
 
+  const formRef = useRef();
+  const mintNFT = async () => {
+    const formData = new FormData(formRef.current);
+    const msg = {
+      name: formData.get('name'),
+      description: formData.get('description'),
+      image: formData.get('image'),
+      tokenId: formData.get('tokenId')
+    };
+
+    const wasm = new Wasm(state.currentAccount);
+    const ret = await wasm.mintNft(marketplaceContract, nftContract, msg);
+    console.log(ret);
+  };
+
   return (
     <>
       <header>
@@ -83,6 +102,29 @@ const Header = () => {
             ))}
           </tbody>
         </table>
+      )}
+      {state.currentAccount && (
+        <div style={{ padding: 20 }}>
+          <form ref={formRef}>
+            <label htmlFor="name">NFT Name</label>
+            <input type="text" name="name" placeholder="NFT name.." />
+
+            <label htmlFor="description">Description</label>
+            <input
+              type="text"
+              name="description"
+              placeholder="NFT descripiton.."
+            />
+
+            <label htmlFor="image">Image</label>
+            <input type="text" name="image" placeholder="NFT URI.." />
+
+            <label htmlFor="tokenId">Token ID</label>
+            <input type="text" name="tokenId" placeholder="Token ID.." />
+
+            <input type="button" value="Submit" onClick={mintNFT} />
+          </form>
+        </div>
       )}
     </>
   );
