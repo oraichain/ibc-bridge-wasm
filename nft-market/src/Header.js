@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 
-const port = process.env.REACT_APP_SERVER_PORT || 8080;
+const port = process.env.REACT_APP_SERVER_PORT
+  ? ':' + process.env.REACT_APP_SERVER_PORT
+  : '';
 const Header = () => {
   const [state, setState] = useState({
     showAccount: false,
@@ -18,12 +20,12 @@ const Header = () => {
   };
   useEffect(() => {
     const getAccounts = async () => {
-      const accounts = await fetch(`http://localhost:${port}/accounts`).then(
+      const accounts = await fetch(`http://localhost${port}/accounts`).then(
         (res) => res.json()
       );
 
       for (let account of accounts) {
-        const url = `http://lcd.${account.network.toLowerCase()}:${port}/cosmos/bank/v1beta1/balances/${
+        const url = `http://lcd.${account.network.toLowerCase()}${port}/cosmos/bank/v1beta1/balances/${
           account.address
         }`;
 
