@@ -16,7 +16,7 @@ docker compose up -d
 ## send coin
 
 ```bash
-docker-compose exec ibc ash
+docker compose exec ibc ash
 # default config, work the same as `yarn ibc-setup init --src earth --dest mars`
 cp .ibc-setup/app.example.yaml .ibc-setup/app.yaml
 yarn oraicli send --network earth --address earth1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgngtwlpx --amount 60000
