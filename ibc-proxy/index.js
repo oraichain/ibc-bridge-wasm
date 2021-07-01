@@ -22,12 +22,12 @@ app
     res.json(accounts);
   })
   .use('/swagger', express.static('swagger-ui'))
-  .use('/frontend', express.static('frontend'))
-  .all('*', (req, res) => {
+  .all('*', (req, res, next) => {
     const target = hostMap[req.headers.host.split(':')[0]];
-    if (!target) return res.end();
+    if (!target) return next();
     proxy.web(req, res, { target: `http://${target}` });
   })
+  .use('/', express.static('frontend'))
   .listen(port, '0.0.0.0', () => {
     console.log(`listening on port ${port}`);
   })

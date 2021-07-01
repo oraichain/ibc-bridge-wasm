@@ -31,9 +31,6 @@ const parseDenom = (denom) => {
   }
 };
 
-const port = process.env.REACT_APP_SERVER_PORT
-  ? ':' + process.env.REACT_APP_SERVER_PORT
-  : '';
 const Header = () => {
   const [state, setState] = useState({
     showAccount: false,
@@ -51,8 +48,8 @@ const Header = () => {
   };
   useEffect(() => {
     const getAccounts = async () => {
-      const accounts = await fetch(`http://localhost${port}/accounts`).then(
-        (res) => res.json()
+      const accounts = await fetch(`https://ibc.orai.io/accounts`).then((res) =>
+        res.json()
       );
 
       const mapAccount = new Map(
@@ -61,7 +58,7 @@ const Header = () => {
 
       for (let account of accounts) {
         const getBalance = async (address) => {
-          const url = `http://lcd.${account.network.toLowerCase()}${port}/cosmos/bank/v1beta1/balances/${address}`;
+          const url = `https://lcd.${account.network.toLowerCase()}.orai.io/cosmos/bank/v1beta1/balances/${address}`;
 
           const { balances } = await fetch(url).then((res) => res.json());
 

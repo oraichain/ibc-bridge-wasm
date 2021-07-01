@@ -12,7 +12,7 @@ const nftContract = process.env.REACT_APP_NFT_CONTRACT;
 class Wasm {
   constructor(network) {
     const chainId = network[0].toUpperCase() + network.substr(1);
-    this.cosmos = new Cosmos(`http://lcd.${network}`, chainId);
+    this.cosmos = new Cosmos(`https://lcd.${network}.orai.io`, chainId);
     this.cosmos.setBech32MainPrefix(network);
   }
 
