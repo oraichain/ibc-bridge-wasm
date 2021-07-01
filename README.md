@@ -44,8 +44,9 @@ yarn oraicli account balance --network mars --address mars1ya6nzd5jtzgmcn4vlueav
 
 ## deploy smart contract
 
-`yarn oraicli wasm deploy --file /root/contracts/ow721/artifacts/ow721.wasm --label ow721 --network earth --input '{"minter":"earth16v74e2cmx2n0vsvw7dq5nzmwupgv9dqy8xpd07","name":"ow721","symbol":"NFT"}' --gas 3000000`
+```bash
+# deploy marketplace contract on mars blockchain
+yarn oraicli wasm deploy --file /root/contracts/marketplace/artifacts/marketplace.wasm --label marketplace --network mars --input '{"name": "nft market"}' --gas 3000000
 
-## execute smart contract
-
-`yarn oraicli wasm execute --address earth10pyejy66429refv3g35g2t7am0was7yarurv3u --network earth --input '{"mint":{"name":"nft","owner":"earth18vd8fpwxzck93qlwghaj6arh4p7c5n898vrlha","token_id":"123"}}'`
+yarn oraicli wasm deploy --file /root/contracts/ow721/artifacts/ow721.wasm --label ow721 --network mars --input '{"minter":marketplace_contract,"name":"NFT Collection","symbol":"NFT"}' --gas 3000000
+```
