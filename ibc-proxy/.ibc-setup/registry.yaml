@@ -8,7 +8,7 @@ chains:
     rpc:
       - http://earth:26657
   mars:
-    chain_id: Marth
+    chain_id: Mars
     prefix: mars
     gas_price: 0.025mars
     rpc:

@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react';
 
+const parseDenom = (denom) => {
+  switch (denom) {
+    case 'ibc/1D87F7F49C0E994F34935219BEB178D8D1E11DB9B94208DD0004ACA7C4E1D767':
+      return 'earth';
+    case 'ibc/05444EFC83A16B5CBA7DE8AFD12EE3DDA503AFE4FDDF0222925B89EF02D10041':
+      return 'mars';
+    default:
+      return denom;
+  }
+};
+
 const port = process.env.REACT_APP_SERVER_PORT
   ? ':' + process.env.REACT_APP_SERVER_PORT
   : '';
@@ -30,8 +41,10 @@ const Header = () => {
         }`;
 
         const { balances } = await fetch(url).then((res) => res.json());
-        const balance = balances[0];
-        account.balance = `${balance.amount} ${balance.denom}`;
+
+        account.balance = balances
+          .map((balance) => `${balance.amount} ${parseDenom(balance.denom)}`)
+          .join(', ');
       }
 
       setState((props) => ({ ...props, accounts }));

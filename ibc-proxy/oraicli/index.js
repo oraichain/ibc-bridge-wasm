@@ -63,7 +63,8 @@ const run = () => {
       const chainId = network[0].toUpperCase() + network.substr(1);
       global.cosmos = new Cosmos(`http://lcd.${network}`, chainId);
       cosmos.setBech32MainPrefix(network);
-      const mnemonic = await getLastLine(`accounts/${chainId}.txt`);
+      const mnemonic =
+        process.env.MNEMONIC || (await getLastLine(`accounts/${chainId}.txt`));
       const childKey = cosmos.getChildKey(mnemonic);
       const from_address = cosmos.getAddress(childKey);
       return { mnemonic, denom: network, childKey, from_address };
