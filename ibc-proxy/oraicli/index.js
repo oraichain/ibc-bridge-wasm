@@ -58,8 +58,9 @@ global.submit = async (type, obj, { childKey, memo, fees, gas }) => {
 
 const run = () => {
   yargs(hideBin(process.argv))
-    .middleware(async ({ network }) => {
+    .middleware(async ({ network, denom }) => {
       // global
+      denom = denom || network;
       const chainId = network[0].toUpperCase() + network.substr(1);
       global.cosmos = new Cosmos(`http://lcd.${network}`, chainId);
       cosmos.setBech32MainPrefix(network);
@@ -67,11 +68,13 @@ const run = () => {
         process.env.MNEMONIC || (await getLastLine(`accounts/${chainId}.txt`));
       const childKey = cosmos.getChildKey(mnemonic);
       const from_address = cosmos.getAddress(childKey);
-      return { mnemonic, denom: network, childKey, from_address };
+      return { mnemonic, denom, childKey, from_address };
     })
     .alias('help', 'h')
     .alias('version', 'v')
-
+    .options('denom', {
+      type: 'string'
+    })
     .option('network', {
       default: 'earth',
       type: 'string'

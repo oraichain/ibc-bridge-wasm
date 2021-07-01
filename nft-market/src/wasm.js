@@ -3,22 +3,31 @@ import { Buffer } from 'buffer';
 
 const message = Cosmos.message;
 
+const marketplaceContract = process.env.REACT_APP_MARKETPLACE_CONTRACT;
+const nftContract = process.env.REACT_APP_NFT_CONTRACT;
+
 /**
  * If there is chainId it will interacte with blockchain, otherwise using simulator
  */
 class Wasm {
-  constructor({ network, mnemonic }) {
+  constructor(network) {
     const chainId = network[0].toUpperCase() + network.substr(1);
     this.cosmos = new Cosmos(`http://lcd.${network}`, chainId);
     this.cosmos.setBech32MainPrefix(network);
-    this.childKey = this.cosmos.getChildKey(mnemonic);
+  }
+
+  get contracts() {
+    return {
+      marketplaceContract,
+      nftContract
+    };
   }
 
   /**
    * query with json string
    * */
   async query(address, input) {
-    const param = Buffer.from(input);
+    const param = Buffer.from(input).toString('base64');
     return await this.cosmos.get(
       `/wasm/v1beta1/contract/${address}/smart/${param}`
     );
@@ -50,12 +59,12 @@ class Wasm {
     });
   }
 
-  async execute(address, input, { gas, fees, funds, memo } = {}) {
+  async execute(address, input, childKey, { gas, fees, funds, memo } = {}) {
     const param = Buffer.from(input);
-    const sender = this.getAddress(this.childKey);
+    const sender = this.getAddress(childKey);
     const txBody = this.getHandleMessage(address, param, sender, funds, memo);
     return await this.cosmos.submit(
-      this.childKey,
+      childKey,
       txBody,
       'BROADCAST_MODE_BLOCK',
       fees || 0,
@@ -63,30 +72,49 @@ class Wasm {
     );
   }
 
-  async mintNft(
-    marketplaceContract,
-    nftContract,
-    { description, image, name, tokenId }
-  ) {
-    await this.execute(
-      marketplaceContract,
-      JSON.stringify({
-        mint_nft: {
-          contract: nftContract,
-          msg: btoa(
-            JSON.stringify({
-              mint: {
-                description,
-                image,
-                name,
-                owner: this.getAddress(),
-                token_id: tokenId
-              }
-            })
-          )
-        }
-      })
+  async mintNft({ description, image, name, tokenId, price }, childKey) {
+    const ret = [];
+    ret.push(
+      await this.execute(
+        marketplaceContract,
+        JSON.stringify({
+          mint_nft: {
+            contract: nftContract,
+            msg: btoa(
+              JSON.stringify({
+                mint: {
+                  description,
+                  image,
+                  name,
+                  owner: this.getAddress(childKey),
+                  token_id: tokenId
+                }
+              })
+            )
+          }
+        }),
+        childKey
+      )
     );
+
+    ret.push(
+      await this.execute(
+        nftContract,
+        JSON.stringify({
+          send_nft: {
+            contract: marketplaceContract,
+            msg: btoa(
+              JSON.stringify({
+                price
+              })
+            ),
+            token_id: tokenId
+          }
+        }),
+        childKey
+      )
+    );
+    return ret;
   }
 
   /**
@@ -94,7 +122,7 @@ class Wasm {
    * @returns string
    */
   getAddress(childKey) {
-    return this.cosmos.getAddress(childKey || this.childKey);
+    return this.cosmos.getAddress(childKey);
   }
 }
 

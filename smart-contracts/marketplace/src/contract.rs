@@ -49,7 +49,7 @@ pub fn execute(
         ExecuteMsg::WithdrawNft { offering_id } => try_withdraw(deps, info, offering_id),
         ExecuteMsg::BuyNft { offering_id } => try_buy(deps, env, info, offering_id),
         ExecuteMsg::ReceiveNft(msg) => try_receive_nft(deps, info, msg),
-        ExecuteMsg::SetPayMent { denom, ratio } => try_set_payment(deps, info, denom, ratio),
+        ExecuteMsg::SetPayment { denom, ratio } => try_set_payment(deps, info, denom, ratio),
     }
 }
 

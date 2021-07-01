@@ -24,7 +24,7 @@ pub enum ExecuteMsg {
         contract: String,
         msg: Binary,
     },
-    SetPayMent {
+    SetPayment {
         denom: String,
         ratio: Decimal,
     },

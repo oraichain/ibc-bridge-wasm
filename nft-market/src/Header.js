@@ -1,5 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import Wasm from './wasm';
+
+window.seedData = async (mnemonic, startId = 4) => {
+  const { photos } = require('./data.json');
+
+  const childKey = window.wasm.cosmos.getChildKey(mnemonic);
+
+  for (let { src, width, height, title, price } of photos) {
+    const realPrice =
+      window.BigInt(price.match(/\d+/)[0]) * window.BigInt(1000000);
+    const msg = {
+      name: title,
+      description: `${width}x${height}`,
+      image: src,
+      tokenId: (startId++).toString(),
+      price: realPrice.toString(10)
+    };
+    const ret = await window.wasm.mintNft(msg, childKey);
+    console.log(ret);
+  }
+};
 
 const parseDenom = (denom) => {
   switch (denom) {
@@ -11,9 +30,6 @@ const parseDenom = (denom) => {
       return denom;
   }
 };
-
-const marketplaceContract = process.env.REACT_APP_MARKETPLACE_CONTRACT;
-const nftContract = process.env.REACT_APP_NFT_CONTRACT;
 
 const port = process.env.REACT_APP_SERVER_PORT
   ? ':' + process.env.REACT_APP_SERVER_PORT
@@ -39,16 +55,31 @@ const Header = () => {
         (res) => res.json()
       );
 
+      const mapAccount = new Map(
+        accounts.map((account) => [account.network, account])
+      );
+
       for (let account of accounts) {
-        const url = `http://lcd.${account.network.toLowerCase()}${port}/cosmos/bank/v1beta1/balances/${
-          account.address
-        }`;
+        const getBalance = async (address) => {
+          const url = `http://lcd.${account.network.toLowerCase()}${port}/cosmos/bank/v1beta1/balances/${address}`;
 
-        const { balances } = await fetch(url).then((res) => res.json());
+          const { balances } = await fetch(url).then((res) => res.json());
 
-        account.balance = balances
-          .map((balance) => `${balance.amount} ${parseDenom(balance.denom)}`)
-          .join(', ');
+          return balances
+            .map((balance) => `${balance.amount} ${parseDenom(balance.denom)}`)
+            .join(', ');
+        };
+
+        account.balance = await getBalance(account.address);
+
+        if (account.network === 'mars') {
+          const earthAccount = mapAccount.get('earth');
+          earthAccount.marsAddress = window.wasm.cosmos.getAddress(
+            earthAccount.mnemonic
+          );
+          earthAccount.marsBalance = await getBalance(earthAccount.marsAddress);
+          account.earthAccount = earthAccount;
+        }
       }
 
       setState((props) => ({ ...props, accounts }));
@@ -63,12 +94,20 @@ const Header = () => {
       name: formData.get('name'),
       description: formData.get('description'),
       image: formData.get('image'),
-      tokenId: formData.get('tokenId')
+      tokenId: formData.get('tokenId'),
+      price: formData.get('price')
     };
 
-    const wasm = new Wasm(state.currentAccount);
-    const ret = await wasm.mintNft(marketplaceContract, nftContract, msg);
-    console.log(ret);
+    const childKey = window.wasm.cosmos.getChildKey(
+      state.currentAccount.mnemonic
+    );
+
+    try {
+      const ret = await window.wasm.mintNft(msg, childKey);
+      console.log(ret);
+    } catch (ex) {
+      alert(ex.message);
+    }
   };
 
   return (
@@ -91,15 +130,22 @@ const Header = () => {
             </tr>
           </thead>
           <tbody>
-            {state.accounts?.map(({ name, address, network, balance }, ind) => (
-              <tr key={address} onClick={() => selectAccount(ind)}>
-                <td>{name}</td>
-                <td>
-                  {address} {balance}
-                </td>
-                <td>{network}</td>
-              </tr>
-            ))}
+            {state.accounts?.map(
+              ({ name, address, network, balance, earthAccount }, ind) => (
+                <tr key={address} onClick={() => selectAccount(ind)}>
+                  <td>{name}</td>
+                  <td>
+                    {address} {balance}
+                    {earthAccount && (
+                      <div>
+                        {earthAccount.marsAddress} {earthAccount.marsBalance}
+                      </div>
+                    )}
+                  </td>
+                  <td>{network}</td>
+                </tr>
+              )
+            )}
           </tbody>
         </table>
       )}
@@ -121,6 +167,9 @@ const Header = () => {
 
             <label htmlFor="tokenId">Token ID</label>
             <input type="text" name="tokenId" placeholder="Token ID.." />
+
+            <label htmlFor="price">Price</label>
+            <input type="text" name="price" placeholder="Price.." />
 
             <input type="button" value="Submit" onClick={mintNFT} />
           </form>

@@ -14,8 +14,8 @@ const Photo = ({
   key
 }) => {
   const imgStyle = { margin: margin, display: 'block' };
-  const { src, width, height, owner, price, title } = photo;
-  console.log(photo);
+  const { src, width, height, seller, price, title, earthPrice, tokenId } =
+    photo;
   if (direction === 'column') {
     imgStyle.position = 'absolute';
     imgStyle.left = left;
@@ -30,18 +30,19 @@ const Photo = ({
 
   return (
     <div
-      key={key}
+      key={tokenId}
       className="nft-item"
       style={onClick ? { ...imgStyle, ...imgWithClick } : imgStyle}
       onClick={onClick ? handleClick : null}
     >
       <img className="nft-image" alt={key} src={src} />
       <div className="nft-bottom">
-        <AvatarPlaceholder className="nft-avatar" address={owner} />
+        <AvatarPlaceholder className="nft-avatar" address={seller} />
         <span className="nft-title">
           {title}
           <br />
-          <span className="nft-price">{price}</span>
+          <span className="nft-price">{price} mars</span>&nbsp;&nbsp;
+          <span className="nft-price">{earthPrice} earth</span>
         </span>
       </div>
     </div>
