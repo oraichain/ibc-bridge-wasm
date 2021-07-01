@@ -72,7 +72,7 @@ class Wasm {
     );
   }
 
-  async mintNft({ description, image, name, tokenId, price }, childKey) {
+  async sellNft({ description, image, name, tokenId, price }, childKey) {
     const ret = [];
     ret.push(
       await this.execute(

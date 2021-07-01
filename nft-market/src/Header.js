@@ -15,7 +15,7 @@ window.seedData = async (mnemonic, startId = 4) => {
       tokenId: (startId++).toString(),
       price: realPrice.toString(10)
     };
-    const ret = await window.wasm.mintNft(msg, childKey);
+    const ret = await window.wasm.sellNft(msg, childKey);
     console.log(ret);
   }
 };
@@ -88,7 +88,7 @@ const Header = () => {
   }, []);
 
   const formRef = useRef();
-  const mintNFT = async () => {
+  const sellNft = async () => {
     const formData = new FormData(formRef.current);
     const msg = {
       name: formData.get('name'),
@@ -103,7 +103,7 @@ const Header = () => {
     );
 
     try {
-      const ret = await window.wasm.mintNft(msg, childKey);
+      const ret = await window.wasm.sellNft(msg, childKey);
       console.log(ret);
     } catch (ex) {
       alert(ex.message);
@@ -171,7 +171,7 @@ const Header = () => {
             <label htmlFor="price">Price</label>
             <input type="text" name="price" placeholder="Price.." />
 
-            <input type="button" value="Submit" onClick={mintNFT} />
+            <input type="button" value="Submit" onClick={sellNft} />
           </form>
         </div>
       )}
