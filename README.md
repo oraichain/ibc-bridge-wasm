@@ -19,8 +19,8 @@ docker compose up -d
 docker compose exec ibc ash
 # default config, work the same as `yarn ibc-setup init --src earth --dest mars`
 cp .ibc-setup/app.example.yaml .ibc-setup/app.yaml
-yarn oraicli send --network earth --address earth1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgngtwlpx --amount 60000
-yarn oraicli send --network mars --address mars1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgnwcvq65 --amount 60000
+yarn oraicli send --network earth --address earth1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgngtwlpx --amount 6000000
+yarn oraicli send --network mars --address mars1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgnwcvq65 --amount 6000000
 # check balance
 yarn ibc-setup balances
 ```
