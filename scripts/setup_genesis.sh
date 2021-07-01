@@ -35,5 +35,5 @@ then
     echo "The genesis initiation process has finished ..."
 fi
 
-oraid start --rpc.laddr tcp://0.0.0.0:26657
+oraid start --rpc.laddr tcp://0.0.0.0:26657 --log_level error
 

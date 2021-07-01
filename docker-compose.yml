@@ -37,11 +37,12 @@ services:
     working_dir: /workspace
     tty: true
     ports:
-      - 80:80
+      - 8888:80
     volumes:
       - ./ibc-proxy/:/workspace
       - ./ibc-proxy/.ibc-setup:/root/.ibc-setup
       - ./smart-contracts:/root/contracts
+      - ./nft-market/build:/workspace/frontend
     command: yarn start
     environment:
       - PORT=80
