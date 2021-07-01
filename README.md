@@ -37,9 +37,9 @@ yarn ibc-setup balances
 
 ```bash
 # from earth to mars on channel
-yarn oraicli ibc transfer --network earth --address mars1stnnv6qm9gnepjkvshh4aynrsrcr82zkyjfpph --amount 100 --channel channel-0
+yarn oraicli ibc transfer --network earth --address mars1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgnwcvq65 --amount 100 --channel channel-0
 # check balance on mars
-yarn oraicli account balance --network mars --address mars1stnnv6qm9gnepjkvshh4aynrsrcr82zkyjfpph
+yarn oraicli account balance --network mars --address mars1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgnwcvq65
 ```
 
 ## deploy smart contract
