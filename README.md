@@ -164,3 +164,19 @@ await Wasm.query(
   })
 );
 ```
+
+### Set Payment method for ibc cross payment
+
+```js
+await wasm.execute(
+  'marketplace',
+  JSON.stringify({
+    set_pay_ment: {
+      denom:
+        'ibc/1D87F7F49C0E994F34935219BEB178D8D1E11DB9B94208DD0004ACA7C4E1D767',
+      ratio: '1000000'
+    }
+  }),
+  childKey
+);
+```

@@ -76,6 +76,7 @@ const Header = () => {
           );
           earthAccount.marsBalance = await getBalance(earthAccount.marsAddress);
           account.earthAccount = earthAccount;
+          window.earthAccount = earthAccount;
         }
       }
 
@@ -146,7 +147,7 @@ const Header = () => {
           </tbody>
         </table>
       )}
-      {state.currentAccount && (
+      {state.showAccount && state.currentAccount && (
         <div style={{ padding: 20 }}>
           <form ref={formRef}>
             <label htmlFor="name">NFT Name</label>

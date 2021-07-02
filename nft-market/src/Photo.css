@@ -1,3 +1,6 @@
+.nft-item {
+  position: relative;
+}
 .nft-image {
   width: 100%;
   object-fit: cover;

@@ -7,6 +7,7 @@ const Photo = ({
   index,
   onClick,
   photo,
+  buy,
   margin,
   direction,
   top,
@@ -38,12 +39,22 @@ const Photo = ({
       <img className="nft-image" alt={key} src={src} />
       <div className="nft-bottom">
         <AvatarPlaceholder className="nft-avatar" address={seller} />
+        {buy && seller}
         <span className="nft-title">
           {title}
           <br />
-          <span className="nft-price">{price} mars</span>&nbsp;&nbsp;
+          <span className="nft-price">{price} mars</span>
+          &nbsp;&nbsp;<span style={{ color: '#F68A1D' }}>or</span>&nbsp;&nbsp;
           <span className="nft-price">{earthPrice} earth</span>
         </span>
+        {buy && (
+          <button
+            onClick={buy}
+            style={{ padding: '10px 20px', marginRight: 10 }}
+          >
+            Buy
+          </button>
+        )}
       </div>
     </div>
   );

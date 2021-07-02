@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 
 import Carousel, { Modal, ModalGateway } from 'react-images';
 import Gallery from 'react-photo-gallery';
@@ -66,10 +66,10 @@ const App = () => {
             title: name,
             tokenId: token_id,
             price,
+            // decimal is 10^6
             earthPrice: (
-              (window.BigInt(price) *
-                window.BigInt(parseFloat(ratio) * 1000000)) /
-              window.BigInt(1000000)
+              window.BigInt(parseFloat(price) * 1000000) /
+              window.BigInt(parseFloat(ratio) * 1000000)
             ).toString(10),
             seller
           };
@@ -81,6 +81,18 @@ const App = () => {
 
     getNFT();
   }, []);
+
+  const currentPhoto = state.photos[state.currentImage];
+  const currencyRef = useRef();
+
+  const buyNft = () => {
+    alert(
+      'buy this nft: ' +
+        JSON.stringify(currentPhoto) +
+        ' with denom ' +
+        currencyRef.current.value
+    );
+  };
 
   return (
     <>
@@ -95,14 +107,21 @@ const App = () => {
       <ModalGateway>
         {state.viewerIsOpen && (
           <Modal onClose={closeLightbox}>
-            <Carousel
-              currentIndex={state.currentImage}
-              views={state.photos.map((x) => ({
-                ...x,
-                srcset: x.srcSet,
-                caption: x.title
-              }))}
-            />
+            <>
+              <Photo photo={currentPhoto} buy={buyNft} />
+              <form>
+                <label htmlFor="currency" style={{ marginLeft: 10 }}>
+                  Choose currency
+                </label>
+                <span>{currentPhoto.balance}</span>
+                <select name="currency" ref={currencyRef}>
+                  <option value="earth">{window.earthAccount.balance}</option>
+                  <option value="mars">
+                    {window.earthAccount.marsBalance}
+                  </option>
+                </select>
+              </form>
+            </>
           </Modal>
         )}
       </ModalGateway>
