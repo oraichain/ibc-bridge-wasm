@@ -173,7 +173,7 @@ const Header = () => {
             <label htmlFor="price">Price</label>
             <input type="text" name="price" placeholder="Price.." />
 
-            <input type="button" value="Submit" onClick={sellNft} />
+            <button onClick={sellNft}>Submit</button>
           </form>
         </div>
       )}
