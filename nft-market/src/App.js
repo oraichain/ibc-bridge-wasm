@@ -111,14 +111,12 @@ const App = () => {
               <Photo photo={currentPhoto} buy={buyNft} />
               <form>
                 <label htmlFor="currency" style={{ marginLeft: 10 }}>
-                  Choose currency
+                  Choose currency ({window.earthAccount.marsBalance})
                 </label>
-                <span>{currentPhoto.balance}</span>
+
                 <select name="currency" ref={currencyRef}>
-                  <option value="earth">{window.earthAccount.balance}</option>
-                  <option value="mars">
-                    {window.earthAccount.marsBalance}
-                  </option>
+                  <option value="earth">earth</option>
+                  <option value="mars">mars</option>
                 </select>
               </form>
             </>
