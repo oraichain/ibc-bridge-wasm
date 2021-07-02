@@ -29,6 +29,12 @@ const Photo = ({
     onClick(event, { photo, index });
   };
 
+  const handleBuy = (event) => {
+    event.target.setAttribute('disabled', true);
+    event.target.innerText = 'Processing...';
+    buy?.();
+  };
+
   return (
     <div
       key={tokenId}
@@ -39,7 +45,7 @@ const Photo = ({
       <img className="nft-image" alt={key} src={src} />
       <div className="nft-bottom">
         <AvatarPlaceholder className="nft-avatar" address={seller} />
-        {buy && seller}
+        {buy && `${seller.slice(0, 8)}...${seller.slice(-8)}`}
         <span className="nft-title">
           {title}
           <br />
@@ -49,7 +55,7 @@ const Photo = ({
         </span>
         {buy && (
           <button
-            onClick={buy}
+            onClick={handleBuy}
             style={{ padding: '10px 20px', marginRight: 10 }}
           >
             Buy

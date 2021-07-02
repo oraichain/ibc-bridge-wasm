@@ -43,8 +43,8 @@ const Header = () => {
       showAccount: !props.showAccount
     }));
   };
-  const selectAccount = (ind) => {
-    setState((props) => ({ ...props, currentAccount: props.accounts[ind] }));
+  const selectAccount = (currentAccount) => {
+    setState((props) => ({ ...props, currentAccount }));
   };
   useEffect(() => {
     const getAccounts = async () => {
@@ -77,6 +77,7 @@ const Header = () => {
           earthAccount.marsBalance = await getBalance(earthAccount.marsAddress);
           account.earthAccount = earthAccount;
           window.earthAccount = earthAccount;
+          selectAccount(account);
         }
       }
 
@@ -130,7 +131,10 @@ const Header = () => {
           <tbody>
             {state.accounts?.map(
               ({ name, address, network, balance, earthAccount }, ind) => (
-                <tr key={address} onClick={() => selectAccount(ind)}>
+                <tr
+                  key={address}
+                  onClick={() => selectAccount(state.accounts[ind])}
+                >
                   <td>{name}</td>
                   <td>
                     {address} {balance}

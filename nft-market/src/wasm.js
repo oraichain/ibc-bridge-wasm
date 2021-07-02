@@ -33,9 +33,9 @@ class Wasm {
     );
   }
 
-  getHandleMessage(contract, msg, sender, funds, memo) {
+  getHandleMessage(contract, msg, sender, funds, memo, denom) {
     const sent_funds = funds
-      ? [{ denom: this.cosmos.bech32MainPrefix, amount: funds }]
+      ? [{ denom: denom || this.cosmos.bech32MainPrefix, amount: funds }]
       : null;
 
     const msgSend = new message.cosmwasm.wasm.v1beta1.MsgExecuteContract({
@@ -59,10 +59,22 @@ class Wasm {
     });
   }
 
-  async execute(address, input, childKey, { gas, fees, funds, memo } = {}) {
+  async execute(
+    address,
+    input,
+    childKey,
+    { gas, fees, funds, memo, denom } = {}
+  ) {
     const param = Buffer.from(input);
     const sender = this.getAddress(childKey);
-    const txBody = this.getHandleMessage(address, param, sender, funds, memo);
+    const txBody = this.getHandleMessage(
+      address,
+      param,
+      sender,
+      funds,
+      memo,
+      denom
+    );
     return await this.cosmos.submit(
       childKey,
       txBody,
@@ -70,6 +82,20 @@ class Wasm {
       fees || 0,
       gas || 200000
     );
+  }
+
+  async buyNft({ offeringId, amount, denom }, childKey) {
+    const ret = await this.execute(
+      marketplaceContract,
+      JSON.stringify({
+        buy_nft: {
+          offering_id: parseInt(offeringId)
+        }
+      }),
+      childKey,
+      { funds: amount.toString(), denom } // need to have an option to specify gas because this transaction costs a lot of gas
+    );
+    return ret;
   }
 
   async sellNft({ description, image, name, tokenId, price }, childKey) {

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 
-import Carousel, { Modal, ModalGateway } from 'react-images';
+import { Modal, ModalGateway } from 'react-images';
 import Gallery from 'react-photo-gallery';
 import Photo from './Photo';
 
@@ -46,7 +46,7 @@ const App = () => {
       );
 
       const photos = await Promise.all(
-        data.offerings.map(async ({ token_id, price, seller }) => {
+        data.offerings.map(async ({ id, token_id, price, seller }) => {
           const { data } = await window.wasm.query(
             nftContract,
             JSON.stringify({ nft_info: { token_id } })
@@ -60,6 +60,7 @@ const App = () => {
             height = parseInt(matched[2]);
           }
           return {
+            id,
             width,
             height,
             src: image,
@@ -85,13 +86,42 @@ const App = () => {
   const currentPhoto = state.photos[state.currentImage];
   const currencyRef = useRef();
 
-  const buyNft = () => {
+  const buyNft = async () => {
+    // alert(
+    //   'buy this nft: ' +
+    //     JSON.stringify(currentPhoto) +
+    //     ' with denom ' +
+    //     currencyRef.current.value
+    // );
+    const denom =
+      currencyRef.current.value === 'mars'
+        ? 'mars'
+        : 'ibc/1D87F7F49C0E994F34935219BEB178D8D1E11DB9B94208DD0004ACA7C4E1D767';
+    const amount =
+      currencyRef.current.value === 'mars'
+        ? currentPhoto.price
+        : currentPhoto.earthPrice;
+
+    const childKey = window.wasm.cosmos.getChildKey(
+      window.earthAccount.mnemonic
+    );
+
+    const purchaseResult = await window.wasm.buyNft(
+      {
+        offeringId: currentPhoto.id,
+        amount,
+        denom
+      },
+      childKey
+    );
+    console.log(purchaseResult);
     alert(
-      'buy this nft: ' +
-        JSON.stringify(currentPhoto) +
+      'bought successfully result: ' +
+        JSON.stringify(purchaseResult) +
         ' with denom ' +
         currencyRef.current.value
     );
+    window.location.reload();
   };
 
   return (

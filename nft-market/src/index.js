@@ -8,9 +8,9 @@ const wasm = new Wasm('mars');
 window.wasm = wasm;
 
 ReactDOM.render(
-  <React.StrictMode>
+  <>
     <Header />
     <App />
-  </React.StrictMode>,
+  </>,
   document.getElementById('root')
 );

@@ -43,6 +43,10 @@ button {
   font-size: 16px;
 }
 
+button[disabled='true'] {
+  opacity: 0.8;
+}
+
 table {
   font-family: Arial, Helvetica, sans-serif;
   border-collapse: collapse;
