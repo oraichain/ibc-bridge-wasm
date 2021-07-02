@@ -62,10 +62,10 @@ const run = () => {
       // global
       denom = denom || network;
       const chainId = network[0].toUpperCase() + network.substr(1);
-      global.cosmos = new Cosmos(`http://lcd.${network}`, chainId);
+      global.cosmos = new Cosmos(`http://lcd.${network}.orai.io`, chainId);
       cosmos.setBech32MainPrefix(network);
       const mnemonic =
-        process.env.MNEMONIC || (await getLastLine(`accounts/${chainId}.txt`));
+        process.env.MNEMONIC || (await getLastLine(`accounts/${network}.txt`));
       const childKey = cosmos.getChildKey(mnemonic);
       const from_address = cosmos.getAddress(childKey);
       return { mnemonic, denom, childKey, from_address };
