@@ -87,7 +87,7 @@ const Header = () => {
   }, []);
 
   const formRef = useRef();
-  const sellNft = async () => {
+  const sellNft = async (event) => {
     const formData = new FormData(formRef.current);
     const msg = {
       name: formData.get('name'),
@@ -97,16 +97,17 @@ const Header = () => {
       price: formData.get('price')
     };
 
-    console.log(msg);
-    return;
-
     const childKey = window.wasm.cosmos.getChildKey(
       state.currentAccount.mnemonic
     );
 
+    event.target.setAttribute('disabled', true);
+    event.target.innerText = 'Processing...';
+
     try {
       const ret = await window.wasm.sellNft(msg, childKey);
-      console.log(ret);
+      alert('Result: ' + JSON.stringify(ret));
+      window.reload();
     } catch (ex) {
       alert(ex.message);
     }
