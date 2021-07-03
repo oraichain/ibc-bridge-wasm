@@ -97,6 +97,9 @@ const Header = () => {
       price: formData.get('price')
     };
 
+    console.log(msg);
+    return;
+
     const childKey = window.wasm.cosmos.getChildKey(
       state.currentAccount.mnemonic
     );
@@ -113,7 +116,7 @@ const Header = () => {
     <>
       <header>
         <h2>NFT Marketplace on IBC</h2>
-        <button onClick={toggleShowAccount}>
+        <button type="button" onClick={toggleShowAccount}>
           {state.currentAccount
             ? `${state.currentAccount.name} (${state.currentAccount.network}) ${state.currentAccount.balance}`
             : 'Accounts'}
@@ -173,7 +176,9 @@ const Header = () => {
             <label htmlFor="price">Price</label>
             <input type="text" name="price" placeholder="Price.." />
 
-            <button onClick={sellNft}>Submit</button>
+            <button type="button" onClick={sellNft}>
+              Submit
+            </button>
           </form>
         </div>
       )}

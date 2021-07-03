@@ -55,6 +55,7 @@ const Photo = ({
         </span>
         {buy && (
           <button
+            type="button"
             onClick={handleBuy}
             style={{ padding: '10px 20px', marginRight: 10 }}
           >
