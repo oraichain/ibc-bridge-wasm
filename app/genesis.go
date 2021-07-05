@@ -21,6 +21,7 @@ import (
 	mint "github.com/cosmos/cosmos-sdk/x/mint/types"
 	slashing "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	staking "github.com/cosmos/cosmos-sdk/x/staking/types"
+	liquidity "github.com/oraichain/orai/x/liquidity/types"
 )
 
 // GenesisState default state for the application
@@ -77,6 +78,7 @@ func NewDefaultGenesisState(cdc codec.JSONMarshaler) GenesisState {
 	genesisState[wasm.ModuleName] = cdc.MustMarshalJSON(&wasm.GenesisState{
 		Params: wasm.DefaultParams(),
 	})
+	genesisState[liquidity.ModuleName] = cdc.MustMarshalJSON(liquidity.DefaultGenesisState())
 
 	return genesisState
 }
