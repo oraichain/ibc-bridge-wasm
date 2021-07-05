@@ -1,0 +1,14 @@
+
+- name: duc
+  type: local
+  address: mars1ymtwdqumdlpj5hveqvnyydd7gnfsmmknyg2dtd
+  pubkey: marspub1addwnpepqgwzpfz8s5sarnkl9yz668zgw7xg4xruxhhum2ydrj45c2zpkmgdvyttkjs
+  mnemonic: ""
+  threshold: 0
+  pubkeys: []
+
+
+**Important** write this mnemonic phrase in a safe place.
+It is the only way to recover your account if you ever forget your password.
+
+bar left spawn wet hobby usual merit tiger security series sock south initial abuse nation toe upon prefer afford desk bomb system more planet

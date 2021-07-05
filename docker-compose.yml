@@ -47,9 +47,10 @@ services:
     environment:
       - PORT=80
 
-  # build:
-  #   image: orai/orai:alpine-wasm
-  #   tty: true
-  #   # command: wget https://github.com/CosmWasm/wasmvm/releases/download/v0.14.0/libwasmvm_muslc.a -O /lib/libwasmvm_muslc.a
-  #   volumes:
-  #     - ./:/workspace
+  build:
+    image: orai/orai:alpine-wasm
+    tty: true
+    # command: wget https://github.com/CosmWasm/wasmvm/releases/download/v0.14.0/libwasmvm_muslc.a -O /lib/libwasmvm_muslc.a
+    # build: apk add upx;make build;upx --best --lzma build/oraid
+    volumes:
+      - ./:/workspace

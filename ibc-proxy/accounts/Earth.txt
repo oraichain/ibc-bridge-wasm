@@ -1,0 +1,14 @@
+
+- name: duc
+  type: local
+  address: earth1yka55rcre7ny6a49sh5wgpt7fmx62gw9v07epe
+  pubkey: earthpub1addwnpepqgkeg053sraa49njze003yeldy6q2ghmcpegd3vtjzy7t8egt3zsc9jv6g2
+  mnemonic: ""
+  threshold: 0
+  pubkeys: []
+
+
+**Important** write this mnemonic phrase in a safe place.
+It is the only way to recover your account if you ever forget your password.
+
+carpet oil shy caught hamster panel that firm amused laugh banana barely ride mountain army unaware define hover wood soldier oil dose awkward regret

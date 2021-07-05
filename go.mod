@@ -11,6 +11,7 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/gorilla/mux v1.8.0
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.5.0
 	github.com/kyokomi/emoji v2.2.4+incompatible
 	github.com/oasisprotocol/oasis-core/go v0.2012.4
 	github.com/pkg/errors v0.9.1
@@ -27,9 +28,10 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/tendermint/tendermint v0.34.10
 	github.com/tendermint/tm-db v0.6.4
-	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
-	google.golang.org/genproto v0.0.0-20210114201628-6edceaf6022f
-	google.golang.org/grpc v1.37.0
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	google.golang.org/genproto v0.0.0-20210617175327-b9e0b3197ced
+	google.golang.org/grpc v1.38.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 replace google.golang.org/grpc => google.golang.org/grpc v1.33.2
