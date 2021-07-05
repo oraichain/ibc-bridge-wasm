@@ -21,9 +21,9 @@ import (
 	dbm "github.com/tendermint/tm-db"
 
 	
-	liquidity "github.com/oraichain/orai/x/liquidity"
-	liquiditykeeper "github.com/oraichain/orai/x/liquidity/keeper"
-	liquiditytypes "github.com/oraichain/orai/x/liquidity/types"
+	"github.com/gravity-devs/liquidity/x/liquidity"
+	liquiditykeeper "github.com/gravity-devs/liquidity/x/liquidity/keeper"
+	liquiditytypes "github.com/gravity-devs/liquidity/x/liquidity/types"
 
 	"github.com/CosmWasm/wasmd/x/wasm"
 	wasmclient "github.com/CosmWasm/wasmd/x/wasm/client"
@@ -446,8 +446,9 @@ func NewOraichainApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLat
 		evidence.NewAppModule(app.evidenceKeeper),
 		ibc.NewAppModule(app.ibcKeeper),
 		params.NewAppModule(app.paramsKeeper),
-		transferModule,
 		liquidity.NewAppModule(appCodec, app.liquidityKeeper, app.accountKeeper, app.bankKeeper, app.distrKeeper),
+		transferModule,
+		
 	)
 
 	// During begin block slashing happens after distr.BeginBlocker so that
@@ -456,7 +457,7 @@ func NewOraichainApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLat
 	// NOTE: staking module is required if HistoricalEntries param > 0
 	app.mm.SetOrderBeginBlockers(
 		upgradetypes.ModuleName, minttypes.ModuleName, distrtypes.ModuleName, slashingtypes.ModuleName,
-		evidencetypes.ModuleName, stakingtypes.ModuleName, ibchost.ModuleName,liquiditytypes.ModuleName,
+		evidencetypes.ModuleName, stakingtypes.ModuleName,liquiditytypes.ModuleName, ibchost.ModuleName,
 	)
 	app.mm.SetOrderEndBlockers(
 		crisistypes.ModuleName, govtypes.ModuleName, 
@@ -473,8 +474,8 @@ func NewOraichainApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLat
 	app.mm.SetOrderInitGenesis(
 		capabilitytypes.ModuleName, authtypes.ModuleName, banktypes.ModuleName, distrtypes.ModuleName, stakingtypes.ModuleName,
 		slashingtypes.ModuleName, govtypes.ModuleName, minttypes.ModuleName, crisistypes.ModuleName,
-		ibchost.ModuleName, genutiltypes.ModuleName, evidencetypes.ModuleName, ibctransfertypes.ModuleName,
-		wasm.ModuleName,liquiditytypes.ModuleName,
+		ibchost.ModuleName, genutiltypes.ModuleName, evidencetypes.ModuleName, liquiditytypes.ModuleName,ibctransfertypes.ModuleName,
+		wasm.ModuleName,
 	)
 
 	app.mm.RegisterInvariants(&app.crisisKeeper)
@@ -500,9 +501,10 @@ func NewOraichainApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLat
 		params.NewAppModule(app.paramsKeeper),
 		wasm.NewAppModule(appCodec, &app.wasmKeeper, app.stakingKeeper),
 		evidence.NewAppModule(app.evidenceKeeper),
+		liquidity.NewAppModule(appCodec, app.liquidityKeeper, app.accountKeeper, app.bankKeeper, app.distrKeeper),
 		ibc.NewAppModule(app.ibcKeeper),
 		transferModule,
-		liquidity.NewAppModule(appCodec, app.liquidityKeeper, app.accountKeeper, app.bankKeeper, app.distrKeeper),
+		
 	)
 
 	app.sm.RegisterStoreDecoders()
@@ -680,10 +682,11 @@ func initParamsKeeper(appCodec codec.BinaryMarshaler, legacyAmino *codec.LegacyA
 	paramsKeeper.Subspace(slashingtypes.ModuleName)
 	paramsKeeper.Subspace(govtypes.ModuleName).WithKeyTable(govtypes.ParamKeyTable())
 	paramsKeeper.Subspace(crisistypes.ModuleName)
+	paramsKeeper.Subspace(liquiditytypes.ModuleName)
 	paramsKeeper.Subspace(ibctransfertypes.ModuleName)
 	paramsKeeper.Subspace(ibchost.ModuleName)
 	paramsKeeper.Subspace(wasm.ModuleName)
-	paramsKeeper.Subspace(liquiditytypes.ModuleName)
+	
 	return paramsKeeper
 }
 

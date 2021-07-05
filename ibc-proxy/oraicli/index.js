@@ -65,7 +65,7 @@ const run = () => {
       global.cosmos = new Cosmos(`http://lcd.${network}.orai.io`, chainId);
       cosmos.setBech32MainPrefix(network);
       const mnemonic =
-        process.env.MNEMONIC || (await getLastLine(`accounts/${network}.txt`));
+        process.env.MNEMONIC || (await getLastLine(`accounts/${chainId}.txt`));
       const childKey = cosmos.getChildKey(mnemonic);
       const from_address = cosmos.getAddress(childKey);
       return { mnemonic, denom, childKey, from_address };

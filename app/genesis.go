@@ -20,8 +20,8 @@ import (
 	ibc "github.com/cosmos/cosmos-sdk/x/ibc/core/types"
 	mint "github.com/cosmos/cosmos-sdk/x/mint/types"
 	slashing "github.com/cosmos/cosmos-sdk/x/slashing/types"
-	staking "github.com/cosmos/cosmos-sdk/x/staking/types"
-	liquidity "github.com/oraichain/orai/x/liquidity/types"
+	staking "github.com/cosmos/cosmos-sdk/x/staking/types"	
+	liquiditytypes "github.com/gravity-devs/liquidity/x/liquidity/types"
 )
 
 // GenesisState default state for the application
@@ -78,7 +78,10 @@ func NewDefaultGenesisState(cdc codec.JSONMarshaler) GenesisState {
 	genesisState[wasm.ModuleName] = cdc.MustMarshalJSON(&wasm.GenesisState{
 		Params: wasm.DefaultParams(),
 	})
-	genesisState[liquidity.ModuleName] = cdc.MustMarshalJSON(liquidity.DefaultGenesisState())
+	// minimum 40000000 denom
+	liquidityGenesis := liquiditytypes.DefaultGenesisState()
+	liquidityGenesis.Params.PoolCreationFee = sdk.NewCoins(sdk.NewCoin(Bech32Prefix, sdk.NewInt(40000000)))
+	genesisState[liquiditytypes.ModuleName] = cdc.MustMarshalJSON(liquidityGenesis)
 
 	return genesisState
 }

@@ -1,11 +1,10 @@
 #!/bin/sh
 #set -o errexit -o nounset -o pipefail
 
-if [ -z "$PASSWORD" ]
-then
+if [ -z "$PASSWORD" ]; then
     echo -n "Enter passphrase:"
     read -s PASSWORD
-fi 
+fi
 
 CHAIN_ID=${CHAIN_ID:-Oraichain}
 USER=${USER:-tupt}
@@ -13,18 +12,23 @@ MONIKER=${MONIKER:-node001}
 
 # mannually reset
 # rm -rf "$PWD"/.$DENOM/*
-if [ ! -d "$PWD/.$DENOM/data" ]
-then     
+if [ ! -d "$PWD/.$DENOM/data" ]; then
     oraid init --chain-id $CHAIN_ID "$MONIKER"
 
-    (echo "$PASSWORD"; echo "$PASSWORD") | oraid keys add $USER 2>&1 | tee ibc/accounts/$CHAIN_ID.txt
+    (
+        echo "$PASSWORD"
+        echo "$PASSWORD"
+    ) | oraid keys add $USER 2>&1 | tee ibc/accounts/$CHAIN_ID.txt
 
     # hardcode the validator account for this instance
-    (echo "$PASSWORD") | oraid add-genesis-account $USER "100000000000000$DENOM"
+    (echo "$PASSWORD") | oraid add-genesis-account $USER "100000000000000$DENOM,10000000000uatom,500000000000uusd"
 
     # submit a genesis validator tx
     ## Workraround for https://github.com/cosmos/cosmos-sdk/issues/8251
-    (echo "$PASSWORD"; echo "$PASSWORD") | oraid gentx $USER "$AMOUNT$DENOM" --chain-id=$CHAIN_ID --amount="$AMOUNT" -y
+    (
+        echo "$PASSWORD"
+        echo "$PASSWORD"
+    ) | oraid gentx $USER "$AMOUNT$DENOM" --chain-id=$CHAIN_ID --amount="$AMOUNT" -y
 
     oraid collect-gentxs
 
@@ -36,4 +40,3 @@ then
 fi
 
 oraid start --rpc.laddr tcp://0.0.0.0:26657 --log_level error
-

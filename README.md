@@ -23,6 +23,9 @@ yarn oraicli send --network earth --address earth1ya6nzd5jtzgmcn4vlueav4p3zdfhpv
 yarn oraicli send --network mars --address mars1ya6nzd5jtzgmcn4vlueav4p3zdfhpvgnwcvq65 --amount 6000000
 # check balance
 yarn ibc-setup balances
+
+# reset blockchain network
+docker-compose stop earth mars && rm -rf .earth/* .mars/* && docker-compose start earth mars
 ```
 
 ## create ics20 channel
@@ -179,4 +182,12 @@ await wasm.execute(
   }),
   childKey
 );
+```
+
+### create liquidity
+
+```bash
+oraid tx liquidity create-pool 1 1000000000uatom,50000000000uusd --from $USER --chain-id $CHAIN_ID -y
+# request swap
+oraid tx liquidity swap 1 1 50000000uusd uatom 0.019 0.003 --from $USER --chain-id $CHAIN_ID -y
 ```

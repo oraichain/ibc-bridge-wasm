@@ -1,8 +1,8 @@
 
 - name: duc
   type: local
-  address: earth1pm9wwthfqljaegusyjnvwqyrldtmhdr3c4y669
-  pubkey: earthpub1addwnpepqwdn2zkhns6uj26cck4mpx0z8qc00spgl3rv480dd8shu57grrmkxk0pkvv
+  address: earth13twlw7h2nylnp682cseyh7xjt89mluasqnl4ph
+  pubkey: earthpub1addwnpepqvwzuya00lrj4qktk53jdsrs7ncd8a39a5pdw7fjr7ptdc35hjy4jqzfq3v
   mnemonic: ""
   threshold: 0
   pubkeys: []
@@ -11,4 +11,4 @@
 **Important** write this mnemonic phrase in a safe place.
 It is the only way to recover your account if you ever forget your password.
 
-canoe spoon vital film rifle slight recall bid cave nut soap pen cloud wet expose burst chapter shy invite stereo rate oil use unveil
+glue decade poet garage firm strategy alert pluck flame there town tube noble credit energy athlete lock vacuum report color forum click sock poet

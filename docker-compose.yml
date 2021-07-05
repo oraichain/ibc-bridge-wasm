@@ -47,6 +47,16 @@ services:
     environment:
       - PORT=80
 
+  mongo:
+    image: bitnami/mongodb
+    tty: true
+    volumes:
+      - ./data/mongodb:/bitnami/mongodb
+
+  redis:
+    image: redis:alpine3.13
+    tty: true
+
   build:
     image: orai/orai:alpine-wasm
     tty: true

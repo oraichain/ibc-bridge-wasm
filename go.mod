@@ -5,14 +5,14 @@ go 1.15
 require (
 	github.com/CosmWasm/wasmd v0.17.0
 	github.com/cosmos/cosmos-sdk v0.42.5
+	github.com/gravity-devs/liquidity v1.2.8
 	github.com/cosmos/go-bip39 v1.0.0
 	github.com/cosmtrek/air v1.27.3 // indirect
 	github.com/gogo/protobuf v1.3.3
 	github.com/golang/protobuf v1.5.2
 	github.com/gorilla/mux v1.8.0
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.5.0
-	github.com/kyokomi/emoji v2.2.4+incompatible
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.5.0	
 	github.com/oasisprotocol/oasis-core/go v0.2012.4
 	github.com/pkg/errors v0.9.1
 	github.com/pwaller/goupx v0.0.0-20160623083017-1d58e01d5ce2 // indirect
