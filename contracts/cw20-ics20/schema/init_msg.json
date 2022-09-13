@@ -1,13 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "InstantiateMsg",
-  "description": "Just needs to know the code_id of a reflect contract to spawn sub-accounts",
+  "title": "InitMsg",
   "type": "object",
   "required": [
-    "reflect_code_id"
+    "default_timeout"
   ],
   "properties": {
-    "reflect_code_id": {
+    "default_timeout": {
+      "description": "Default timeout for ics20 packets, specified in seconds",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
