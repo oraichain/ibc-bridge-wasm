@@ -18,7 +18,7 @@ if [ ! -d "$PWD/.$DENOM/data" ]; then
     (
         echo "$PASSWORD"
         echo "$PASSWORD"
-    ) | oraid keys add $USER 2>&1 | tee ibc/accounts/$CHAIN_ID.txt
+    ) | oraid keys add $USER 2>&1 | tail -1 | tee ibc/accounts/$CHAIN_ID.txt 
 
     # hardcode the validator account for this instance
     (echo "$PASSWORD") | oraid add-genesis-account $USER "100000000000000$DENOM,10000000000uatom,500000000000uusd"

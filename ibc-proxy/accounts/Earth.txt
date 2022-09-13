@@ -1,14 +1,1 @@
-
-- name: duc
-  type: local
-  address: earth13twlw7h2nylnp682cseyh7xjt89mluasqnl4ph
-  pubkey: earthpub1addwnpepqvwzuya00lrj4qktk53jdsrs7ncd8a39a5pdw7fjr7ptdc35hjy4jqzfq3v
-  mnemonic: ""
-  threshold: 0
-  pubkeys: []
-
-
-**Important** write this mnemonic phrase in a safe place.
-It is the only way to recover your account if you ever forget your password.
-
-glue decade poet garage firm strategy alert pluck flame there town tube noble credit energy athlete lock vacuum report color forum click sock poet
+void frame benefit door solar month ozone negative special proud orphan icon urge favorite borrow curious connect dad toddler powder aerobic art quick shadow

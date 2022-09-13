@@ -1,14 +1,1 @@
-
-- name: duc
-  type: local
-  address: mars15txja60hxuc9p7jxh683sntt2tcnw5rcwswnlh
-  pubkey: marspub1addwnpepqgengvnu8snua6pcytvadmmw3u4x35m4flw8qsutmp80k8zvmqsycnhfdd9
-  mnemonic: ""
-  threshold: 0
-  pubkeys: []
-
-
-**Important** write this mnemonic phrase in a safe place.
-It is the only way to recover your account if you ever forget your password.
-
-fringe state fringe throw dawn ranch kangaroo fatal abandon twelve seminar coral tuition nuclear drama warm breeze purpose parrot west merit indoor cannon extra
+chaos pole attitude furnace gym apology donkey success unknown slot maze scatter piano monster salon fox alpha provide woman unknown monster hazard ship slam

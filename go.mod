@@ -12,7 +12,7 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/gorilla/mux v1.8.0
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.5.0	
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.5.0
 	github.com/oasisprotocol/oasis-core/go v0.2012.4
 	github.com/pkg/errors v0.9.1
 	github.com/pwaller/goupx v0.0.0-20160623083017-1d58e01d5ce2 // indirect

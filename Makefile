@@ -51,7 +51,6 @@ comma := ,
 build_tags_comma_sep := $(subst $(empty),$(comma),$(build_tags))
 
 # process linker flags
-
 ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=orai \
 		  -X github.com/cosmos/cosmos-sdk/version.AppName=oraid \
 		  -X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
@@ -65,7 +64,7 @@ endif
 ldflags += $(LDFLAGS)
 ldflags := $(strip $(ldflags))
 
-BUILD_FLAGS := -tags "$(build_tags_comma_sep)" -ldflags '$(ldflags)' -trimpath
+BUILD_FLAGS := -tags "$(build_tags_comma_sep)" -ldflags '-s -w $(ldflags)' -trimpath
 
 
 all: install lint test

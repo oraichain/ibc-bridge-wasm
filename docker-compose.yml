@@ -9,12 +9,13 @@ services:
       - DENOM=earth
       - CHAIN_ID=Earth
     working_dir: /workspace
-    command: /workspace/scripts/setup_genesis.sh
+    command: /workspace/scripts/setup_genesis.sh    
     volumes:
       - ./.earth:/workspace/.earth
       - ./scripts:/workspace/scripts
       - ./build:/usr/local/bin
       - ./ibc-proxy:/workspace/ibc
+      
 
   mars:
     image: alpine:3.12
@@ -25,37 +26,22 @@ services:
       - DENOM=mars
       - CHAIN_ID=Mars
     working_dir: /workspace
-    command: /workspace/scripts/setup_genesis.sh
+    command: /workspace/scripts/setup_genesis.sh    
     volumes:
       - ./.mars:/workspace/.mars
       - ./scripts:/workspace/scripts
       - ./build:/usr/local/bin
       - ./ibc-proxy:/workspace/ibc
+      
 
-  ibc:
-    image: node:16.3.0-alpine3.13
+  hermes:
+    image: informalsystems/hermes:1.0.0
     working_dir: /workspace
-    tty: true
-    ports:
-      - 8888:80
-    volumes:
-      - ./ibc-proxy/:/workspace
-      - ./ibc-proxy/.ibc-setup:/root/.ibc-setup
-      - ./smart-contracts:/root/contracts
-      - ./nft-market/build:/workspace/frontend
-    command: yarn start
-    environment:
-      - PORT=80
+    tty: true    
+    entrypoint: tail -f /dev/null
+    volumes:                 
+      - ./ibc-proxy:/workspace 
 
-  mongo:
-    image: bitnami/mongodb
-    tty: true
-    volumes:
-      - ./data/mongodb:/bitnami/mongodb
-
-  redis:
-    image: redis:alpine3.13
-    tty: true
 
   build:
     image: orai/orai:alpine-wasm

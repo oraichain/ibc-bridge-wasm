@@ -2,3 +2,5 @@
 .mars
 node_modules
 data
+build
+target
