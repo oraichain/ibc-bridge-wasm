@@ -15,7 +15,7 @@ use crate::msg::{
     ChannelResponse, ExecuteMsg, InitMsg, ListChannelsResponse, MigrateMsg, PortResponse, QueryMsg,
     TransferMsg,
 };
-use crate::state::{Config, CHANNEL_INFO, CHANNEL_STATE, CONFIG};
+use crate::state::{Config, CHANNEL_INFO, CHANNEL_STATE, CONFIG, CW20_ISC20_DENOM};
 use cw0::{nonpayable, one_coin};
 
 // version info for migration info
@@ -138,6 +138,14 @@ pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, C
             previous_contract: version.contract,
         });
     }
+
+    // try to map denom with corresponding cw20 contract. After ibc receive => send same amount of cw20 tokens to receiver
+    CW20_ISC20_DENOM.save(
+        deps.storage,
+        "earth",
+        &String::from("cw20:mars199d3u09j0n6ud2g0skevp93utgnp38kdata8s4"),
+    )?;
+
     Ok(Response::default())
 }
 

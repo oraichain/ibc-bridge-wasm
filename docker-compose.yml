@@ -9,13 +9,12 @@ services:
       - DENOM=earth
       - CHAIN_ID=Earth
     working_dir: /workspace
-    command: /workspace/scripts/setup_genesis.sh    
+    command: /workspace/scripts/setup_genesis.sh
     volumes:
       - ./.earth:/workspace/.earth
       - ./scripts:/workspace/scripts
       - ./build:/usr/local/bin
       - ./ibc-proxy:/workspace/ibc
-      
 
   mars:
     image: alpine:3.12
@@ -26,27 +25,17 @@ services:
       - DENOM=mars
       - CHAIN_ID=Mars
     working_dir: /workspace
-    command: /workspace/scripts/setup_genesis.sh    
+    command: /workspace/scripts/setup_genesis.sh
     volumes:
       - ./.mars:/workspace/.mars
       - ./scripts:/workspace/scripts
       - ./build:/usr/local/bin
       - ./ibc-proxy:/workspace/ibc
-      
 
   hermes:
     image: informalsystems/hermes:1.0.0
     working_dir: /workspace
-    tty: true    
-    entrypoint: tail -f /dev/null
-    volumes:                 
-      - ./ibc-proxy:/workspace 
-
-
-  build:
-    image: orai/orai:alpine-wasm
     tty: true
-    # command: wget https://github.com/CosmWasm/wasmvm/releases/download/v0.14.0/libwasmvm_muslc.a -O /lib/libwasmvm_muslc.a
-    # build: apk add upx;make build;upx --best --lzma build/oraid
+    entrypoint: tail -f /dev/null
     volumes:
-      - ./:/workspace
+      - ./ibc-proxy:/workspace

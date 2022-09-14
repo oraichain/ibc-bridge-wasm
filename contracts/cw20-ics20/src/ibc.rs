@@ -9,7 +9,7 @@ use cosmwasm_std::{
 
 use crate::amount::Amount;
 use crate::error::{ContractError, Never};
-use crate::state::{ChannelInfo, CHANNEL_INFO, CHANNEL_STATE};
+use crate::state::{ChannelInfo, CHANNEL_INFO, CHANNEL_STATE, CW20_ISC20_DENOM};
 use cw20::Cw20ExecuteMsg;
 
 pub const ICS20_VERSION: &str = "ics20-1";
@@ -140,23 +140,24 @@ pub fn ibc_packet_receive(
     _env: Env,
     packet: IbcPacket,
 ) -> Result<IbcReceiveResponse, Never> {
-    let res = match do_ibc_packet_receive(deps, &packet) {
+    let res = match do_ibc_packet_receive(&deps, &packet) {
         Ok(msg) => {
             // build attributes first so we don't have to clone msg below
             // similar event messages like ibctransfer module
 
             // This cannot fail as we parse it in do_ibc_packet_receive. Best to pass the data somehow?
-            let denom = parse_voucher_denom(&msg.denom, &packet.src).unwrap();
+            // let denom = parse_voucher_denom(&msg.denom, &packet.src).unwrap();
 
             let attributes = vec![
                 attr("action", "receive"),
                 attr("sender", &msg.sender),
                 attr("receiver", &msg.receiver),
-                attr("denom", denom),
+                attr("denom", msg.denom.clone()),
                 attr("amount", msg.amount),
                 attr("success", "true"),
             ];
-            let to_send = Amount::from_parts(denom.into(), msg.amount);
+            let map_data = CW20_ISC20_DENOM.load(deps.storage, &msg.denom).unwrap();
+            let to_send = Amount::from_parts(map_data, msg.amount);
             let msg = send_amount(to_send, msg.receiver);
             IbcReceiveResponse {
                 acknowledgement: ack_success(),
@@ -207,28 +208,28 @@ fn parse_voucher_denom<'a>(
 }
 
 // this does the work of ibc_packet_receive, we wrap it to turn errors into acknowledgements
-fn do_ibc_packet_receive(deps: DepsMut, packet: &IbcPacket) -> Result<Ics20Packet, ContractError> {
+fn do_ibc_packet_receive(deps: &DepsMut, packet: &IbcPacket) -> Result<Ics20Packet, ContractError> {
     let msg: Ics20Packet = from_binary(&packet.data)?;
-    let channel = packet.dest.channel_id.clone();
+    // let channel = packet.dest.channel_id.clone();
 
-    // If the token originated on the remote chain, it looks like "ucosm".
-    // If it originated on our chain, it looks like "port/channel/ucosm".
-    let denom = parse_voucher_denom(&msg.denom, &packet.src)?;
+    // // If the token originated on the remote chain, it looks like "ucosm".
+    // // If it originated on our chain, it looks like "port/channel/ucosm".
+    // let denom = parse_voucher_denom(&msg.denom, &packet.src)?;
 
-    let amount = msg.amount;
-    CHANNEL_STATE.update(
-        deps.storage,
-        (&channel, denom),
-        |orig| -> Result<_, ContractError> {
-            // this will return error if we don't have the funds there to cover the request (or no denom registered)
-            let mut cur = orig.ok_or(ContractError::InsufficientFunds {})?;
-            cur.outstanding = cur
-                .outstanding
-                .checked_sub(amount)
-                .or(Err(ContractError::InsufficientFunds {}))?;
-            Ok(cur)
-        },
-    )?;
+    // let amount = msg.amount;
+    // CHANNEL_STATE.update(
+    //     deps.storage,
+    //     (&channel, denom),
+    //     |orig| -> Result<_, ContractError> {
+    //         // this will return error if we don't have the funds there to cover the request (or no denom registered)
+    //         let mut cur = orig.ok_or(ContractError::InsufficientFunds {})?;
+    //         cur.outstanding = cur
+    //             .outstanding
+    //             .checked_sub(amount)
+    //             .or(Err(ContractError::InsufficientFunds {}))?;
+    //         Ok(cur)
+    //     },
+    // )?;
     Ok(msg)
 }
 
