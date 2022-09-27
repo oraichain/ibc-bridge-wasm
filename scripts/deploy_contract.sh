@@ -7,12 +7,9 @@ init=${3:-{\}}
 code_id=${4:-}
 CHAIN_ID=${CHAIN_ID:-Oraichain}
 
-echo "Enter passphrase:"
-read -s passphrase
-
 if [ -z $code_id ]
 then 
-    store_ret=$(echo $passphrase | oraid tx wasm store $contract_path --from $USER --gas="auto" --gas-adjustment="1.2" --chain-id=$CHAIN_ID -y)
+    store_ret=$(oraid tx wasm store $contract_path --from $USER --gas="auto" --gas-adjustment="1.2" --chain-id=$CHAIN_ID -y --keyring-backend test)
     echo $store_ret
     if [ ! `command -v jq` ]; then  
         echo "Installing jq ..."
@@ -24,9 +21,9 @@ fi
 # echo "oraid tx wasm instantiate $code_id '$init' --from $USER --label '$label' --gas auto --gas-adjustment 1.2 --chain-id=$CHAIN_ID -y"
 # quote string with "" with escape content inside which contains " characters
 
-admin=$(echo $passphrase | oraid keys show $USER --output json | jq -r '.address')
+admin=$(oraid keys show $USER --output json --keyring-backend test | jq -r '.address')
 
-(echo $passphrase;echo $passphrase) | oraid tx wasm instantiate $code_id "$init" --from $USER --label "$label" --gas auto --gas-adjustment 1.2 --admin $admin --chain-id=$CHAIN_ID -y
+oraid tx wasm instantiate $code_id "$init" --from $USER --label "$label" --gas auto --gas-adjustment 1.2 --admin $admin --chain-id=$CHAIN_ID -y --keyring-backend test
 contract_address=$(oraid query wasm list-contract-by-code $code_id -o json | jq -r '.contracts[-1]')
 
 echo "contract address: $contract_address"

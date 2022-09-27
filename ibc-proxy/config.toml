@@ -8,7 +8,7 @@ account_prefix = 'earth'
 key_name = 'testkey'
 store_prefix = 'ibc'
 max_gas = 2000000
-gas_price = { price = 0.001, denom = 'earth' }
+gas_price = { price = 0.000, denom = 'earth' }
 gas_multiplier = 1.1
 clock_drift = '5s'
 trusting_period = '6000s'
@@ -24,7 +24,7 @@ account_prefix = 'mars'
 key_name = 'testkey'
 store_prefix = 'ibc'
 max_gas = 2000000
-gas_price = { price = 0.001, denom = 'mars' }
+gas_price = { price = 0.000, denom = 'mars' }
 gas_multiplier = 1.1
 clock_drift = '5s'
 trusting_period = '6000s'

@@ -9,26 +9,24 @@ fi
 CHAIN_ID=${CHAIN_ID:-Oraichain}
 USER=${USER:-tupt}
 MONIKER=${MONIKER:-node001}
+MNEMONIC=$(cat ibc/accounts/$CHAIN_ID.txt)
 
 # mannually reset
 # rm -rf "$PWD"/.$DENOM/*
 if [ ! -d "$PWD/.$DENOM/data" ]; then
     oraid init --chain-id $CHAIN_ID "$MONIKER"
 
-    (
-        echo "$PASSWORD"
-        echo "$PASSWORD"
-    ) | oraid keys add $USER 2>&1 | tail -1 | tee ibc/accounts/$CHAIN_ID.txt 
+    ( echo "$MNEMONIC") | oraid keys add $USER --recover --keyring-backend test
 
     # hardcode the validator account for this instance
-    (echo "$PASSWORD") | oraid add-genesis-account $USER "100000000000000$DENOM,10000000000uatom,500000000000uusd"
+    (echo "$PASSWORD") | oraid add-genesis-account $USER "100000000000000$DENOM,10000000000uatom,500000000000uusd" --keyring-backend test
 
     # submit a genesis validator tx
     ## Workraround for https://github.com/cosmos/cosmos-sdk/issues/8251
     (
         echo "$PASSWORD"
         echo "$PASSWORD"
-    ) | oraid gentx $USER "$AMOUNT$DENOM" --chain-id=$CHAIN_ID --amount="$AMOUNT" -y
+    ) | oraid gentx $USER "$AMOUNT$DENOM" --chain-id=$CHAIN_ID --amount="$AMOUNT" -y --keyring-backend test
 
     oraid collect-gentxs
 

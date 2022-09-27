@@ -7,7 +7,7 @@ use crate::state::ChannelInfo;
 use cosmwasm_std::testing::{
     mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
 };
-use cosmwasm_std::{DepsMut, IbcChannel, IbcEndpoint, OwnedDeps};
+use cosmwasm_std::{Addr, DepsMut, IbcChannel, IbcEndpoint, OwnedDeps};
 
 use crate::msg::InitMsg;
 
@@ -58,6 +58,7 @@ pub fn setup(channels: &[&str]) -> OwnedDeps<MockStorage, MockApi, MockQuerier> 
     // instantiate an empty contract
     let instantiate_msg = InitMsg {
         default_timeout: DEFAULT_TIMEOUT,
+        // cw20_contract: Addr::unchecked("foobar".to_string()),
     };
     let info = mock_info(&String::from("anyone"), &[]);
     let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();

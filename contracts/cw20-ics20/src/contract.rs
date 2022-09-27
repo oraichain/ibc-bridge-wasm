@@ -34,6 +34,15 @@ pub fn instantiate(
         default_timeout: msg.default_timeout,
     };
     CONFIG.save(deps.storage, &cfg)?;
+
+    // try to map denom with corresponding cw20 contract. After ibc receive => send same amount of cw20 tokens to receiver
+    // TODO: remove hard code
+    CW20_ISC20_DENOM.save(
+        deps.storage,
+        "earth",
+        &String::from("cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0"),
+    )?;
+
     Ok(Response::default())
 }
 
@@ -95,9 +104,10 @@ pub fn execute_transfer(
     let timeout = env.block.time.plus_seconds(timeout_delta);
 
     // build ics20 packet
+    // TODO: remove hard code
     let packet = Ics20Packet::new(
         amount.amount(),
-        amount.denom(),
+        "wasm.mars10pyejy66429refv3g35g2t7am0was7ya90pn2w/channel-0/earth",
         sender.as_ref(),
         &msg.remote_address,
     );
@@ -140,10 +150,11 @@ pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, C
     }
 
     // try to map denom with corresponding cw20 contract. After ibc receive => send same amount of cw20 tokens to receiver
+    // TODO: remove hard code
     CW20_ISC20_DENOM.save(
         deps.storage,
         "earth",
-        &String::from("cw20:mars199d3u09j0n6ud2g0skevp93utgnp38kdata8s4"),
+        &String::from("cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0"),
     )?;
 
     Ok(Response::default())
