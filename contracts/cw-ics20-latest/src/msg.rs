@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::IbcEndpoint;
+use cosmwasm_std::{Addr, Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 
 use crate::amount::Amount;
@@ -36,7 +36,8 @@ pub enum ExecuteMsg {
     /// This allows us to transfer *exactly one* native token
     Transfer(TransferMsg),
     TransferBackToRemoteChain(TransferMsg),
-    UpdateCw20MappigPair(Cw20Pair),
+    UpdateCw20MappigPair(Cw20PairMsg),
+    UpdateNativeAllowList(AllowContractMsg),
     /// This must be called by gov_contract, will allow a new cw20 token to be sent
     Allow(AllowMsg),
     /// Change the admin (must be called by current admin)
@@ -46,9 +47,17 @@ pub enum ExecuteMsg {
 }
 
 #[cw_serde]
-pub struct Cw20Pair {
-    pub ibc_endpoint: IbcEndpoint,
+pub struct AllowContractMsg {
+    pub address: Addr,
+    pub active: bool,
+}
+
+#[cw_serde]
+pub struct Cw20PairMsg {
+    pub src_ibc_endpoint: IbcEndpoint,
+    pub dest_ibc_endpoint: IbcEndpoint,
     pub denom: String,
+    pub cw20_denom: String,
 }
 
 /// This is the message we accept via Receive
@@ -62,6 +71,22 @@ pub struct TransferMsg {
     pub remote_address: String,
     /// How long the packet lives in seconds. If not specified, use default_timeout
     pub timeout: Option<u64>,
+    /// metadata of the transfer to suit the new fungible token transfer
+    pub metadata: Binary,
+}
+
+/// This is the message we accept via Receive
+#[cw_serde]
+pub struct TransferBackMsg {
+    /// the destination ibc endpoint you want to send tokens back to
+    pub dest_ibc_endpoint: IbcEndpoint,
+    /// token denom
+    pub native_denom: String,
+    pub remote_address: String,
+    /// How long the packet lives in seconds. If not specified, use default_timeout
+    pub timeout: Option<u64>,
+    /// metadata of the transfer to suit the new fungible token transfer
+    pub metadata: Binary,
 }
 
 /// This is the message we accept via Receive
@@ -75,6 +100,7 @@ pub struct TransferBackToRemoteChainMsg {
     pub remote_address: String,
     /// How long the packet lives in seconds. If not specified, use default_timeout
     pub timeout: Option<u64>,
+    pub metadata: Binary,
 }
 
 #[cw_serde]

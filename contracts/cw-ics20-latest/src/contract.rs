@@ -15,12 +15,14 @@ use crate::error::ContractError;
 use crate::ibc::Ics20Packet;
 use crate::migrations::{v1, v2};
 use crate::msg::{
-    AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, ExecuteMsg, InitMsg,
-    ListAllowedResponse, ListChannelsResponse, MigrateMsg, PortResponse, QueryMsg, TransferMsg,
+    AllowContractMsg, AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse,
+    Cw20PairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, MigrateMsg,
+    PortResponse, QueryMsg, TransferBackMsg, TransferMsg,
 };
 use crate::state::{
-    increase_channel_balance, reduce_channel_balance, AllowInfo, Config, ADMIN, ALLOW_LIST,
-    CHANNEL_INFO, CHANNEL_STATE, CONFIG,
+    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance, AllowInfo, Config,
+    Cw20MappingMetadata, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_STATE, CONFIG, CW20_ISC20_DENOM,
+    NATIVE_ALLOW_LIST,
 };
 use cw_utils::{maybe_addr, nonpayable, one_coin};
 
@@ -69,6 +71,12 @@ pub fn execute(
         ExecuteMsg::Transfer(msg) => {
             let coin = one_coin(&info)?;
             execute_transfer(deps, env, msg, Amount::Native(coin), info.sender)
+        }
+        ExecuteMsg::UpdateCw20MappigPair(msg) => {
+            execute_update_cw20_mapping_pair(deps, env, info, msg)
+        }
+        ExecuteMsg::UpdateNativeAllowList(msg) => {
+            execute_update_native_allow_list(deps, env, info, msg)
         }
         ExecuteMsg::TransferBackToRemoteChain(msg) => {
             let coin = one_coin(&info)?;
@@ -140,6 +148,7 @@ pub fn execute_transfer(
         amount.denom(),
         sender.as_ref(),
         &msg.remote_address,
+        msg.metadata,
     );
     packet.validate()?;
 
@@ -169,16 +178,28 @@ pub fn execute_transfer(
 pub fn execute_transfer_back_to_remote_chain(
     deps: DepsMut,
     env: Env,
-    msg: TransferMsg,
+    msg: TransferBackMsg,
     amount: Amount,
     sender: Addr,
 ) -> Result<Response, ContractError> {
     if amount.is_empty() {
         return Err(ContractError::NoFunds {});
     }
+
+    let cw20_mapping_metadata = CW20_ISC20_DENOM.load(
+        deps.storage,
+        &get_key_ics20_ibc_denom(
+            &msg.dest_ibc_endpoint.port_id,
+            &msg.dest_ibc_endpoint.channel_id,
+            &msg.native_denom,
+        ),
+    )?;
+
     // ensure the requested channel is registered
-    if !CHANNEL_INFO.has(deps.storage, &msg.channel) {
-        return Err(ContractError::NoSuchChannel { id: msg.channel });
+    if !CHANNEL_INFO.has(deps.storage, &cw20_mapping_metadata.ibc_endpoint.channel_id) {
+        return Err(ContractError::NoSuchChannel {
+            id: cw20_mapping_metadata.ibc_endpoint.channel_id,
+        });
     }
     let config = CONFIG.load(deps.storage)?;
 
@@ -194,18 +215,28 @@ pub fn execute_transfer_back_to_remote_chain(
     // TODO: remove hard code
     let packet = Ics20Packet::new(
         amount.amount(),
-        "wasm.mars10pyejy66429refv3g35g2t7am0was7ya90pn2w/channel-0/earth",
+        get_key_ics20_ibc_denom(
+            &cw20_mapping_metadata.ibc_endpoint.port_id,
+            &cw20_mapping_metadata.ibc_endpoint.channel_id,
+            &msg.native_denom,
+        ),
         sender.as_ref(),
         &msg.remote_address,
+        msg.metadata,
     );
     packet.validate()?;
 
     // because we are transferring back, we reduce the channel's balance
-    reduce_channel_balance(deps.storage, &msg.channel, &amount.denom(), amount.amount())?;
+    reduce_channel_balance(
+        deps.storage,
+        &cw20_mapping_metadata.ibc_endpoint.channel_id,
+        &amount.denom(),
+        amount.amount(),
+    )?;
 
     // prepare ibc message
     let msg = IbcMsg::SendPacket {
-        channel_id: msg.channel,
+        channel_id: cw20_mapping_metadata.ibc_endpoint.channel_id,
         data: to_binary(&packet)?,
         timeout: timeout.into(),
     };
@@ -259,6 +290,58 @@ pub fn execute_allow(
         .add_attribute("action", "allow")
         .add_attribute("contract", allow.contract)
         .add_attribute("gas_limit", gas);
+    Ok(res)
+}
+
+/// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
+/// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
+pub fn execute_update_cw20_mapping_pair(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    mapping_pair_msg: Cw20PairMsg,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+    let key = get_key_ics20_ibc_denom(
+        &mapping_pair_msg.src_ibc_endpoint.port_id,
+        &mapping_pair_msg.src_ibc_endpoint.channel_id,
+        &mapping_pair_msg.denom,
+    );
+    CW20_ISC20_DENOM.update(deps.storage, &key, |_| -> StdResult<_> {
+        Ok(Cw20MappingMetadata {
+            denom: mapping_pair_msg.cw20_denom.clone(),
+            ibc_endpoint: mapping_pair_msg.dest_ibc_endpoint,
+        })
+    })?;
+
+    let res = Response::new()
+        .add_attribute("action", "update_cw20_ics20_mapping_pair")
+        .add_attribute("denom", mapping_pair_msg.denom)
+        .add_attribute("new_cw20", mapping_pair_msg.cw20_denom.clone());
+    Ok(res)
+}
+
+/// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
+/// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
+pub fn execute_update_native_allow_list(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    native_allow_msg: AllowContractMsg,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+    NATIVE_ALLOW_LIST.update(
+        deps.storage,
+        &native_allow_msg.address,
+        |_| -> StdResult<_> { Ok(native_allow_msg.active) },
+    )?;
+
+    let res = Response::new()
+        .add_attribute("action", "update_native_allow_list")
+        .add_attribute("contract_address", native_allow_msg.address)
+        .add_attribute("is_active", native_allow_msg.active.to_string());
     Ok(res)
 }
 
@@ -500,6 +583,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: None,
+            metadata: Binary::from("foobar".as_bytes()),
         };
 
         // works with proper funds
@@ -561,6 +645,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: Some(7777),
+            metadata: Binary::from("foobar".as_bytes()),
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "my-account".into(),
@@ -607,6 +692,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: Some(7777),
+            metadata: Binary::from("foobar".as_bytes()),
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "my-account".into(),

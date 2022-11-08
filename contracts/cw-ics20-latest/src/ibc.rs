@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
-    IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
+    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Deps, DepsMut,
+    Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
     IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
     IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
 };
@@ -12,8 +12,9 @@ use cosmwasm_std::{
 use crate::amount::Amount;
 use crate::error::{ContractError, Never};
 use crate::state::{
-    increase_channel_balance, reduce_channel_balance, undo_reduce_channel_balance, ChannelInfo,
-    ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, CW20_ISC20_DENOM, REPLY_ARGS,
+    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
+    undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
+    CW20_ISC20_DENOM, NATIVE_ALLOW_LIST, REPLY_ARGS,
 };
 use cw20::Cw20ExecuteMsg;
 
@@ -33,15 +34,24 @@ pub struct Ics20Packet {
     pub receiver: String,
     /// the sender address
     pub sender: String,
+    /// optional memo
+    pub metadata: Binary,
 }
 
 impl Ics20Packet {
-    pub fn new<T: Into<String>>(amount: Uint128, denom: T, sender: &str, receiver: &str) -> Self {
+    pub fn new<T: Into<String>>(
+        amount: Uint128,
+        denom: T,
+        sender: &str,
+        receiver: &str,
+        metadata: Binary,
+    ) -> Self {
         Ics20Packet {
             denom: denom.into(),
             amount,
             sender: sender.to_string(),
             receiver: receiver.to_string(),
+            metadata,
         }
     }
 
@@ -267,7 +277,7 @@ fn do_ibc_packet_receive(
 
     let to_send = Amount::from_parts(denom.0.to_string(), msg.amount);
     let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-    let send = send_amount(to_send, msg.receiver.clone());
+    let send = send_amount(to_send, msg.receiver.clone(), None);
     let mut submsg = SubMsg::reply_on_error(send, RECEIVE_ID);
     submsg.gas_limit = gas_limit;
 
@@ -294,15 +304,25 @@ fn handle_ibc_packet_receive_native_remote_chain(
     increase_channel_balance(storage, &packet.dest.channel_id, denom, msg.amount.clone())?;
 
     // key in form transfer/channel-0/foo
-    let ibc_denom = format!(
-        "{}/{}/{}",
-        packet.src.port_id, packet.src.channel_id, msg.denom
-    );
+    let ibc_denom = get_key_ics20_ibc_denom(&packet.src.port_id, &packet.src.channel_id, denom);
     let cw20_denom = CW20_ISC20_DENOM.load(storage, &ibc_denom)?;
-    let to_send = Amount::from_parts(cw20_denom, msg.amount);
 
-    // TODO: special case, if it is BEP20 / ERC20 ORAI, then we need to call converter to collect native ORAI to send to the receiver
-    let cosmos_msg = send_amount(to_send, msg.receiver.clone());
+    // validate receiver, should be the custom contract in the allowed list
+    let is_whitelist_result =
+        NATIVE_ALLOW_LIST.may_load(storage, &Addr::unchecked(&msg.receiver))?;
+    if is_whitelist_result.is_none() {
+        return Err(ContractError::NotOnNativeAllowList {});
+    }
+
+    // if the contract is revoked, then it is not allowed either
+    let whitelist = is_whitelist_result.unwrap();
+    if !whitelist {
+        return Err(ContractError::CustomContractRevoked {});
+    }
+
+    let to_send = Amount::from_parts(cw20_denom.denom, msg.amount);
+
+    let cosmos_msg = send_amount(to_send, msg.receiver.clone(), Some(packet.data.clone()));
     let sub_msg = SubMsg::new(cosmos_msg);
 
     let res = IbcReceiveResponse::new()
@@ -395,7 +415,7 @@ fn on_packet_failure(
 
     let to_send = Amount::from_parts(msg.denom.clone(), msg.amount);
     let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-    let send = send_amount(to_send, msg.sender.clone());
+    let send = send_amount(to_send, msg.sender.clone(), None);
     let mut submsg = SubMsg::reply_on_error(send, ACK_FAILURE_ID);
     submsg.gas_limit = gas_limit;
 
@@ -413,7 +433,7 @@ fn on_packet_failure(
     Ok(res)
 }
 
-fn send_amount(amount: Amount, recipient: String) -> CosmosMsg {
+fn send_amount(amount: Amount, recipient: String, msg: Option<Binary>) -> CosmosMsg {
     match amount {
         Amount::Native(coin) => BankMsg::Send {
             to_address: recipient,
@@ -421,13 +441,20 @@ fn send_amount(amount: Amount, recipient: String) -> CosmosMsg {
         }
         .into(),
         Amount::Cw20(coin) => {
-            let msg = Cw20ExecuteMsg::Transfer {
-                recipient,
+            let mut msg_cw20 = Cw20ExecuteMsg::Transfer {
+                recipient: recipient.clone(),
                 amount: coin.amount,
             };
+            if let Some(msg) = msg {
+                msg_cw20 = Cw20ExecuteMsg::Send {
+                    contract: recipient,
+                    amount: coin.amount,
+                    msg,
+                };
+            }
             WasmMsg::Execute {
                 contract_addr: coin.address,
-                msg: to_binary(&msg).unwrap(),
+                msg: to_binary(&msg_cw20).unwrap(),
                 funds: vec![],
             }
             .into()
@@ -465,6 +492,7 @@ mod test {
             "ucosm",
             "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n",
             "wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc",
+            Binary::from("foobar".as_bytes()),
         );
         // Example message generated from the SDK
         let expected = r#"{"amount":"12345","denom":"ucosm","receiver":"wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc","sender":"cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n"}"#;
@@ -515,6 +543,7 @@ mod test {
             amount: amount.into(),
             sender: "remote-sender".to_string(),
             receiver: receiver.to_string(),
+            metadata: Binary::from("foobar".as_bytes()),
         };
         print!("Packet denom: {}", &data.denom);
         IbcPacket::new(
@@ -561,6 +590,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "remote-rcpt".to_string(),
             timeout: None,
+            metadata: Binary::from("foobar".as_bytes()),
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "local-sender".to_string(),
@@ -575,6 +605,7 @@ mod test {
             amount: Uint128::new(987654321),
             sender: "local-sender".to_string(),
             receiver: "remote-rcpt".to_string(),
+            metadata: Binary::from("foobar".as_bytes()),
         };
         let timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
         assert_eq!(
@@ -641,6 +672,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "my-remote-address".to_string(),
             timeout: None,
+            metadata: Binary::from("foobar".as_bytes()),
         });
         let info = mock_info("local-sender", &coins(987654321, denom));
         execute(deps.as_mut(), mock_env(), info, msg).unwrap();
