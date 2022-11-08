@@ -132,6 +132,8 @@ pub fn ibc_channel_close(
     unimplemented!();
 }
 
+// this should receive tokens that are sent from channel A to channel B. Channel B has cosmwasm port. A's token denom will be in raw state because we dont use transfer port, but cosmwasm port in channel B => no IBC denom.
+// For ORAI case, we can create a new CW20 ORAI, then send it to the converter contract to collect native ORAI, then send back native ORAI to the user
 #[cfg_attr(not(feature = "library"), entry_point)]
 /// Check to see if we have any balance here
 /// We should not return an error if possible, but rather an acknowledgement of failure

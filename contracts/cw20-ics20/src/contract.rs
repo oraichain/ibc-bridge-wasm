@@ -79,6 +79,7 @@ pub fn execute_receive(
     execute_transfer(deps, env, msg, amount, api.addr_validate(&wrapper.sender)?)
 }
 
+// this should transfer back from channel B to channel A
 pub fn execute_transfer(
     deps: DepsMut,
     env: Env,
