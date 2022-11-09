@@ -495,7 +495,7 @@ mod test {
             Binary::from("foobar".as_bytes()),
         );
         // Example message generated from the SDK
-        let expected = r#"{"amount":"12345","denom":"ucosm","receiver":"wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc","sender":"cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n"}"#;
+        let expected = r#"{"amount":"12345","denom":"ucosm","receiver":"wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc","sender":"cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n","metadata":"Zm9vYmFy"}"#;
 
         let encdoded = String::from_utf8(to_vec(&packet).unwrap()).unwrap();
         assert_eq!(expected, encdoded.as_str());
@@ -565,11 +565,13 @@ mod test {
     fn send_receive_cw20() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
+        let custom_addr = "custom-addr";
         let cw20_denom = "cw20:token-addr";
         let gas_limit = 1234567;
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
+            &[(custom_addr, true)],
         );
 
         // prepare some mock packets
@@ -651,7 +653,12 @@ mod test {
     #[test]
     fn send_receive_native() {
         let send_channel = "channel-9";
-        let mut deps = setup(&["channel-1", "channel-7", send_channel], &[]);
+        let custom_addr = "custom-addr";
+        let mut deps = setup(
+            &["channel-1", "channel-7", send_channel],
+            &[],
+            &[(custom_addr, true)],
+        );
 
         let denom = "uatom";
 
@@ -712,8 +719,13 @@ mod test {
     fn check_gas_limit_handles_all_cases() {
         let send_channel = "channel-9";
         let allowed = "foobar";
+        let custom_addr = "custom-addr";
         let allowed_gas = 777666;
-        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
+        let mut deps = setup(
+            &[send_channel],
+            &[(allowed, allowed_gas)],
+            &[(custom_addr, true)],
+        );
 
         // allow list will get proper gas
         let limit = check_gas_limit(deps.as_ref(), &Amount::cw20(500, allowed)).unwrap();

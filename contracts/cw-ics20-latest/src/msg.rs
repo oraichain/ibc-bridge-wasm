@@ -13,6 +13,7 @@ pub struct InitMsg {
     pub gov_contract: String,
     /// initial allowlist - all cw20 tokens we will send must be previously allowed by governance
     pub allowlist: Vec<AllowMsg>,
+    pub native_allowlist: Vec<AllowContractMsg>,
     /// If set, contracts off the allowlist will run with this gas limit.
     /// If unset, will refuse to accept any contract off the allow list.
     pub default_gas_limit: Option<u64>,
@@ -36,7 +37,7 @@ pub enum ExecuteMsg {
     /// This allows us to transfer *exactly one* native token
     Transfer(TransferMsg),
     TransferBackToRemoteChain(TransferMsg),
-    UpdateCw20MappigPair(Cw20PairMsg),
+    UpdateCw20MappingPair(Cw20PairMsg),
     UpdateNativeAllowList(AllowContractMsg),
     /// This must be called by gov_contract, will allow a new cw20 token to be sent
     Allow(AllowMsg),

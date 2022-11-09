@@ -47,6 +47,15 @@ pub fn instantiate(
     let admin = deps.api.addr_validate(&msg.gov_contract)?;
     ADMIN.set(deps.branch(), Some(admin))?;
 
+    // save init mapping pair & native allow list
+    for contract_allow_list in msg.native_allowlist {
+        NATIVE_ALLOW_LIST.save(
+            deps.storage,
+            &contract_allow_list.address,
+            &contract_allow_list.active,
+        )?;
+    }
+
     // add all allows
     for allowed in msg.allowlist {
         let contract = deps.api.addr_validate(&allowed.contract)?;
@@ -72,7 +81,7 @@ pub fn execute(
             let coin = one_coin(&info)?;
             execute_transfer(deps, env, msg, Amount::Native(coin), info.sender)
         }
-        ExecuteMsg::UpdateCw20MappigPair(msg) => {
+        ExecuteMsg::UpdateCw20MappingPair(msg) => {
             execute_update_cw20_mapping_pair(deps, env, info, msg)
         }
         ExecuteMsg::UpdateNativeAllowList(msg) => {
@@ -542,7 +551,8 @@ mod test {
 
     #[test]
     fn setup_and_query() {
-        let deps = setup(&["channel-3", "channel-7"], &[]);
+        let custom_addr = "custom-addr";
+        let deps = setup(&["channel-3", "channel-7"], &[], &[(custom_addr, true)]);
 
         let raw_list = query(deps.as_ref(), mock_env(), QueryMsg::ListChannels {}).unwrap();
         let list_res: ListChannelsResponse = from_binary(&raw_list).unwrap();
@@ -571,13 +581,17 @@ mod test {
             },
         )
         .unwrap_err();
-        assert_eq!(err, StdError::not_found("cw20_ics20::state::ChannelInfo"));
+        assert_eq!(
+            err,
+            StdError::not_found("cw20_ics20_latest::state::ChannelInfo")
+        );
     }
 
     #[test]
     fn proper_checks_on_execute_native() {
         let send_channel = "channel-5";
-        let mut deps = setup(&[send_channel, "channel-10"], &[]);
+        let custom_addr = "custom-addr";
+        let mut deps = setup(&[send_channel, "channel-10"], &[], &[(custom_addr, true)]);
 
         let mut transfer = TransferMsg {
             channel: send_channel.to_string(),
@@ -639,7 +653,12 @@ mod test {
     fn proper_checks_on_execute_cw20() {
         let send_channel = "channel-15";
         let cw20_addr = "my-token";
-        let mut deps = setup(&["channel-3", send_channel], &[(cw20_addr, 123456)]);
+        let custom_addr = "custom-addr";
+        let mut deps = setup(
+            &["channel-3", send_channel],
+            &[(cw20_addr, 123456)],
+            &[(custom_addr, true)],
+        );
 
         let transfer = TransferMsg {
             channel: send_channel.to_string(),
@@ -685,7 +704,8 @@ mod test {
     #[test]
     fn execute_cw20_fails_if_not_whitelisted_unless_default_gas_limit() {
         let send_channel = "channel-15";
-        let mut deps = setup(&[send_channel], &[]);
+        let custom_addr = "custom-addr";
+        let mut deps = setup(&[send_channel], &[], &[(custom_addr, true)]);
 
         let cw20_addr = "my-token";
         let transfer = TransferMsg {
@@ -725,7 +745,12 @@ mod test {
         let send_channel = "channel-15";
         let cw20_addr = "my-token";
         let native = "ucosm";
-        let mut deps = setup(&[send_channel], &[(cw20_addr, 123456)]);
+        let custom_addr = "custom-addr";
+        let mut deps = setup(
+            &[send_channel],
+            &[(cw20_addr, 123456)],
+            &[(custom_addr, true)],
+        );
 
         // mock that we sent some tokens in both native and cw20 (TODO: cw20)
         // balances set high

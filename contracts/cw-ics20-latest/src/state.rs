@@ -24,7 +24,7 @@ pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 /// Every custom contract that handles the native token sent from remote chain. Key is the contract address, value is if the contract is active or not, can be revoked
 pub const NATIVE_ALLOW_LIST: Map<&Addr, bool> = Map::new("allow_list_native");
 
-// used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash - transfer/channel-0/uatom for example; value - cw20 denom of chain B, in form: cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 for example
+// used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash - transfer/channel-0/uatom for example; value - mapping data including cw20 denom of chain B, in form: cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 for example, and destination endpoint 
 pub const CW20_ISC20_DENOM: Map<&str, Cw20MappingMetadata> = Map::new("cw20_ics20_mapping");
 
 #[cw_serde]
