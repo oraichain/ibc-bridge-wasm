@@ -1,12 +1,15 @@
+use std::ops::Div;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Deps, DepsMut,
-    Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
-    IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
+    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Decimal, Deps,
+    DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
+    IbcChannelOpenMsg, IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg,
+    IbcPacketTimeoutMsg, IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult,
+    Uint128, WasmMsg,
 };
 
 use crate::amount::Amount;
@@ -256,12 +259,12 @@ fn do_ibc_packet_receive(
 
     // if denom is native, we handle it the native way
     if denom.1 {
-        return Ok(handle_ibc_packet_receive_native_remote_chain(
+        return handle_ibc_packet_receive_native_remote_chain(
             deps.storage,
             &denom.0,
             &packet,
             &msg,
-        )?);
+        );
     }
 
     // make sure we have enough balance for this
@@ -305,7 +308,9 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     // key in form transfer/channel-0/foo
     let ibc_denom = get_key_ics20_ibc_denom(&packet.src.port_id, &packet.src.channel_id, denom);
-    let cw20_denom = CW20_ISC20_DENOM.load(storage, &ibc_denom)?;
+    let cw20_mapping = CW20_ISC20_DENOM
+        .load(storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
 
     // validate receiver, should be the custom contract in the allowed list
     let is_whitelist_result =
@@ -320,7 +325,12 @@ fn handle_ibc_packet_receive_native_remote_chain(
         return Err(ContractError::CustomContractRevoked {});
     }
 
-    let to_send = Amount::from_parts(cw20_denom.denom, msg.amount);
+    let to_send = Amount::from_parts(
+        cw20_mapping.cw20_denom,
+        msg.amount.div(Uint128::from(
+            10u64.pow((cw20_mapping.remote_decimals - 6) as u32), // TODO: get cw20 decimal instead of hardcode. Also, need to check safe sub to prevent negative
+        )),
+    );
 
     let cosmos_msg = send_amount(to_send, msg.receiver.clone(), Some(packet.data.clone()));
     let sub_msg = SubMsg::new(cosmos_msg);
@@ -468,7 +478,7 @@ mod test {
     use crate::test_helpers::*;
 
     use crate::contract::{execute, migrate, query_channel};
-    use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg};
+    use crate::msg::{Cw20PairMsg, ExecuteMsg, MigrateMsg, TransferMsg};
     use cosmwasm_std::testing::{mock_env, mock_info};
     use cosmwasm_std::{coins, to_vec, IbcEndpoint, IbcMsg, IbcTimeout, Timestamp};
     use cw20::Cw20ReceiveMsg;
@@ -753,5 +763,137 @@ mod test {
         // non-allow list will now get default
         let limit = check_gas_limit(deps.as_ref(), &Amount::cw20(500, random)).unwrap();
         assert_eq!(limit, Some(def_limit));
+    }
+
+    // test remote chain send native token to local chain
+    fn mock_receive_packet_remote_to_local(
+        my_channel: &str,
+        amount: u128,
+        denom: &str,
+        receiver: &str,
+    ) -> IbcPacket {
+        let data = Ics20Packet {
+            // this is returning a foreign native token, thus denom is <denom>, eg: uatom
+            denom: format!("{}", denom),
+            amount: amount.into(),
+            sender: "remote-sender".to_string(),
+            receiver: receiver.to_string(),
+            metadata: Binary::from("foobar".as_bytes()),
+        };
+        print!("Packet denom: {}", &data.denom);
+        IbcPacket::new(
+            to_binary(&data).unwrap(),
+            IbcEndpoint {
+                port_id: REMOTE_PORT.to_string(),
+                channel_id: "channel-1234".to_string(),
+            },
+            IbcEndpoint {
+                port_id: CONTRACT_PORT.to_string(),
+                channel_id: my_channel.to_string(),
+            },
+            3,
+            Timestamp::from_seconds(1665321069).into(),
+        )
+    }
+
+    #[test]
+    fn send_native_from_remote_mapping_not_found() {
+        let send_channel = "channel-9";
+        let cw20_addr = "token-addr";
+        let custom_addr = "custom-addr";
+        let cw20_denom = "cw20:token-addr";
+        let gas_limit = 1234567;
+        let mut deps = setup(
+            &["channel-1", "channel-7", send_channel],
+            &[(cw20_addr, gas_limit)],
+            &[(custom_addr, true)],
+        );
+
+        // prepare some mock packets
+        let recv_packet =
+            mock_receive_packet_remote_to_local(send_channel, 876543210, cw20_denom, custom_addr);
+
+        // we can receive this denom, channel balance should increase
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
+        // assert_eq!(res, StdError)
+        assert_eq!(
+            res.attributes.last().unwrap().value,
+            "You can only send native tokens that has a map to the corresponding cw20 address denom"
+        );
+    }
+
+    #[test]
+    fn send_native_from_remote_receive() {
+        let send_channel = "channel-9";
+        let cw20_addr = "token-addr";
+        let custom_addr = "custom-addr";
+        let denom = "uatom";
+        let cw20_denom = "cw20:token-addr";
+        let gas_limit = 1234567;
+        let mut deps = setup(
+            &["channel-1", "channel-7", send_channel],
+            &[(cw20_addr, gas_limit)],
+            &[(custom_addr, true)],
+        );
+
+        let pair = Cw20PairMsg {
+            src_ibc_endpoint: IbcEndpoint {
+                port_id: REMOTE_PORT.to_string(),
+                channel_id: "channel-1234".to_string(),
+            },
+            dest_ibc_endpoint: IbcEndpoint {
+                port_id: CONTRACT_PORT.to_string(),
+                channel_id: "channel-1".to_string(),
+            },
+            denom: denom.to_string(),
+            cw20_denom: cw20_denom.to_string(),
+            remote_decimals: 18u8,
+        };
+
+        let _ = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("gov", &[]),
+            ExecuteMsg::UpdateCw20MappingPair(pair),
+        )
+        .unwrap();
+
+        // prepare some mock packets
+        let recv_packet =
+            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
+        let recv_high_packet =
+            mock_receive_packet_remote_to_local(send_channel, 1876543210, denom, custom_addr);
+
+        // we can receive this denom, channel balance should increase
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
+        assert_eq!(res.messages.len(), 1);
+        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
+        println!("ack: {:?}", ack);
+        assert!(matches!(ack, Ics20Ack::Result(_)));
+
+        // query channel state|_|
+        let state = query_channel(deps.as_ref(), send_channel.to_string()).unwrap();
+        assert_eq!(state.balances, vec![Amount::native(876543210, denom)]);
+        assert_eq!(state.total_sent, vec![Amount::native(876543210, denom)]);
+
+        // // we can receive less than we sent
+        // let msg = IbcPacketReceiveMsg::new(recv_packet);
+        // let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
+        // assert_eq!(1, res.messages.len());
+        // assert_eq!(
+        //     cw20_payment(876543210, cw20_addr, "local-rcpt", Some(gas_limit)),
+        //     res.messages[0]
+        // );
+        // let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
+        // assert!(matches!(ack, Ics20Ack::Result(_)));
+
+        // // TODO: we need to call the reply block
+
+        // // query channel state
+        // let state = query_channel(deps.as_ref(), send_channel.to_string()).unwrap();
+        // assert_eq!(state.balances, vec![Amount::cw20(111111111, cw20_addr)]);
+        // assert_eq!(state.total_sent, vec![Amount::cw20(987654321, cw20_addr)]);
     }
 }

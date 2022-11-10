@@ -3,7 +3,7 @@ use cosmwasm_std::{Addr, Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 
 use crate::amount::Amount;
-use crate::state::ChannelInfo;
+use crate::state::{ChannelInfo, Cw20MappingMetadata};
 
 #[cw_serde]
 pub struct InitMsg {
@@ -59,6 +59,7 @@ pub struct Cw20PairMsg {
     pub dest_ibc_endpoint: IbcEndpoint,
     pub denom: String,
     pub cw20_denom: String,
+    pub remote_decimals: u8,
 }
 
 /// This is the message we accept via Receive
@@ -129,6 +130,19 @@ pub enum QueryMsg {
     ListAllowed {
         start_after: Option<String>,
         limit: Option<u32>,
+        order: Option<u8>,
+    },
+    #[returns(ListNativeAllowedResponse)]
+    ListNativeAllowed {
+        start_after: Option<String>,
+        limit: Option<u32>,
+        order: Option<u8>,
+    },
+    #[returns(ListCw20MappingResponse)]
+    Cw20Mapping {
+        start_after: Option<String>,
+        limit: Option<u32>,
+        order: Option<u8>,
     },
 }
 
@@ -169,6 +183,22 @@ pub struct AllowedResponse {
 #[cw_serde]
 pub struct ListAllowedResponse {
     pub allow: Vec<AllowedInfo>,
+}
+
+#[cw_serde]
+pub struct ListNativeAllowedResponse {
+    pub allow: Vec<AllowContractMsg>,
+}
+
+#[cw_serde]
+pub struct ListCw20MappingResponse {
+    pub pairs: Vec<Cw20PairQuery>,
+}
+
+#[cw_serde]
+pub struct Cw20PairQuery {
+    pub key: String,
+    pub cw20_map: Cw20MappingMetadata,
 }
 
 #[cw_serde]

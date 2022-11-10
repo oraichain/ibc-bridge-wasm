@@ -16,8 +16,9 @@ use crate::ibc::Ics20Packet;
 use crate::migrations::{v1, v2};
 use crate::msg::{
     AllowContractMsg, AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse,
-    Cw20PairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, MigrateMsg,
-    PortResponse, QueryMsg, TransferBackMsg, TransferMsg,
+    Cw20PairMsg, Cw20PairQuery, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
+    ListCw20MappingResponse, ListNativeAllowedResponse, MigrateMsg, PortResponse, QueryMsg,
+    TransferBackMsg, TransferMsg,
 };
 use crate::state::{
     get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance, AllowInfo, Config,
@@ -319,8 +320,9 @@ pub fn execute_update_cw20_mapping_pair(
     );
     CW20_ISC20_DENOM.update(deps.storage, &key, |_| -> StdResult<_> {
         Ok(Cw20MappingMetadata {
-            denom: mapping_pair_msg.cw20_denom.clone(),
+            cw20_denom: mapping_pair_msg.cw20_denom.clone(),
             ibc_endpoint: mapping_pair_msg.dest_ibc_endpoint,
+            remote_decimals: mapping_pair_msg.remote_decimals,
         })
     })?;
 
@@ -430,9 +432,21 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Channel { id } => to_binary(&query_channel(deps, id)?),
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Allowed { contract } => to_binary(&query_allowed(deps, contract)?),
-        QueryMsg::ListAllowed { start_after, limit } => {
-            to_binary(&list_allowed(deps, start_after, limit)?)
-        }
+        QueryMsg::ListAllowed {
+            start_after,
+            limit,
+            order,
+        } => to_binary(&list_allowed(deps, start_after, limit, order)?),
+        QueryMsg::ListNativeAllowed {
+            start_after,
+            limit,
+            order,
+        } => to_binary(&list_native_allowed(deps, start_after, limit, order)?),
+        QueryMsg::Cw20Mapping {
+            start_after,
+            limit,
+            order,
+        } => to_binary(&list_cw20_mapping(deps, start_after, limit, order)?),
         QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
     }
 }
@@ -511,13 +525,14 @@ fn list_allowed(
     deps: Deps,
     start_after: Option<String>,
     limit: Option<u32>,
+    order: Option<u8>,
 ) -> StdResult<ListAllowedResponse> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let addr = maybe_addr(deps.api, start_after)?;
     let start = addr.as_ref().map(Bound::exclusive);
 
     let allow = ALLOW_LIST
-        .range(deps.storage, start, None, Order::Ascending)
+        .range(deps.storage, start, None, map_order(order))
         .take(limit)
         .map(|item| {
             item.map(|(addr, allow)| AllowedInfo {
@@ -529,13 +544,72 @@ fn list_allowed(
     Ok(ListAllowedResponse { allow })
 }
 
+fn list_native_allowed(
+    deps: Deps,
+    start_after: Option<String>,
+    limit: Option<u32>,
+    order: Option<u8>,
+) -> StdResult<ListNativeAllowedResponse> {
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let addr = maybe_addr(deps.api, start_after)?;
+    let start = addr.as_ref().map(Bound::exclusive);
+
+    let allow = NATIVE_ALLOW_LIST
+        .range(deps.storage, start, None, map_order(order))
+        .take(limit)
+        .map(|item| {
+            item.map(|(addr, active)| AllowContractMsg {
+                address: addr.into(),
+                active,
+            })
+        })
+        .collect::<StdResult<_>>()?;
+    Ok(ListNativeAllowedResponse { allow })
+}
+
+fn list_cw20_mapping(
+    deps: Deps,
+    start_after: Option<String>,
+    limit: Option<u32>,
+    order: Option<u8>,
+) -> StdResult<ListCw20MappingResponse> {
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let mut allow_range = CW20_ISC20_DENOM.range(deps.storage, None, None, map_order(order));
+    if let Some(start_after) = start_after {
+        let start = Some(Bound::exclusive::<&str>(&start_after));
+        allow_range = CW20_ISC20_DENOM.range(deps.storage, start, None, map_order(order));
+    }
+    let pairs = allow_range
+        .take(limit)
+        .map(|item| {
+            item.map(|(key, mapping)| Cw20PairQuery {
+                key,
+                cw20_map: mapping,
+            })
+        })
+        .collect::<StdResult<_>>()?;
+    Ok(ListCw20MappingResponse { pairs })
+}
+
+fn map_order(order: Option<u8>) -> Order {
+    if order.is_none() {
+        return Order::Ascending;
+    }
+    let order_unwrap = order.unwrap();
+    if order_unwrap == 1 {
+        return Order::Ascending;
+    }
+    Order::Descending
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{coin, coins, CosmosMsg, IbcMsg, StdError, Uint128};
+    use cosmwasm_std::{coin, coins, CosmosMsg, IbcEndpoint, IbcMsg, StdError, Uint128};
+    use cw_controllers::AdminError;
 
     use crate::state::ChannelState;
     use cw_utils::PaymentError;
@@ -584,6 +658,94 @@ mod test {
         assert_eq!(
             err,
             StdError::not_found("cw20_ics20_latest::state::ChannelInfo")
+        );
+    }
+
+    #[test]
+    fn test_update_cw20_mapping() {
+        let custom_addr = "custom-addr";
+        let mut deps = setup(&["channel-3", "channel-7"], &[], &[(custom_addr, true)]);
+
+        let update = Cw20PairMsg {
+            src_ibc_endpoint: IbcEndpoint {
+                port_id: "earth-port".to_string(),
+                channel_id: "earth-channel".to_string(),
+            },
+            dest_ibc_endpoint: IbcEndpoint {
+                port_id: "mars-port".to_string(),
+                channel_id: "mars-channel".to_string(),
+            },
+            denom: "earth".to_string(),
+            cw20_denom: "cw20:foobar".to_string(),
+            remote_decimals: 18,
+        };
+
+        // works with proper funds
+        let msg = ExecuteMsg::UpdateCw20MappingPair(update.clone());
+
+        // unauthorized case
+        let info = mock_info("foobar", &coins(1234567, "ucosm"));
+        let res_err = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap_err();
+        assert_eq!(res_err, ContractError::Admin(AdminError::NotAdmin {}));
+
+        let info = mock_info("gov", &coins(1234567, "ucosm"));
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // query to verify if the mapping has been updated
+        let mappings = query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::Cw20Mapping {
+                start_after: None,
+                limit: None,
+                order: None,
+            },
+        )
+        .unwrap();
+        let response: ListCw20MappingResponse = from_binary(&mappings).unwrap();
+        println!("response: {:?}", response);
+        assert_eq!(
+            response.pairs.first().unwrap().key,
+            "earth-port/earth-channel/earth".to_string()
+        );
+    }
+
+    #[test]
+    fn test_update_native_allow_list() {
+        let mut deps = setup(&["channel-3", "channel-7"], &[], &[]);
+
+        let update = AllowContractMsg {
+            address: Addr::unchecked("foobar"),
+            active: true,
+        };
+
+        // works with proper funds
+        let msg = ExecuteMsg::UpdateNativeAllowList(update.clone());
+
+        // unauthorized case
+        let info = mock_info("foobar", &coins(1234567, "ucosm"));
+        let res_err = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap_err();
+        assert_eq!(res_err, ContractError::Admin(AdminError::NotAdmin {}));
+
+        let info = mock_info("gov", &coins(1234567, "ucosm"));
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // query to verify if the mapping has been updated
+        let mappings = query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::ListNativeAllowed {
+                start_after: None,
+                limit: None,
+                order: None,
+            },
+        )
+        .unwrap();
+        let response: ListNativeAllowedResponse = from_binary(&mappings).unwrap();
+        println!("response: {:?}", response);
+        assert_eq!(
+            response.allow.first().unwrap().address,
+            "foobar".to_string()
         );
     }
 
