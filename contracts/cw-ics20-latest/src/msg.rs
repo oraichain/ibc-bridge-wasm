@@ -2,8 +2,8 @@ use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Addr, Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 
-use crate::amount::Amount;
 use crate::state::{ChannelInfo, Cw20MappingMetadata};
+use cw20_ics20_msg::amount::Amount;
 
 #[cw_serde]
 pub struct InitMsg {

@@ -11,7 +11,6 @@ For more information on this contract, please check out the
 [README](https://github.com/CosmWasm/cw-plus/blob/main/contracts/cw20-ics20/README.md).
 */
 
-pub mod amount;
 pub mod contract;
 mod error;
 pub mod ibc;

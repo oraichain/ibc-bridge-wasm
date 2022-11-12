@@ -267,10 +267,23 @@ dependencies = [
  "cw-utils",
  "cw2 0.16.0",
  "cw20",
+ "cw20-ics20-msg",
  "schemars",
  "semver",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "cw20-ics20-msg"
+version = "0.0.1"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-storage-plus",
+ "cw20",
+ "schemars",
+ "serde",
 ]
 
 [[package]]

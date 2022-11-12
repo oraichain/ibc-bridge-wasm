@@ -10,7 +10,6 @@ use cw2::{get_contract_version, set_contract_version};
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
 use cw_storage_plus::Bound;
 
-use crate::amount::Amount;
 use crate::error::ContractError;
 use crate::ibc::Ics20Packet;
 use crate::migrations::{v1, v2};
@@ -25,6 +24,7 @@ use crate::state::{
     Cw20MappingMetadata, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_STATE, CONFIG, CW20_ISC20_DENOM,
     NATIVE_ALLOW_LIST,
 };
+use cw20_ics20_msg::amount::Amount;
 use cw_utils::{maybe_addr, nonpayable, one_coin};
 
 // version info for migration info
@@ -481,7 +481,7 @@ pub fn query_channel(deps: Deps, id: String) -> StdResult<ChannelResponse> {
         })
         .collect::<StdResult<Vec<_>>>()?;
     // we want (Vec<outstanding>, Vec<total>)
-    let (balances, total_sent) = state.into_iter().unzip();
+    let (balances, total_sent): (Vec<Amount>, Vec<Amount>) = state.into_iter().unzip();
 
     Ok(ChannelResponse {
         info,

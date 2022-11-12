@@ -1,18 +1,15 @@
-use std::ops::Div;
-
+use cw20_ics20_msg::DelegateCw20Msg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Decimal, Deps,
-    DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
-    IbcChannelOpenMsg, IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg,
-    IbcPacketTimeoutMsg, IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult,
-    Uint128, WasmMsg,
+    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Deps, DepsMut,
+    Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
+    IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
+    IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
 };
 
-use crate::amount::Amount;
 use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
@@ -20,6 +17,7 @@ use crate::state::{
     CW20_ISC20_DENOM, NATIVE_ALLOW_LIST, REPLY_ARGS,
 };
 use cw20::Cw20ExecuteMsg;
+use cw20_ics20_msg::amount::Amount;
 
 pub const ICS20_VERSION: &str = "ics20-1";
 pub const ICS20_ORDERING: IbcOrder = IbcOrder::Unordered;
@@ -325,14 +323,20 @@ fn handle_ibc_packet_receive_native_remote_chain(
         return Err(ContractError::CustomContractRevoked {});
     }
 
-    let to_send = Amount::from_parts(
-        cw20_mapping.cw20_denom,
-        msg.amount.div(Uint128::from(
-            10u64.pow((cw20_mapping.remote_decimals - 6) as u32), // TODO: get cw20 decimal instead of hardcode. Also, need to check safe sub to prevent negative
-        )),
-    );
+    let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
 
-    let cosmos_msg = send_amount(to_send, msg.receiver.clone(), Some(packet.data.clone()));
+    // send token to the custom contract for further handling
+    let cosmos_msg: CosmosMsg = WasmMsg::Execute {
+        contract_addr: msg.receiver.clone(),
+        msg: to_binary(&DelegateCw20Msg {
+            token: to_send,
+            from_decimals: cw20_mapping.remote_decimals,
+            data: packet.data.clone(),
+        })
+        .unwrap(),
+        funds: vec![],
+    }
+    .into();
     let sub_msg = SubMsg::new(cosmos_msg);
 
     let res = IbcReceiveResponse::new()
