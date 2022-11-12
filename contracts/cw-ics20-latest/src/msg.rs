@@ -36,7 +36,7 @@ pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
     /// This allows us to transfer *exactly one* native token
     Transfer(TransferMsg),
-    TransferBackToRemoteChain(TransferMsg),
+    TransferBackToRemoteChain(TransferBackMsg),
     UpdateCw20MappingPair(Cw20PairMsg),
     UpdateNativeAllowList(AllowContractMsg),
     /// This must be called by gov_contract, will allow a new cw20 token to be sent

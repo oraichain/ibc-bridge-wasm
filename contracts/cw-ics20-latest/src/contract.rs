@@ -90,7 +90,7 @@ pub fn execute(
         }
         ExecuteMsg::TransferBackToRemoteChain(msg) => {
             let coin = one_coin(&info)?;
-            execute_transfer(deps, env, msg, Amount::Native(coin), info.sender)
+            execute_transfer_back_to_remote_chain(deps, env, msg, Amount::Native(coin), info.sender)
         }
         ExecuteMsg::Allow(allow) => execute_allow(deps, env, info, allow),
         ExecuteMsg::UpdateAdmin { admin } => {
