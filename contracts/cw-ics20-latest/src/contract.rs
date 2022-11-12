@@ -708,6 +708,20 @@ mod test {
             response.pairs.first().unwrap().key,
             "earth-port/earth-channel/earth".to_string()
         );
+
+        // not found case
+        let mappings = query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::Cw20Mapping {
+                start_after: None,
+                limit: None,
+                order: None,
+            },
+        )
+        .unwrap();
+        let response: ListCw20MappingResponse = from_binary(&mappings).unwrap();
+        assert_ne!(response.pairs.first().unwrap().key, "foobar".to_string());
     }
 
     #[test]
@@ -747,6 +761,20 @@ mod test {
             response.allow.first().unwrap().address,
             "foobar".to_string()
         );
+
+        // not found case
+        let mappings = query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::ListNativeAllowed {
+                start_after: None,
+                limit: None,
+                order: None,
+            },
+        )
+        .unwrap();
+        let response: ListNativeAllowedResponse = from_binary(&mappings).unwrap();
+        assert_ne!(response.allow.first().unwrap().address, "xyz".to_string());
     }
 
     #[test]
