@@ -797,6 +797,67 @@ mod test {
     }
 
     #[test]
+    fn test_parse_voucher_denom_invalid_length() {
+        let voucher_denom = "foobar/foobar";
+        let ibc_endpoint = IbcEndpoint {
+            port_id: "hello".to_string(),
+            channel_id: "world".to_string(),
+        };
+        // native denom case
+        assert_eq!(
+            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap_err(),
+            ContractError::NoForeignTokens {}
+        );
+    }
+
+    #[test]
+    fn test_parse_voucher_denom_invalid_port() {
+        let voucher_denom = "foobar/abc/xyz";
+        let ibc_endpoint = IbcEndpoint {
+            port_id: "hello".to_string(),
+            channel_id: "world".to_string(),
+        };
+        // native denom case
+        assert_eq!(
+            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap_err(),
+            ContractError::FromOtherPort {
+                port: "foobar".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_voucher_denom_invalid_channel() {
+        let voucher_denom = "hello/abc/xyz";
+        let ibc_endpoint = IbcEndpoint {
+            port_id: "hello".to_string(),
+            channel_id: "world".to_string(),
+        };
+        // native denom case
+        assert_eq!(
+            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap_err(),
+            ContractError::FromOtherChannel {
+                channel: "abc".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_voucher_denom_native_denom_valid() {
+        let voucher_denom = "foobar";
+        let ibc_endpoint = IbcEndpoint {
+            port_id: "hello".to_string(),
+            channel_id: "world".to_string(),
+        };
+        assert_eq!(
+            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap(),
+            ("foobar", true)
+        );
+    }
+
+    /////////////////////////////// Test cases for native denom transfer from remote chain to local chain
+
+    #[test]
     fn send_native_from_remote_mapping_not_found() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
@@ -824,7 +885,107 @@ mod test {
     }
 
     #[test]
-    fn send_native_from_remote_receive() {
+    fn send_native_from_remote_receive_invalid_not_on_native_allow_list() {
+        let send_channel = "channel-9";
+        let cw20_addr = "token-addr";
+        let custom_addr = "custom-addr";
+        let denom = "uatom";
+        let cw20_denom = "cw20:token-addr";
+        let gas_limit = 1234567;
+        let mut deps = setup(
+            &["channel-1", "channel-7", send_channel],
+            &[(cw20_addr, gas_limit)],
+            &[],
+        );
+
+        let pair = Cw20PairMsg {
+            src_ibc_endpoint: IbcEndpoint {
+                port_id: REMOTE_PORT.to_string(),
+                channel_id: "channel-1234".to_string(),
+            },
+            dest_ibc_endpoint: IbcEndpoint {
+                port_id: CONTRACT_PORT.to_string(),
+                channel_id: "channel-1".to_string(),
+            },
+            denom: denom.to_string(),
+            cw20_denom: cw20_denom.to_string(),
+            remote_decimals: 18u8,
+        };
+
+        let _ = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("gov", &[]),
+            ExecuteMsg::UpdateCw20MappingPair(pair),
+        )
+        .unwrap();
+
+        // prepare some mock packets
+        let recv_packet =
+            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
+
+        // we can receive this denom, channel balance should increase
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
+        // assert_eq!(res, StdError)
+        assert_eq!(
+            res.attributes.last().unwrap().value,
+            "You can only send native tokens to an address that have been explicitly allowed by governance"
+        );
+    }
+
+    #[test]
+    fn send_native_from_remote_receive_invalid_allow_contract_revoked() {
+        let send_channel = "channel-9";
+        let cw20_addr = "token-addr";
+        let custom_addr = "custom-addr";
+        let denom = "uatom";
+        let cw20_denom = "cw20:token-addr";
+        let gas_limit = 1234567;
+        let mut deps = setup(
+            &["channel-1", "channel-7", send_channel],
+            &[(cw20_addr, gas_limit)],
+            &[(custom_addr, false)],
+        );
+
+        let pair = Cw20PairMsg {
+            src_ibc_endpoint: IbcEndpoint {
+                port_id: REMOTE_PORT.to_string(),
+                channel_id: "channel-1234".to_string(),
+            },
+            dest_ibc_endpoint: IbcEndpoint {
+                port_id: CONTRACT_PORT.to_string(),
+                channel_id: "channel-1".to_string(),
+            },
+            denom: denom.to_string(),
+            cw20_denom: cw20_denom.to_string(),
+            remote_decimals: 18u8,
+        };
+
+        let _ = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("gov", &[]),
+            ExecuteMsg::UpdateCw20MappingPair(pair),
+        )
+        .unwrap();
+
+        // prepare some mock packets
+        let recv_packet =
+            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
+
+        // we can receive this denom, channel balance should increase
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
+        // assert_eq!(res, StdError)
+        assert_eq!(
+            res.attributes.last().unwrap().value,
+            "The contract address you are sending native tokens to is already revoked"
+        );
+    }
+
+    #[test]
+    fn send_native_from_remote_receive_happy_path() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
@@ -862,8 +1023,6 @@ mod test {
         // prepare some mock packets
         let recv_packet =
             mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
-        let recv_high_packet =
-            mock_receive_packet_remote_to_local(send_channel, 1876543210, denom, custom_addr);
 
         // we can receive this denom, channel balance should increase
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
@@ -877,23 +1036,5 @@ mod test {
         let state = query_channel(deps.as_ref(), send_channel.to_string()).unwrap();
         assert_eq!(state.balances, vec![Amount::native(876543210, denom)]);
         assert_eq!(state.total_sent, vec![Amount::native(876543210, denom)]);
-
-        // // we can receive less than we sent
-        // let msg = IbcPacketReceiveMsg::new(recv_packet);
-        // let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        // assert_eq!(1, res.messages.len());
-        // assert_eq!(
-        //     cw20_payment(876543210, cw20_addr, "local-rcpt", Some(gas_limit)),
-        //     res.messages[0]
-        // );
-        // let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        // assert!(matches!(ack, Ics20Ack::Result(_)));
-
-        // // TODO: we need to call the reply block
-
-        // // query channel state
-        // let state = query_channel(deps.as_ref(), send_channel.to_string()).unwrap();
-        // assert_eq!(state.balances, vec![Amount::cw20(111111111, cw20_addr)]);
-        // assert_eq!(state.total_sent, vec![Amount::cw20(987654321, cw20_addr)]);
     }
 }
