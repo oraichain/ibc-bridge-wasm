@@ -76,6 +76,9 @@ pub enum ContractError {
 
     #[error("The contract address you are sending native tokens to is already revoked")]
     CustomContractRevoked,
+
+    #[error("Cw20 Receive Message format is invalid")]
+    InvalidReceiveCw20Message,
 }
 
 impl From<FromUtf8Error> for ContractError {

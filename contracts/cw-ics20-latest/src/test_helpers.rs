@@ -11,7 +11,7 @@ use cosmwasm_std::{
     Addr, DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, OwnedDeps,
 };
 
-use crate::msg::{AllowContractMsg, AllowMsg, InitMsg};
+use crate::msg::{AllowMsg, InitMsg};
 
 pub const DEFAULT_TIMEOUT: u64 = 3600; // 1 hour,
 pub const CONTRACT_PORT: &str = "ibc:wasm1234567890abcdef";
@@ -57,7 +57,7 @@ pub fn add_channel(mut deps: DepsMut, channel_id: &str) {
 pub fn setup(
     channels: &[&str],
     allow: &[(&str, u64)],
-    native_allow: &[(&str, bool)],
+    native_allow: &str,
 ) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
     let mut deps = mock_dependencies();
 
@@ -69,21 +69,13 @@ pub fn setup(
         })
         .collect();
 
-    let native_allow = native_allow
-        .iter()
-        .map(|(contract, active)| AllowContractMsg {
-            address: Addr::unchecked(contract.to_string()),
-            active: *active,
-        })
-        .collect();
-
     // instantiate an empty contract
     let instantiate_msg = InitMsg {
         default_gas_limit: None,
         default_timeout: DEFAULT_TIMEOUT,
         gov_contract: "gov".to_string(),
         allowlist,
-        native_allowlist: native_allow,
+        native_allow_contract: Addr::unchecked(native_allow),
     };
     let info = mock_info(&String::from("anyone"), &[]);
     let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();

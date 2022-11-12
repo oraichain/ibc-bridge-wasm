@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, BankMsg, Binary, CosmosMsg, Deps, DepsMut,
-    Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
+    attr, entry_point, from_binary, to_binary, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
+    IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
     IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
     IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
 };
@@ -14,7 +14,7 @@ use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
     undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
-    CW20_ISC20_DENOM, NATIVE_ALLOW_LIST, REPLY_ARGS,
+    CW20_ISC20_DENOM, NATIVE_ALLOW_CONTRACT, REPLY_ARGS,
 };
 use cw20::Cw20ExecuteMsg;
 use cw20_ics20_msg::amount::Amount;
@@ -311,23 +311,16 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map_err(|_| ContractError::NotOnMappingList {})?;
 
     // validate receiver, should be the custom contract in the allowed list
-    let is_whitelist_result =
-        NATIVE_ALLOW_LIST.may_load(storage, &Addr::unchecked(&msg.receiver))?;
-    if is_whitelist_result.is_none() {
-        return Err(ContractError::NotOnNativeAllowList {});
-    }
-
-    // if the contract is revoked, then it is not allowed either
-    let whitelist = is_whitelist_result.unwrap();
-    if !whitelist {
-        return Err(ContractError::CustomContractRevoked {});
+    let native_allow_contract = NATIVE_ALLOW_CONTRACT.load(storage)?;
+    if native_allow_contract.ne(&msg.receiver) {
+        return Err(ContractError::NotOnNativeAllowList);
     }
 
     let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
 
     // send token to the custom contract for further handling
     let cosmos_msg: CosmosMsg = WasmMsg::Execute {
-        contract_addr: msg.receiver.clone(),
+        contract_addr: native_allow_contract.to_string(),
         msg: to_binary(&DelegateCw20Msg {
             token: to_send,
             from_decimals: cw20_mapping.remote_decimals,
@@ -585,7 +578,7 @@ mod test {
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
-            &[(custom_addr, true)],
+            &custom_addr,
         );
 
         // prepare some mock packets
@@ -668,11 +661,7 @@ mod test {
     fn send_receive_native() {
         let send_channel = "channel-9";
         let custom_addr = "custom-addr";
-        let mut deps = setup(
-            &["channel-1", "channel-7", send_channel],
-            &[],
-            &[(custom_addr, true)],
-        );
+        let mut deps = setup(&["channel-1", "channel-7", send_channel], &[], &custom_addr);
 
         let denom = "uatom";
 
@@ -735,11 +724,7 @@ mod test {
         let allowed = "foobar";
         let custom_addr = "custom-addr";
         let allowed_gas = 777666;
-        let mut deps = setup(
-            &[send_channel],
-            &[(allowed, allowed_gas)],
-            &[(custom_addr, true)],
-        );
+        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)], &custom_addr);
 
         // allow list will get proper gas
         let limit = check_gas_limit(deps.as_ref(), &Amount::cw20(500, allowed)).unwrap();
@@ -871,7 +856,7 @@ mod test {
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
-            &[(custom_addr, true)],
+            &custom_addr,
         );
 
         // prepare some mock packets
@@ -889,7 +874,7 @@ mod test {
     }
 
     #[test]
-    fn send_native_from_remote_receive_invalid_not_on_native_allow_list() {
+    fn send_native_from_remote_receive_invalid_not_on_native_allow_contract() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
@@ -899,7 +884,7 @@ mod test {
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
-            &[],
+            "xyz",
         );
 
         let pair = Cw20PairMsg {
@@ -939,56 +924,6 @@ mod test {
     }
 
     #[test]
-    fn send_native_from_remote_receive_invalid_allow_contract_revoked() {
-        let send_channel = "channel-9";
-        let cw20_addr = "token-addr";
-        let custom_addr = "custom-addr";
-        let denom = "uatom";
-        let cw20_denom = "cw20:token-addr";
-        let gas_limit = 1234567;
-        let mut deps = setup(
-            &["channel-1", "channel-7", send_channel],
-            &[(cw20_addr, gas_limit)],
-            &[(custom_addr, false)],
-        );
-
-        let pair = Cw20PairMsg {
-            src_ibc_endpoint: IbcEndpoint {
-                port_id: REMOTE_PORT.to_string(),
-                channel_id: "channel-1234".to_string(),
-            },
-            dest_ibc_endpoint: IbcEndpoint {
-                port_id: CONTRACT_PORT.to_string(),
-                channel_id: "channel-1".to_string(),
-            },
-            denom: denom.to_string(),
-            cw20_denom: cw20_denom.to_string(),
-            remote_decimals: 18u8,
-        };
-
-        let _ = execute(
-            deps.as_mut(),
-            mock_env(),
-            mock_info("gov", &[]),
-            ExecuteMsg::UpdateCw20MappingPair(pair),
-        )
-        .unwrap();
-
-        // prepare some mock packets
-        let recv_packet =
-            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
-
-        // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        // assert_eq!(res, StdError)
-        assert_eq!(
-            res.attributes.last().unwrap().value,
-            "The contract address you are sending native tokens to is already revoked"
-        );
-    }
-
-    #[test]
     fn send_native_from_remote_receive_happy_path() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
@@ -999,7 +934,7 @@ mod test {
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
-            &[(custom_addr, true)],
+            &custom_addr,
         );
 
         let pair = Cw20PairMsg {

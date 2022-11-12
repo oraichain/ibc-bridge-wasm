@@ -13,7 +13,7 @@ pub struct InitMsg {
     pub gov_contract: String,
     /// initial allowlist - all cw20 tokens we will send must be previously allowed by governance
     pub allowlist: Vec<AllowMsg>,
-    pub native_allowlist: Vec<AllowContractMsg>,
+    pub native_allow_contract: Addr,
     /// If set, contracts off the allowlist will run with this gas limit.
     /// If unset, will refuse to accept any contract off the allow list.
     pub default_gas_limit: Option<u64>,
@@ -38,19 +38,13 @@ pub enum ExecuteMsg {
     Transfer(TransferMsg),
     TransferBackToRemoteChain(TransferBackMsg),
     UpdateCw20MappingPair(Cw20PairMsg),
-    UpdateNativeAllowList(AllowContractMsg),
+    UpdateNativeAllowContract(String),
     /// This must be called by gov_contract, will allow a new cw20 token to be sent
     Allow(AllowMsg),
     /// Change the admin (must be called by current admin)
     UpdateAdmin {
         admin: String,
     },
-}
-
-#[cw_serde]
-pub struct AllowContractMsg {
-    pub address: Addr,
-    pub active: bool,
 }
 
 #[cw_serde]
@@ -132,12 +126,8 @@ pub enum QueryMsg {
         limit: Option<u32>,
         order: Option<u8>,
     },
-    #[returns(ListNativeAllowedResponse)]
-    ListNativeAllowed {
-        start_after: Option<String>,
-        limit: Option<u32>,
-        order: Option<u8>,
-    },
+    #[returns(Addr)]
+    GetNativeAllowAddress {},
     #[returns(ListCw20MappingResponse)]
     Cw20Mapping {
         start_after: Option<String>,
@@ -183,11 +173,6 @@ pub struct AllowedResponse {
 #[cw_serde]
 pub struct ListAllowedResponse {
     pub allow: Vec<AllowedInfo>,
-}
-
-#[cw_serde]
-pub struct ListNativeAllowedResponse {
-    pub allow: Vec<AllowContractMsg>,
 }
 
 #[cw_serde]
