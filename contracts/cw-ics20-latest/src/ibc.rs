@@ -302,10 +302,17 @@ fn handle_ibc_packet_receive_native_remote_chain(
     msg: &Ics20Packet,
 ) -> Result<IbcReceiveResponse, ContractError> {
     // make sure we have enough balance for this
-    increase_channel_balance(storage, &packet.dest.channel_id, denom, msg.amount.clone())?;
 
     // key in form transfer/channel-0/foo
     let ibc_denom = get_key_ics20_ibc_denom(&packet.src.port_id, &packet.src.channel_id, denom);
+
+    increase_channel_balance(
+        storage,
+        &packet.dest.channel_id,
+        &ibc_denom,
+        msg.amount.clone(),
+    )?;
+
     let cw20_mapping = CW20_ISC20_DENOM
         .load(storage, &ibc_denom)
         .map_err(|_| ContractError::NotOnMappingList {})?;
@@ -440,7 +447,7 @@ fn on_packet_failure(
     Ok(res)
 }
 
-fn send_amount(amount: Amount, recipient: String, msg: Option<Binary>) -> CosmosMsg {
+pub fn send_amount(amount: Amount, recipient: String, msg: Option<Binary>) -> CosmosMsg {
     match amount {
         Amount::Native(coin) => BankMsg::Send {
             to_address: recipient,
