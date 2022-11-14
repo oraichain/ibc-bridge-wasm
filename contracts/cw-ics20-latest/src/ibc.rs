@@ -1,4 +1,4 @@
-use cw20_ics20_msg::DelegateCw20Msg;
+use cw20_ics20_msg::receiver::Cw20Ics20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -326,22 +326,16 @@ fn handle_ibc_packet_receive_native_remote_chain(
     let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
 
     // send token to the custom contract for further handling
-    let cosmos_msg: CosmosMsg = WasmMsg::Execute {
-        contract_addr: native_allow_contract.to_string(),
-        msg: to_binary(&DelegateCw20Msg {
-            token: to_send,
-            from_decimals: cw20_mapping.remote_decimals,
-            data: packet.data.clone(),
-        })
-        .unwrap(),
-        funds: vec![],
+    let cosmos_msg = Cw20Ics20ReceiveMsg {
+        token: to_send,
+        from_decimals: cw20_mapping.remote_decimals,
+        data: packet.data.clone(),
     }
-    .into();
-    let sub_msg = SubMsg::new(cosmos_msg);
+    .into_cosmos_msg(native_allow_contract.to_string())?;
 
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
-        .add_submessage(sub_msg)
+        .add_message(cosmos_msg)
         .add_attribute("action", "receive_native")
         .add_attribute("sender", msg.sender.clone())
         .add_attribute("receiver", msg.receiver.clone())
@@ -980,7 +974,19 @@ mod test {
 
         // query channel state|_|
         let state = query_channel(deps.as_ref(), send_channel.to_string()).unwrap();
-        assert_eq!(state.balances, vec![Amount::native(876543210, denom)]);
-        assert_eq!(state.total_sent, vec![Amount::native(876543210, denom)]);
+        assert_eq!(
+            state.balances,
+            vec![Amount::native(
+                876543210,
+                &get_key_ics20_ibc_denom(REMOTE_PORT, "channel-1234", denom)
+            )]
+        );
+        assert_eq!(
+            state.total_sent,
+            vec![Amount::native(
+                876543210,
+                &get_key_ics20_ibc_denom(REMOTE_PORT, "channel-1234", denom)
+            )]
+        );
     }
 }
