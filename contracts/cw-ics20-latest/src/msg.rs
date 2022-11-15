@@ -68,7 +68,7 @@ pub struct TransferMsg {
     /// How long the packet lives in seconds. If not specified, use default_timeout
     pub timeout: Option<u64>,
     /// metadata of the transfer to suit the new fungible token transfer
-    pub metadata: Binary,
+    pub memo: String,
 }
 
 /// This is the message we accept via Receive
@@ -82,7 +82,7 @@ pub struct TransferBackMsg {
     /// How long the packet lives in seconds. If not specified, use default_timeout
     pub timeout: Option<u64>,
     /// metadata of the transfer to suit the new fungible token transfer
-    pub metadata: Option<Binary>,
+    pub memo: Option<String>,
     /// native amount of the remote chain
     pub amount: Amount,
     /// Original sender that sends the cw20 token

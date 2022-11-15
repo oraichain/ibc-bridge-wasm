@@ -149,7 +149,7 @@ pub fn execute_transfer(
         amount.denom(),
         sender.as_ref(),
         &msg.remote_address,
-        msg.metadata,
+        msg.memo,
     );
     packet.validate()?;
 
@@ -228,7 +228,7 @@ pub fn execute_transfer_back_to_remote_chain(
         ),
         &msg.original_sender,
         &msg.remote_address,
-        msg.metadata.unwrap_or_default(),
+        msg.memo.unwrap_or_default(),
     );
     packet.validate()?;
 
@@ -736,7 +736,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: None,
-            metadata: Binary::from("foobar".as_bytes()),
+            memo: "memo".to_string(),
         };
 
         // works with proper funds
@@ -803,7 +803,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: Some(7777),
-            metadata: Binary::from("foobar".as_bytes()),
+            memo: "memo".to_string(),
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "my-account".into(),
@@ -851,7 +851,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: Some(7777),
-            metadata: Binary::from("foobar".as_bytes()),
+            memo: "memo".to_string(),
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "my-account".into(),
@@ -939,7 +939,7 @@ mod test {
             amount: amount.into(),
             sender: "remote-sender".to_string(),
             receiver: receiver.to_string(),
-            metadata: Binary::from("foobar".as_bytes()),
+            memo: "memo".to_string(),
         };
         print!("Packet denom: {}", &data.denom);
         IbcPacket::new(
@@ -1001,7 +1001,7 @@ mod test {
             native_denom: denom.to_string(),
             amount: Amount::from_parts(denom.to_string(), Uint128::from(amount)),
             timeout: Some(DEFAULT_TIMEOUT),
-            metadata: None,
+            memo: None,
             original_sender: original_sender.to_string(),
         };
 
@@ -1095,7 +1095,7 @@ mod test {
             );
             assert_eq!(msg.sender.as_str(), original_sender);
             assert_eq!(msg.receiver.as_str(), "foreign-address");
-            assert_eq!(msg.metadata, Binary::default());
+            assert_eq!(msg.memo, "".to_string());
         } else {
             panic!("Unexpected return message: {:?}", res.messages[0]);
         }
