@@ -1,6 +1,8 @@
 #!/bin/sh
 #set -o errexit -o nounset -o pipefail
 
+apk add build-base;
+
 if [ -z "$PASSWORD" ]; then
     echo -n "Enter passphrase:"
     read -s PASSWORD
