@@ -16,8 +16,8 @@ docker-compose up -d
 
 ```bash
 # build smart contract
-./scripts/build_contract.sh contracts/cw20-ics20
-cp contracts/cw20-ics20/artifacts/cw20-ics20.wasm .mars
+./scripts/build_contract.sh contracts/cw-ics20-latest
+cp contracts/cw-ics20-latest/artifacts/cw-ics20-latest.wasm .mars
 
 # build cw20
 ./scripts/build_contract.sh contracts/cw20-base
