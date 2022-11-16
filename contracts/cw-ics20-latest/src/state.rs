@@ -24,7 +24,7 @@ pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 /// custom contract that handles the native token sent from remote chain.
 pub const NATIVE_ALLOW_CONTRACT: Item<Addr> = Item::new("allow_native_custom_contract");
 
-// used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash - transfer/channel-0/uatom for example; value - mapping data including cw20 denom of chain B, in form: cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 for example, and destination endpoint
+// used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash for destination port & channel - transfer/channel-0/uatom for example; value - mapping data including cw20 denom of chain B, in form: cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 for example
 pub const CW20_ISC20_DENOM: Map<&str, Cw20MappingMetadata> = Map::new("cw20_ics20_mapping");
 
 #[cw_serde]
@@ -59,8 +59,6 @@ pub struct Cw20MappingMetadata {
     /// denom should be in form: cw20:...
     pub cw20_denom: String,
     pub remote_decimals: u8,
-    /// The endpoint that has port: wasm:...
-    pub ibc_endpoint: IbcEndpoint,
 }
 
 #[cw_serde]
@@ -91,6 +89,8 @@ pub fn reduce_channel_balance(
     denom: &str,
     amount: Uint128,
 ) -> Result<(), ContractError> {
+    println!("channel: {:?}", channel);
+    println!("denom: {:?}", denom);
     CHANNEL_STATE.update(
         storage,
         (channel, denom),
@@ -118,6 +118,22 @@ pub fn undo_reduce_channel_balance(
     CHANNEL_STATE.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding += amount;
+        Ok(state)
+    })?;
+    Ok(())
+}
+
+// this is like decrease, but it only "un-add" (= adds) outstanding, not total_sent
+// calling `increase_channel_balance` and then `undo_increase_channel_balance` should leave state unchanged.
+pub fn undo_increase_channel_balance(
+    storage: &mut dyn Storage,
+    channel: &str,
+    denom: &str,
+    amount: Uint128,
+) -> Result<(), ContractError> {
+    CHANNEL_STATE.update(storage, (channel, denom), |orig| -> StdResult<_> {
+        let mut state = orig.unwrap_or_default();
+        state.outstanding -= amount;
         Ok(state)
     })?;
     Ok(())

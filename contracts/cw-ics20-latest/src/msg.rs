@@ -49,7 +49,6 @@ pub enum ExecuteMsg {
 
 #[cw_serde]
 pub struct Cw20PairMsg {
-    pub src_ibc_endpoint: IbcEndpoint,
     pub dest_ibc_endpoint: IbcEndpoint,
     pub denom: String,
     pub cw20_denom: String,
@@ -74,8 +73,8 @@ pub struct TransferMsg {
 /// This is the message we accept via Receive
 #[cw_serde]
 pub struct TransferBackMsg {
-    /// the destination ibc endpoint you want to send tokens back to
-    pub dest_ibc_endpoint: IbcEndpoint,
+    /// the local ibc endpoint you want to send tokens back on
+    pub local_ibc_endpoint: IbcEndpoint,
     /// token denom
     pub native_denom: String,
     pub remote_address: String,

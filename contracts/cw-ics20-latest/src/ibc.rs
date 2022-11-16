@@ -13,8 +13,8 @@ use cosmwasm_std::{
 use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
-    undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
-    CW20_ISC20_DENOM, NATIVE_ALLOW_CONTRACT, REPLY_ARGS,
+    undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST,
+    CHANNEL_INFO, CONFIG, CW20_ISC20_DENOM, NATIVE_ALLOW_CONTRACT, REPLY_ARGS,
 };
 use cw20::Cw20ExecuteMsg;
 use cw20_ics20_msg::amount::Amount;
@@ -87,6 +87,7 @@ fn ack_fail(err: String) -> Binary {
 }
 
 const RECEIVE_ID: u64 = 1337;
+const NATIVE_RECEIVE_ID: u64 = 1338;
 const ACK_FAILURE_ID: u64 = 0xfa17;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -109,6 +110,32 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                 // should not be used for ExecuteMsg handlers
                 let reply_args = REPLY_ARGS.load(deps.storage)?;
                 undo_reduce_channel_balance(
+                    deps.storage,
+                    &reply_args.channel,
+                    &reply_args.denom,
+                    reply_args.amount,
+                )?;
+
+                Ok(Response::new().set_data(ack_fail(err)))
+            }
+        },
+        NATIVE_RECEIVE_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            SubMsgResult::Err(err) => {
+                // Important design note:  with ibcv2 and wasmd 0.22 we can implement this all much easier.
+                // No reply needed... the receive function and submessage should return error on failure and all
+                // state gets reverted with a proper app-level message auto-generated
+
+                // Since we need compatibility with Juno (Jan 2022), we need to ensure that optimisitic
+                // state updates in ibc_packet_receive get reverted in the (unlikely) chance of an
+                // error while sending the token
+
+                // However, this requires passing some state between the ibc_packet_receive function and
+                // the reply handler. We do this with a singleton, with is "okay" for IBC as there is no
+                // reentrancy on these functions (cannot be called by another contract). This pattern
+                // should not be used for ExecuteMsg handlers
+                let reply_args = REPLY_ARGS.load(deps.storage)?;
+                undo_increase_channel_balance(
                     deps.storage,
                     &reply_args.channel,
                     &reply_args.denom,
@@ -304,7 +331,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     // make sure we have enough balance for this
 
     // key in form transfer/channel-0/foo
-    let ibc_denom = get_key_ics20_ibc_denom(&packet.src.port_id, &packet.src.channel_id, denom);
+    let ibc_denom = get_key_ics20_ibc_denom(&packet.dest.port_id, &packet.dest.channel_id, denom);
 
     increase_channel_balance(
         storage,
@@ -312,6 +339,14 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &ibc_denom,
         msg.amount.clone(),
     )?;
+
+    // we need to save the data to update the balances in reply
+    let reply_args = ReplyArgs {
+        channel: packet.dest.channel_id.clone(),
+        denom: ibc_denom.clone(),
+        amount: msg.amount,
+    };
+    REPLY_ARGS.save(storage, &reply_args)?;
 
     let cw20_mapping = CW20_ISC20_DENOM
         .load(storage, &ibc_denom)
@@ -329,7 +364,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     }
     .into_cosmos_msg(native_allow_contract.to_string())?;
 
-    let submsg = SubMsg::reply_on_error(cosmos_msg, RECEIVE_ID);
+    let submsg = SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID);
 
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
@@ -551,7 +586,6 @@ mod test {
             receiver: receiver.to_string(),
             memo: None,
         };
-        print!("Packet denom: {}", &data.denom);
         IbcPacket::new(
             to_binary(&data).unwrap(),
             IbcEndpoint {
@@ -770,7 +804,6 @@ mod test {
 
             memo: None,
         };
-        print!("Packet denom: {}", &data.denom);
         IbcPacket::new(
             to_binary(&data).unwrap(),
             IbcEndpoint {
@@ -889,13 +922,9 @@ mod test {
         );
 
         let pair = Cw20PairMsg {
-            src_ibc_endpoint: IbcEndpoint {
-                port_id: REMOTE_PORT.to_string(),
-                channel_id: "channel-1234".to_string(),
-            },
             dest_ibc_endpoint: IbcEndpoint {
                 port_id: CONTRACT_PORT.to_string(),
-                channel_id: "channel-1".to_string(),
+                channel_id: send_channel.to_string(),
             },
             denom: denom.to_string(),
             cw20_denom: cw20_denom.to_string(),
@@ -917,6 +946,7 @@ mod test {
         // we can receive this denom, channel balance should increase
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
+        println!("res: {:?}", res);
         assert_eq!(res.messages.len(), 1);
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
         println!("ack: {:?}", ack);
@@ -928,14 +958,14 @@ mod test {
             state.balances,
             vec![Amount::native(
                 876543210,
-                &get_key_ics20_ibc_denom(REMOTE_PORT, "channel-1234", denom)
+                &get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom)
             )]
         );
         assert_eq!(
             state.total_sent,
             vec![Amount::native(
                 876543210,
-                &get_key_ics20_ibc_denom(REMOTE_PORT, "channel-1234", denom)
+                &get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom)
             )]
         );
     }
