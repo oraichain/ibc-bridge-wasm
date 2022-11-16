@@ -228,7 +228,7 @@ pub fn execute_transfer_back_to_remote_chain(
         ),
         &msg.original_sender,
         &msg.remote_address,
-        msg.memo.unwrap_or_default(),
+        msg.memo,
     );
     packet.validate()?;
 
@@ -736,7 +736,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: None,
-            memo: "memo".to_string(),
+            memo: Some("memo".to_string()),
         };
 
         // works with proper funds
@@ -803,7 +803,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: Some(7777),
-            memo: "memo".to_string(),
+            memo: Some("memo".to_string()),
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "my-account".into(),
@@ -851,7 +851,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "foreign-address".to_string(),
             timeout: Some(7777),
-            memo: "memo".to_string(),
+            memo: Some("memo".to_string()),
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "my-account".into(),
@@ -939,7 +939,7 @@ mod test {
             amount: amount.into(),
             sender: "remote-sender".to_string(),
             receiver: receiver.to_string(),
-            memo: "memo".to_string(),
+            memo: Some("memo".to_string()),
         };
         print!("Packet denom: {}", &data.denom);
         IbcPacket::new(
@@ -1095,7 +1095,7 @@ mod test {
             );
             assert_eq!(msg.sender.as_str(), original_sender);
             assert_eq!(msg.receiver.as_str(), "foreign-address");
-            assert_eq!(msg.memo, "".to_string());
+            assert_eq!(msg.memo, None);
         } else {
             panic!("Unexpected return message: {:?}", res.messages[0]);
         }

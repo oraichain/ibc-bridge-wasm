@@ -36,7 +36,7 @@ pub struct Ics20Packet {
     /// the sender address
     pub sender: String,
     /// optional memo
-    pub memo: String,
+    pub memo: Option<String>,
 }
 
 impl Ics20Packet {
@@ -45,7 +45,7 @@ impl Ics20Packet {
         denom: T,
         sender: &str,
         receiver: &str,
-        memo: String,
+        memo: Option<String>,
     ) -> Self {
         Ics20Packet {
             denom: denom.into(),
@@ -329,9 +329,11 @@ fn handle_ibc_packet_receive_native_remote_chain(
     }
     .into_cosmos_msg(native_allow_contract.to_string())?;
 
+    let submsg = SubMsg::reply_on_error(cosmos_msg, RECEIVE_ID);
+
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
-        .add_message(cosmos_msg)
+        .add_submessage(submsg)
         .add_attribute("action", "receive_native")
         .add_attribute("sender", msg.sender.clone())
         .add_attribute("receiver", msg.receiver.clone())
@@ -496,10 +498,10 @@ mod test {
             "ucosm",
             "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n",
             "wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc",
-            "memo".to_string(),
+            None,
         );
         // Example message generated from the SDK
-        let expected = r#"{"amount":"12345","denom":"ucosm","receiver":"wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc","sender":"cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n","memo":"memo"}"#;
+        let expected = r#"{"amount":"12345","denom":"ucosm","receiver":"wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc","sender":"cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n","memo":null}"#;
 
         let encdoded = String::from_utf8(to_vec(&packet).unwrap()).unwrap();
         assert_eq!(expected, encdoded.as_str());
@@ -547,7 +549,7 @@ mod test {
             amount: amount.into(),
             sender: "remote-sender".to_string(),
             receiver: receiver.to_string(),
-            memo: "memo".to_string(),
+            memo: None,
         };
         print!("Packet denom: {}", &data.denom);
         IbcPacket::new(
@@ -596,7 +598,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "remote-rcpt".to_string(),
             timeout: None,
-            memo: "memo".to_string(),
+            memo: None,
         };
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: "local-sender".to_string(),
@@ -612,7 +614,7 @@ mod test {
             sender: "local-sender".to_string(),
             receiver: "remote-rcpt".to_string(),
 
-            memo: "memo".to_string(),
+            memo: None,
         };
         let timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
         assert_eq!(
@@ -680,7 +682,7 @@ mod test {
             channel: send_channel.to_string(),
             remote_address: "my-remote-address".to_string(),
             timeout: None,
-            memo: "memo".to_string(),
+            memo: Some("memo".to_string()),
         });
         let info = mock_info("local-sender", &coins(987654321, denom));
         execute(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -766,7 +768,7 @@ mod test {
             sender: "remote-sender".to_string(),
             receiver: receiver.to_string(),
 
-            memo: "memo".to_string(),
+            memo: None,
         };
         print!("Packet denom: {}", &data.denom);
         IbcPacket::new(
