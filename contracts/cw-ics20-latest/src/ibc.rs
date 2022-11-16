@@ -317,16 +317,12 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .load(storage, &ibc_denom)
         .map_err(|_| ContractError::NotOnMappingList {})?;
 
-    // validate receiver, should be the custom contract in the allowed list
     let native_allow_contract = NATIVE_ALLOW_CONTRACT.load(storage)?;
-    if native_allow_contract.ne(&msg.receiver) {
-        return Err(ContractError::NotOnNativeAllowList);
-    }
-
     let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
 
     // send token to the custom contract for further handling
     let cosmos_msg = Cw20Ics20ReceiveMsg {
+        receiver: msg.receiver.clone(),
         token: to_send,
         from_decimals: cw20_mapping.remote_decimals,
         data: packet.data.clone(),
@@ -873,56 +869,6 @@ mod test {
         assert_eq!(
             res.attributes.last().unwrap().value,
             "You can only send native tokens that has a map to the corresponding cw20 address denom"
-        );
-    }
-
-    #[test]
-    fn send_native_from_remote_receive_invalid_not_on_native_allow_contract() {
-        let send_channel = "channel-9";
-        let cw20_addr = "token-addr";
-        let custom_addr = "custom-addr";
-        let denom = "uatom";
-        let cw20_denom = "cw20:token-addr";
-        let gas_limit = 1234567;
-        let mut deps = setup(
-            &["channel-1", "channel-7", send_channel],
-            &[(cw20_addr, gas_limit)],
-            "xyz",
-        );
-
-        let pair = Cw20PairMsg {
-            src_ibc_endpoint: IbcEndpoint {
-                port_id: REMOTE_PORT.to_string(),
-                channel_id: "channel-1234".to_string(),
-            },
-            dest_ibc_endpoint: IbcEndpoint {
-                port_id: CONTRACT_PORT.to_string(),
-                channel_id: "channel-1".to_string(),
-            },
-            denom: denom.to_string(),
-            cw20_denom: cw20_denom.to_string(),
-            remote_decimals: 18u8,
-        };
-
-        let _ = execute(
-            deps.as_mut(),
-            mock_env(),
-            mock_info("gov", &[]),
-            ExecuteMsg::UpdateCw20MappingPair(pair),
-        )
-        .unwrap();
-
-        // prepare some mock packets
-        let recv_packet =
-            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
-
-        // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        // assert_eq!(res, StdError)
-        assert_eq!(
-            res.attributes.last().unwrap().value,
-            "You can only send native tokens to an address that have been explicitly allowed by governance"
         );
     }
 

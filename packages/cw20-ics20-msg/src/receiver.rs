@@ -7,6 +7,8 @@ use crate::amount::Amount;
 #[cw_serde]
 
 pub struct Cw20Ics20ReceiveMsg {
+    /// receiver of the token
+    pub receiver: String,
     /// token from the remote chain
     pub token: Amount,
     /// the decimals of the native token, popular is 18 or 6
