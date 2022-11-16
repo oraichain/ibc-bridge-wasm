@@ -2,17 +2,14 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, IbcMsg, IbcQuery, MessageInfo, Order,
-    PortIdResponse, Response, StdError, StdResult,
+    PortIdResponse, Response, StdResult,
 };
-use semver::Version;
-
-use cw2::{get_contract_version, set_contract_version};
+use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
 use cw_storage_plus::Bound;
 
 use crate::error::ContractError;
 use crate::ibc::Ics20Packet;
-use crate::migrations::{v1, v2};
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, Cw20PairMsg,
     Cw20PairQuery, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
@@ -346,72 +343,17 @@ pub fn execute_update_native_allow_contract(
     Ok(res)
 }
 
-const MIGRATE_MIN_VERSION: &str = "0.11.1";
-const MIGRATE_VERSION_2: &str = "0.12.0-alpha1";
-// the new functionality starts in 0.13.1, this is the last release that needs to be migrated to v3
-const MIGRATE_VERSION_3: &str = "0.13.0";
-
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(mut deps: DepsMut, env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
-    let version: Version = CONTRACT_VERSION.parse().map_err(from_semver)?;
-    let stored = get_contract_version(deps.storage)?;
-    let storage_version: Version = stored.version.parse().map_err(from_semver)?;
-
-    // First, ensure we are working from an equal or older version of this contract
-    // wrong type
-    if CONTRACT_NAME != stored.contract {
-        return Err(ContractError::CannotMigrate {
-            previous_contract: stored.contract,
-        });
-    }
-    // existing one is newer
-    if storage_version > version {
-        return Err(ContractError::CannotMigrateVersion {
-            previous_version: stored.version,
-        });
-    }
-
-    // Then, run the proper migration
-    if storage_version < MIGRATE_MIN_VERSION.parse().map_err(from_semver)? {
-        return Err(ContractError::CannotMigrateVersion {
-            previous_version: stored.version,
-        });
-    }
-    // run the v1->v2 converstion if we are v1 style
-    if storage_version <= MIGRATE_VERSION_2.parse().map_err(from_semver)? {
-        let old_config = v1::CONFIG.load(deps.storage)?;
-        ADMIN.set(deps.branch(), Some(old_config.gov_contract))?;
-        let config = Config {
-            default_timeout: old_config.default_timeout,
-            default_gas_limit: None,
-        };
-        CONFIG.save(deps.storage, &config)?;
-    }
-    // run the v2->v3 converstion if we are v2 style
-    if storage_version <= MIGRATE_VERSION_3.parse().map_err(from_semver)? {
-        v2::update_balances(deps.branch(), &env)?;
-    }
-    // otherwise no migration (yet) - add them here
-
-    // always allow setting the default gas limit via MigrateMsg, even if same version
-    // (Note this doesn't allow unsetting it now)
+pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
+    // we don't need to save anything if migrating from the same version
     if msg.default_gas_limit.is_some() {
         CONFIG.update(deps.storage, |mut old| -> StdResult<_> {
             old.default_gas_limit = msg.default_gas_limit;
             Ok(old)
         })?;
     }
-
-    // we don't need to save anything if migrating from the same version
-    if storage_version < version {
-        set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-    }
-
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     Ok(Response::new())
-}
-
-fn from_semver(err: semver::Error) -> StdError {
-    StdError::generic_err(format!("Semver: {}", err))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -575,14 +517,13 @@ mod test {
     use crate::ibc::ibc_packet_receive;
     use crate::test_helpers::*;
 
-    use cosmwasm_std::testing::{mock_env, mock_info, MOCK_CONTRACT_ADDR};
+    use cosmwasm_std::testing::{mock_env, mock_info};
     use cosmwasm_std::{
         coin, coins, CosmosMsg, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, StdError,
         Timestamp, Uint128,
     };
     use cw_controllers::AdminError;
 
-    use crate::state::ChannelState;
     use cw_utils::PaymentError;
 
     #[test]
@@ -673,7 +614,7 @@ mod test {
         println!("response: {:?}", response);
         assert_eq!(
             response.pairs.first().unwrap().key,
-            "earth-port/earth-channel/earth".to_string()
+            "mars-port/mars-channel/earth".to_string()
         );
 
         // not found case
@@ -869,53 +810,6 @@ mod test {
         // try again
         execute(deps.as_mut(), mock_env(), info, msg).unwrap();
     }
-
-    #[test]
-    fn v3_migration_works() {
-        // basic state with one channel
-        let send_channel = "channel-15";
-        let cw20_addr = "my-token";
-        let native = "ucosm";
-        let custom_addr = "custom-addr";
-        let mut deps = setup(&[send_channel], &[(cw20_addr, 123456)], &custom_addr);
-
-        // mock that we sent some tokens in both native and cw20 (TODO: cw20)
-        // balances set high
-        deps.querier
-            .update_balance(MOCK_CONTRACT_ADDR, coins(50000, native));
-        // pretend this is an old contract - set version explicitly
-        set_contract_version(deps.as_mut().storage, CONTRACT_NAME, MIGRATE_VERSION_3).unwrap();
-
-        // channel state a bit lower (some in-flight acks)
-        let state = ChannelState {
-            // 14000 not accounted for (in-flight)
-            outstanding: Uint128::new(36000),
-            total_sent: Uint128::new(100000),
-        };
-        CHANNEL_STATE
-            .save(deps.as_mut().storage, (send_channel, native), &state)
-            .unwrap();
-
-        // run migration
-        migrate(
-            deps.as_mut(),
-            mock_env(),
-            MigrateMsg {
-                default_gas_limit: Some(123456),
-            },
-        )
-        .unwrap();
-
-        // check new channel state
-        let chan = query_channel(deps.as_ref(), send_channel.into()).unwrap();
-        assert_eq!(chan.balances, vec![Amount::native(50000, native)]);
-        assert_eq!(chan.total_sent, vec![Amount::native(114000, native)]);
-
-        // check config updates
-        let config = query_config(deps.as_ref()).unwrap();
-        assert_eq!(config.default_gas_limit, Some(123456));
-    }
-
     // test execute transfer back to native remote chain
 
     fn mock_receive_packet(
