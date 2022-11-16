@@ -27,6 +27,9 @@ pub const NATIVE_ALLOW_CONTRACT: Item<Addr> = Item::new("allow_native_custom_con
 // used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash for destination port & channel - transfer/channel-0/uatom for example; value - mapping data including cw20 denom of chain B, in form: cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 for example
 pub const CW20_ISC20_DENOM: Map<&str, Cw20MappingMetadata> = Map::new("cw20_ics20_mapping");
 
+// this reverse map is used when the CW20_ISC20_DENOM is updated for simplicity (usually we can use indexing, but this is just for simplicity). TODO: change to indexing instead
+pub const CW20_ISC20_DENOM_REVERSE: Map<&str, String> = Map::new("cw20_ics20_mapping_reverse");
+
 #[cw_serde]
 #[derive(Default)]
 pub struct ChannelState {

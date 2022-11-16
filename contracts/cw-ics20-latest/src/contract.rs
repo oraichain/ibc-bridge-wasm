@@ -18,7 +18,7 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance, AllowInfo, Config,
     Cw20MappingMetadata, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_STATE, CONFIG, CW20_ISC20_DENOM,
-    NATIVE_ALLOW_CONTRACT,
+    CW20_ISC20_DENOM_REVERSE, NATIVE_ALLOW_CONTRACT,
 };
 use cw20_ics20_msg::amount::Amount;
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -183,12 +183,8 @@ pub fn execute_transfer_back_to_remote_chain(
         return Err(ContractError::NoFunds {});
     }
 
-    let ibc_denom = get_key_ics20_ibc_denom(
-        &msg.local_ibc_endpoint.port_id,
-        &msg.local_ibc_endpoint.channel_id,
-        &msg.native_denom,
-    );
-
+    // should be in form port/channel/denom
+    let ibc_denom = CW20_ISC20_DENOM_REVERSE.load(deps.storage, &msg.cw20_denom)?;
     let allow_contract = NATIVE_ALLOW_CONTRACT.load(deps.storage)?;
 
     // needs to be the allow contract
@@ -215,11 +211,7 @@ pub fn execute_transfer_back_to_remote_chain(
     // build ics20 packet
     let packet = Ics20Packet::new(
         msg.amount.amount(),
-        get_key_ics20_ibc_denom(
-            &msg.local_ibc_endpoint.port_id,
-            &msg.local_ibc_endpoint.channel_id,
-            &msg.native_denom,
-        ),
+        ibc_denom.clone(),
         &msg.original_sender,
         &msg.remote_address,
         msg.memo,
@@ -304,17 +296,23 @@ pub fn execute_update_cw20_mapping_pair(
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
 
-    let key = get_key_ics20_ibc_denom(
+    let ibc_denom = get_key_ics20_ibc_denom(
         &mapping_pair_msg.dest_ibc_endpoint.port_id,
         &mapping_pair_msg.dest_ibc_endpoint.channel_id,
         &mapping_pair_msg.denom,
     );
-    CW20_ISC20_DENOM.update(deps.storage, &key, |_| -> StdResult<_> {
+    CW20_ISC20_DENOM.update(deps.storage, &ibc_denom, |_| -> StdResult<_> {
         Ok(Cw20MappingMetadata {
             cw20_denom: mapping_pair_msg.cw20_denom.clone(),
             remote_decimals: mapping_pair_msg.remote_decimals,
         })
     })?;
+
+    CW20_ISC20_DENOM_REVERSE.update(
+        deps.storage,
+        &mapping_pair_msg.cw20_denom,
+        |_| -> StdResult<_> { Ok(ibc_denom) },
+    )?;
 
     let res = Response::new()
         .add_attribute("action", "update_cw20_ics20_mapping_pair")
@@ -880,7 +878,7 @@ mod test {
                 channel_id: local_channel.to_string(),
             },
             remote_address: "foreign-address".to_string(),
-            native_denom: denom.to_string(),
+            cw20_denom: cw20_denom.to_string(),
             amount: Amount::from_parts(denom.to_string(), Uint128::from(amount)),
             timeout: Some(DEFAULT_TIMEOUT),
             memo: None,
@@ -910,35 +908,6 @@ mod test {
         let invalid_info = mock_info("foobar", &[]);
         let err = execute(deps.as_mut(), mock_env(), invalid_info, invalid_msg).unwrap_err();
         assert_eq!(err, ContractError::NotOnNativeAllowList);
-
-        // reject with bad channel id
-        let pair = Cw20PairMsg {
-            dest_ibc_endpoint: IbcEndpoint {
-                port_id: CONTRACT_PORT.to_string(),
-                channel_id: "not_registered_channel".to_string(),
-            },
-            denom: denom.to_string(),
-            cw20_denom: cw20_denom.to_string(),
-            remote_decimals: 18u8,
-        };
-
-        execute(
-            deps.as_mut(),
-            mock_env(),
-            mock_info("gov", &[]),
-            ExecuteMsg::UpdateCw20MappingPair(pair),
-        )
-        .unwrap();
-
-        transfer.local_ibc_endpoint.channel_id = "not_registered_channel".to_string();
-        let invalid_msg = ExecuteMsg::TransferBackToRemoteChain(transfer.clone());
-        let err = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap_err();
-        assert_eq!(
-            err,
-            ContractError::NoSuchChannel {
-                id: "not_registered_channel".to_string()
-            }
-        );
 
         // revert transfer state to correct state
         transfer.local_ibc_endpoint.channel_id = local_channel.to_string();
@@ -985,6 +954,35 @@ mod test {
                 amount,
                 &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
             )]
+        );
+
+        // reject case with bad channel id
+        let pair = Cw20PairMsg {
+            dest_ibc_endpoint: IbcEndpoint {
+                port_id: CONTRACT_PORT.to_string(),
+                channel_id: "not_registered_channel".to_string(),
+            },
+            denom: denom.to_string(),
+            cw20_denom: cw20_denom.to_string(),
+            remote_decimals: 18u8,
+        };
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("gov", &[]),
+            ExecuteMsg::UpdateCw20MappingPair(pair),
+        )
+        .unwrap();
+
+        transfer.local_ibc_endpoint.channel_id = "not_registered_channel".to_string();
+        let invalid_msg = ExecuteMsg::TransferBackToRemoteChain(transfer.clone());
+        let err = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::NoSuchChannel {
+                id: "not_registered_channel".to_string()
+            }
         );
     }
 }
