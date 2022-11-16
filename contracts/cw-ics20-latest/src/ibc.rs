@@ -90,7 +90,7 @@ const RECEIVE_ID: u64 = 1337;
 const NATIVE_RECEIVE_ID: u64 = 1338;
 const ACK_FAILURE_ID: u64 = 0xfa17;
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
     match reply.id {
         RECEIVE_ID => match reply.result {
@@ -153,7 +153,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
     }
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 /// enforces ordering and versioning constraints
 pub fn ibc_channel_open(
     _deps: DepsMut,
@@ -164,7 +164,7 @@ pub fn ibc_channel_open(
     Ok(())
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 /// record the channel in CHANNEL_INFO
 pub fn ibc_channel_connect(
     deps: DepsMut,
@@ -207,7 +207,7 @@ fn enforce_order_and_version(
     Ok(())
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn ibc_channel_close(
     _deps: DepsMut,
     _env: Env,
@@ -218,7 +218,7 @@ pub fn ibc_channel_close(
     unimplemented!();
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 /// Check to see if we have any balance here
 /// We should not return an error if possible, but rather an acknowledgement of failure
 pub fn ibc_packet_receive(
@@ -333,6 +333,24 @@ fn handle_ibc_packet_receive_native_remote_chain(
     // key in form transfer/channel-0/foo
     let ibc_denom = get_key_ics20_ibc_denom(&packet.dest.port_id, &packet.dest.channel_id, denom);
 
+    let cw20_mapping = CW20_ISC20_DENOM
+        .load(storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
+
+    let native_allow_contract = NATIVE_ALLOW_CONTRACT.load(storage)?;
+    let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
+
+    // send token to the custom contract for further handling
+    let cosmos_msg = Cw20Ics20ReceiveMsg {
+        receiver: msg.receiver.clone(),
+        token: to_send,
+        from_decimals: cw20_mapping.remote_decimals,
+        memo: msg.memo.clone(),
+    }
+    .into_cosmos_msg(native_allow_contract.to_string())?;
+
+    let submsg = SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID);
+
     increase_channel_balance(
         storage,
         &packet.dest.channel_id,
@@ -347,24 +365,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         amount: msg.amount,
     };
     REPLY_ARGS.save(storage, &reply_args)?;
-
-    let cw20_mapping = CW20_ISC20_DENOM
-        .load(storage, &ibc_denom)
-        .map_err(|_| ContractError::NotOnMappingList {})?;
-
-    let native_allow_contract = NATIVE_ALLOW_CONTRACT.load(storage)?;
-    let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
-
-    // send token to the custom contract for further handling
-    let cosmos_msg = Cw20Ics20ReceiveMsg {
-        receiver: msg.receiver.clone(),
-        token: to_send,
-        from_decimals: cw20_mapping.remote_decimals,
-        data: packet.data.clone(),
-    }
-    .into_cosmos_msg(native_allow_contract.to_string())?;
-
-    let submsg = SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID);
 
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
@@ -397,7 +397,7 @@ fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractE
     }
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 /// check if success or failure and update balance, or return funds
 pub fn ibc_packet_ack(
     deps: DepsMut,
@@ -414,7 +414,7 @@ pub fn ibc_packet_ack(
     }
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 /// return fund to original sender (same as failure in ibc_packet_ack)
 pub fn ibc_packet_timeout(
     deps: DepsMut,

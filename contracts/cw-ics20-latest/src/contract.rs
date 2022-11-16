@@ -27,7 +27,7 @@ use cw_utils::{maybe_addr, nonpayable, one_coin};
 const CONTRACT_NAME: &str = "crates.io:cw20-ics20";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn instantiate(
     mut deps: DepsMut,
     _env: Env,
@@ -57,7 +57,7 @@ pub fn instantiate(
     Ok(Response::default())
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -244,7 +244,8 @@ pub fn execute_transfer_back_to_remote_chain(
     // send response
     let res = Response::new()
         .add_message(msg)
-        .add_attribute("action", "transfer_back_to_native_chain")
+        .add_attribute("action", "transfer")
+        .add_attribute("type", "transfer_back_to_remote_chain")
         .add_attribute("sender", &packet.sender)
         .add_attribute("receiver", &packet.receiver)
         .add_attribute("denom", &packet.denom)
@@ -343,7 +344,7 @@ pub fn execute_update_native_allow_contract(
     Ok(res)
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
     // we don't need to save anything if migrating from the same version
     if msg.default_gas_limit.is_some() {
@@ -356,7 +357,7 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
     Ok(Response::new())
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Port {} => to_binary(&query_port(deps)?),

@@ -46,7 +46,7 @@ oraid tx wasm execute mars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn
 
 
 # migrate contract
-./scripts/migrate_contract.sh .mars/cw20-ics20.wasm mars1wug8sewp6cedgkmrmvhl3lf3tulagm9hnvy8p0rppz9yjw0g4wtqrhq5mn # migrate to test changing cw20 contract
+./scripts/migrate_contract.sh .mars/cw-ics20-latest.wasm mars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn7y4x6 # migrate to test changing cw20 contract
 ```
 
 ## start relayer
@@ -74,13 +74,19 @@ oraid tx ibc-transfer transfer transfer channel-0 mars15ez8l0c2qte2sa0a4xsdmaswy
 docker compose exec mars ash
 oraid query wasm contract-state smart mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 '{"balance":{"address":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
 
-# from mars to earth send back
-# send back command
-oraid tx wasm execute mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 '{"send":{"amount":"10000000","contract":"mars10pyejy66429refv3g35g2t7am0was7ya90pn2w","msg":"'$(echo '{"channel":"channel-0","remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp"}' | base64 -w 0)'"}}' --from $USER --chain-id $CHAIN_ID -y --keyring-backend test -b block
+```
+
+## test send back to remote chain
+
+```bash
+
+# update the native allow contract to admin so we dont need to call cross contract for testing
+oraid tx wasm execute mars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn7y4x6 '{"update_native_allow_contract":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}' --from duc --chain-id $CHAIN_ID -y --keyring-backend test -b block
+
+# call transfer back method
+oraid tx wasm execute mars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn7y4x6 '{"transfer_back_to_remote_chain":{"local_ibc_endpoint":{"port_id":"wasmmars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn7y4x6","channel_id":"channel-1"},"native_denom":"earth","remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp","amount":{"native":{"denom":"foobar","amount":"1"}},"original_sender":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}' --from mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq --chain-id $CHAIN_ID -y -b block --keyring-backend test
 ```
 
 # TODO:
 
 remove hard code & update dynamic logic for cw20-ics20. Now the demo is for prototype only (proof of concept)
-
-99999980000000

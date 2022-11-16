@@ -19,6 +19,9 @@ pub enum ExecuteMsg {
 }
 
 #[cw_serde]
+pub struct MigrateMsg {}
+
+#[cw_serde]
 #[derive(QueryResponses)]
 pub enum QueryMsg {}
 
@@ -26,7 +29,7 @@ pub const COUNT: Item<u128> = Item::new("count");
 
 // version info for migration info
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn instantiate(
     mut deps: DepsMut,
     _env: Env,
@@ -37,7 +40,7 @@ pub fn instantiate(
     Ok(Response::default())
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -48,13 +51,23 @@ pub fn execute(
         ExecuteMsg::IbcWasmReceive(msg) => {
             let count = COUNT.load(deps.storage)?;
             COUNT.save(deps.storage, &(count + 1))?;
-            Ok(Response::default()
-                .add_attribute("receive_msg_decimals", msg.from_decimals.to_string()))
+
+            let mut res: Response = Response::default()
+                .add_attribute("receive_msg_decimals", msg.from_decimals.to_string());
+            if let Some(memo) = msg.memo {
+                res = res.add_attribute("memo", memo);
+            }
+            Ok(res)
         }
     }
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
+#[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     Ok(Binary::default())
+}
+
+#[entry_point]
+pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
+    Ok(Response::new())
 }

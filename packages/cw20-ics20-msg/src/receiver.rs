@@ -14,7 +14,7 @@ pub struct Cw20Ics20ReceiveMsg {
     /// the decimals of the native token, popular is 18 or 6
     pub from_decimals: u8,
     /// additional data from the memo of the IBC transfer packet
-    pub data: Binary,
+    pub memo: Option<String>,
 }
 
 impl Cw20Ics20ReceiveMsg {
