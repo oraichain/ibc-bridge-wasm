@@ -136,6 +136,10 @@ pub enum QueryMsg {
         limit: Option<u32>,
         order: Option<u8>,
     },
+    #[returns(Cw20PairQuery)]
+    Cw20MappingFromKey { key: String },
+    #[returns(Cw20PairQuery)]
+    Cw20MappingFromCw20Denom { cw20_denom: String },
 }
 
 #[cw_serde]

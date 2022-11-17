@@ -1,7 +1,7 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
 use cw_controllers::Admin;
-use cw_storage_plus::{Item, Map};
+use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, UniqueIndex};
 
 use crate::ContractError;
 
@@ -24,11 +24,28 @@ pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 /// custom contract that handles the native token sent from remote chain.
 pub const NATIVE_ALLOW_CONTRACT: Item<Addr> = Item::new("allow_native_custom_contract");
 
-// used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash for destination port & channel - transfer/channel-0/uatom for example; value - mapping data including cw20 denom of chain B, in form: cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 for example
-pub const CW20_ISC20_DENOM: Map<&str, Cw20MappingMetadata> = Map::new("cw20_ics20_mapping");
+// Cw20MappingMetadataIndexex structs keeps a list of indexers
+pub struct Cw20MappingMetadataIndexex<'a> {
+    // token.identifier
+    pub cw20_denom: UniqueIndex<'a, String, Cw20MappingMetadata>,
+}
 
-// this reverse map is used when the CW20_ISC20_DENOM is updated for simplicity (usually we can use indexing, but this is just for simplicity). TODO: change to indexing instead
-pub const CW20_ISC20_DENOM_REVERSE: Map<&str, String> = Map::new("cw20_ics20_mapping_reverse");
+// IndexList is just boilerplate code for fetching a struct's indexes
+impl<'a> IndexList<Cw20MappingMetadata> for Cw20MappingMetadataIndexex<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<Cw20MappingMetadata>> + '_> {
+        let v: Vec<&dyn Index<Cw20MappingMetadata>> = vec![&self.cw20_denom];
+        Box::new(v.into_iter())
+    }
+}
+
+// used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash for destination port & channel - transfer/channel-0/uatom for example; value - mapping data including cw20 denom of chain B, in form: cw20:mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 for example
+pub fn cw20_ics20_denoms<'a>(
+) -> IndexedMap<'a, &'a str, Cw20MappingMetadata, Cw20MappingMetadataIndexex<'a>> {
+    let indexes = Cw20MappingMetadataIndexex {
+        cw20_denom: UniqueIndex::new(|d| d.cw20_denom.clone(), "cw20_denom"),
+    };
+    IndexedMap::new("cw20_mapping_namespace", indexes)
+}
 
 #[cw_serde]
 #[derive(Default)]

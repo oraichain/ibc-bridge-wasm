@@ -12,9 +12,9 @@ use cosmwasm_std::{
 
 use crate::error::{ContractError, Never};
 use crate::state::{
-    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
+    cw20_ics20_denoms, get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST,
-    CHANNEL_INFO, CONFIG, CW20_ISC20_DENOM, NATIVE_ALLOW_CONTRACT, REPLY_ARGS,
+    CHANNEL_INFO, CONFIG, NATIVE_ALLOW_CONTRACT, REPLY_ARGS,
 };
 use cw20::Cw20ExecuteMsg;
 use cw20_ics20_msg::amount::Amount;
@@ -333,7 +333,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     // key in form transfer/channel-0/foo
     let ibc_denom = get_key_ics20_ibc_denom(&packet.dest.port_id, &packet.dest.channel_id, denom);
 
-    let cw20_mapping = CW20_ISC20_DENOM
+    let cw20_mapping = cw20_ics20_denoms()
         .load(storage, &ibc_denom)
         .map_err(|_| ContractError::NotOnMappingList {})?;
 

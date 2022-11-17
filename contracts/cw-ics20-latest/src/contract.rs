@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, IbcMsg, IbcQuery, MessageInfo, Order,
-    PortIdResponse, Response, StdResult,
+    PortIdResponse, Response, StdError, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -16,9 +16,9 @@ use crate::msg::{
     ListCw20MappingResponse, MigrateMsg, PortResponse, QueryMsg, TransferBackMsg, TransferMsg,
 };
 use crate::state::{
-    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance, AllowInfo, Config,
-    Cw20MappingMetadata, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_STATE, CONFIG, CW20_ISC20_DENOM,
-    CW20_ISC20_DENOM_REVERSE, NATIVE_ALLOW_CONTRACT,
+    cw20_ics20_denoms, get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
+    AllowInfo, Config, Cw20MappingMetadata, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_STATE, CONFIG,
+    NATIVE_ALLOW_CONTRACT,
 };
 use cw20_ics20_msg::amount::Amount;
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -184,7 +184,8 @@ pub fn execute_transfer_back_to_remote_chain(
     }
 
     // should be in form port/channel/denom
-    let ibc_denom = CW20_ISC20_DENOM_REVERSE.load(deps.storage, &msg.cw20_denom)?;
+    let cw20_mapping = get_cw20_mapping_from_cw20_denom(deps.as_ref(), msg.cw20_denom)?;
+    let ibc_denom = cw20_mapping.key;
     let allow_contract = NATIVE_ALLOW_CONTRACT.load(deps.storage)?;
 
     // needs to be the allow contract
@@ -301,18 +302,13 @@ pub fn execute_update_cw20_mapping_pair(
         &mapping_pair_msg.dest_ibc_endpoint.channel_id,
         &mapping_pair_msg.denom,
     );
-    CW20_ISC20_DENOM.update(deps.storage, &ibc_denom, |_| -> StdResult<_> {
+
+    cw20_ics20_denoms().update(deps.storage, &ibc_denom, |_| -> StdResult<_> {
         Ok(Cw20MappingMetadata {
             cw20_denom: mapping_pair_msg.cw20_denom.clone(),
             remote_decimals: mapping_pair_msg.remote_decimals,
         })
     })?;
-
-    CW20_ISC20_DENOM_REVERSE.update(
-        deps.storage,
-        &mapping_pair_msg.cw20_denom,
-        |_| -> StdResult<_> { Ok(ibc_denom) },
-    )?;
 
     let res = Response::new()
         .add_attribute("action", "update_cw20_ics20_mapping_pair")
@@ -374,6 +370,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             limit,
             order,
         } => to_binary(&list_cw20_mapping(deps, start_after, limit, order)?),
+        QueryMsg::Cw20MappingFromKey { key } => to_binary(&get_cw20_mapping_from_key(deps, key)?),
+        QueryMsg::Cw20MappingFromCw20Denom { cw20_denom } => {
+            to_binary(&get_cw20_mapping_from_cw20_denom(deps, cw20_denom)?)
+        }
         QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
     }
 }
@@ -482,10 +482,10 @@ fn list_cw20_mapping(
     order: Option<u8>,
 ) -> StdResult<ListCw20MappingResponse> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-    let mut allow_range = CW20_ISC20_DENOM.range(deps.storage, None, None, map_order(order));
+    let mut allow_range = cw20_ics20_denoms().range(deps.storage, None, None, map_order(order));
     if let Some(start_after) = start_after {
         let start = Some(Bound::exclusive::<&str>(&start_after));
-        allow_range = CW20_ISC20_DENOM.range(deps.storage, start, None, map_order(order));
+        allow_range = cw20_ics20_denoms().range(deps.storage, start, None, map_order(order));
     }
     let pairs = allow_range
         .take(limit)
@@ -497,6 +497,31 @@ fn list_cw20_mapping(
         })
         .collect::<StdResult<_>>()?;
     Ok(ListCw20MappingResponse { pairs })
+}
+
+fn get_cw20_mapping_from_key(deps: Deps, ibc_denom: String) -> StdResult<Cw20PairQuery> {
+    let result = cw20_ics20_denoms().load(deps.storage, &ibc_denom)?;
+    Ok(Cw20PairQuery {
+        key: ibc_denom,
+        cw20_map: result,
+    })
+}
+
+fn get_cw20_mapping_from_cw20_denom(deps: Deps, cw20_denom: String) -> StdResult<Cw20PairQuery> {
+    let cw20_mapping_result = cw20_ics20_denoms()
+        .idx
+        .cw20_denom
+        .item(deps.storage, cw20_denom)?;
+    if cw20_mapping_result.is_none() {
+        return Err(StdError::generic_err(
+            ContractError::NotOnMappingList.to_string(),
+        ));
+    }
+    let cw20_mapping = cw20_mapping_result.unwrap();
+    Ok(Cw20PairQuery {
+        key: String::from_utf8(cw20_mapping.0)?,
+        cw20_map: cw20_mapping.1,
+    })
 }
 
 fn map_order(order: Option<u8>) -> Order {
@@ -963,7 +988,7 @@ mod test {
                 channel_id: "not_registered_channel".to_string(),
             },
             denom: denom.to_string(),
-            cw20_denom: cw20_denom.to_string(),
+            cw20_denom: "random_cw20_denom".to_string(),
             remote_decimals: 18u8,
         };
 
