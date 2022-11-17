@@ -86,7 +86,3 @@ oraid tx wasm execute mars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn
 # call transfer back method
 oraid tx wasm execute mars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn7y4x6 '{"transfer_back_to_remote_chain":{"local_ibc_endpoint":{"port_id":"wasmmars1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrqn7y4x6","channel_id":"channel-1"},"native_denom":"earth","remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp","amount":{"native":{"denom":"foobar","amount":"1"}},"original_sender":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}' --from mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq --chain-id $CHAIN_ID -y -b block --keyring-backend test
 ```
-
-# TODO:
-
-remove hard code & update dynamic logic for cw20-ics20. Now the demo is for prototype only (proof of concept)
