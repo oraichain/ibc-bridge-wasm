@@ -514,7 +514,7 @@ fn get_cw20_mapping_from_cw20_denom(deps: Deps, cw20_denom: String) -> StdResult
         .item(deps.storage, cw20_denom)?;
     if cw20_mapping_result.is_none() {
         return Err(StdError::generic_err(
-            ContractError::NotOnMappingList.to_string(),
+            "cw20 mapping pair from the given cw20 denom is not found",
         ));
     }
     let cw20_mapping = cw20_mapping_result.unwrap();
