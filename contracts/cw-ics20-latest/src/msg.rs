@@ -50,7 +50,9 @@ pub enum ExecuteMsg {
 #[cw_serde]
 pub struct Cw20PairMsg {
     pub dest_ibc_endpoint: IbcEndpoint,
+    /// native denom of the remote chain. Eg: orai
     pub denom: String,
+    /// cw20 denom of the local chain. Eg: cw20:orai...
     pub cw20_denom: String,
     pub remote_decimals: u8,
 }

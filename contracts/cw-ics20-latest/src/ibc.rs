@@ -144,7 +144,9 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     reply_args.amount,
                 )?;
 
-                Ok(Response::new().set_data(ack_fail(err)))
+                Ok(Response::new()
+                    .set_data(ack_fail(err.clone()))
+                    .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
             }
         },
         ACK_FAILURE_ID => match reply.result {
@@ -153,7 +155,9 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
         },
         TRANSFER_BACK_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => Ok(Response::new().set_data(ack_fail(err))),
+            SubMsgResult::Err(err) => Ok(Response::new()
+                .set_data(ack_fail(err.clone()))
+                .add_attribute("error_refund_cw20_tokens", err)),
         },
         _ => Err(ContractError::UnknownReplyId { id: reply.id }),
     }
@@ -493,6 +497,8 @@ fn on_packet_failure(
         send_packet: packet.src,
     }
     .into_cosmos_msg(allow_contract)?;
+
+    // TODO: add gas limit to prevent reentrancy / DOS on the allow contract
     let submsg = SubMsg::reply_on_error(cosmos_msg, TRANSFER_BACK_FAILURE_ID);
 
     // similar event messages like ibctransfer module
