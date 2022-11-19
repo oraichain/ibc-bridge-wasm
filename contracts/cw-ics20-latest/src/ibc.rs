@@ -1,3 +1,4 @@
+use cw20_ics20_msg::ack_fail::TransferBackFailAckMsg;
 use cw20_ics20_msg::receiver::Cw20Ics20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -89,6 +90,7 @@ fn ack_fail(err: String) -> Binary {
 const RECEIVE_ID: u64 = 1337;
 const NATIVE_RECEIVE_ID: u64 = 1338;
 const ACK_FAILURE_ID: u64 = 0xfa17;
+const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
 #[entry_point]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
@@ -146,6 +148,10 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
             }
         },
         ACK_FAILURE_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            SubMsgResult::Err(err) => Ok(Response::new().set_data(ack_fail(err))),
+        },
+        TRANSFER_BACK_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new().set_data(ack_fail(err))),
         },
@@ -437,6 +443,7 @@ fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicRespon
         attr("receiver", &msg.receiver),
         attr("denom", &msg.denom),
         attr("amount", msg.amount),
+        attr("memo", msg.memo.unwrap_or_default()),
         attr("success", "true"),
     ];
 
@@ -451,14 +458,42 @@ fn on_packet_failure(
 ) -> Result<IbcBasicResponse, ContractError> {
     let msg: Ics20Packet = from_binary(&packet.data)?;
 
-    // undo the balance update on failure (as we pre-emptively added it on send)
-    reduce_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
+    // in case that the denom is not in the mapping list, meaning that it is not transferred back, but transfer originally from this local chain
+    if cw20_ics20_denoms()
+        .may_load(deps.storage, &msg.denom)?
+        .is_none()
+    {
+        // undo the balance update on failure (as we pre-emptively added it on send)
+        reduce_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
 
-    let to_send = Amount::from_parts(msg.denom.clone(), msg.amount);
-    let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-    let send = send_amount(to_send, msg.sender.clone(), None);
-    let mut submsg = SubMsg::reply_on_error(send, ACK_FAILURE_ID);
-    submsg.gas_limit = gas_limit;
+        let to_send = Amount::from_parts(msg.denom.clone(), msg.amount);
+        let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
+        let send = send_amount(to_send, msg.sender.clone(), None);
+        let mut submsg = SubMsg::reply_on_error(send, ACK_FAILURE_ID);
+        submsg.gas_limit = gas_limit;
+
+        // similar event messages like ibctransfer module
+        let res = IbcBasicResponse::new()
+            .add_submessage(submsg)
+            .add_attribute("action", "acknowledge")
+            .add_attribute("sender", msg.sender)
+            .add_attribute("receiver", msg.receiver)
+            .add_attribute("denom", msg.denom)
+            .add_attribute("amount", msg.amount.to_string())
+            .add_attribute("success", "false")
+            .add_attribute("error", err);
+
+        return Ok(res);
+    }
+
+    // since we reduce the channel's balance optimistically when transferring back, we increase it again when receiving failed ack
+    increase_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
+    let allow_contract = NATIVE_ALLOW_CONTRACT.load(deps.storage)?;
+    let cosmos_msg = TransferBackFailAckMsg {
+        send_packet: packet.src,
+    }
+    .into_cosmos_msg(allow_contract)?;
+    let submsg = SubMsg::reply_on_error(cosmos_msg, TRANSFER_BACK_FAILURE_ID);
 
     // similar event messages like ibctransfer module
     let res = IbcBasicResponse::new()
@@ -472,6 +507,8 @@ fn on_packet_failure(
         .add_attribute("error", err);
 
     Ok(res)
+
+    // send ack fail to custom contract for refund
 }
 
 pub fn send_amount(amount: Amount, recipient: String, msg: Option<Binary>) -> CosmosMsg {
