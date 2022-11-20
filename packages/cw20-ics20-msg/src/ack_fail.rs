@@ -1,11 +1,15 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{to_binary, Binary, CosmosMsg, IbcEndpoint, StdResult, WasmMsg};
+use cosmwasm_std::{to_binary, Binary, CosmosMsg, StdResult, WasmMsg};
+
+use crate::amount::Amount;
 
 /// Cw20ReceiveMsg should be de/serialized under `IbcWasmReceive()` variant in a ExecuteMsg
 #[cw_serde]
 
 pub struct TransferBackFailAckMsg {
-    pub send_packet: IbcEndpoint,
+    pub original_sender: String,
+    pub from_decimals: u8,
+    pub amount: Amount,
 }
 
 impl TransferBackFailAckMsg {

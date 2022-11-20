@@ -90,7 +90,7 @@ fn ack_fail(err: String) -> Binary {
 const RECEIVE_ID: u64 = 1337;
 const NATIVE_RECEIVE_ID: u64 = 1338;
 const ACK_FAILURE_ID: u64 = 0xfa17;
-const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
+// const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
 #[entry_point]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
@@ -153,12 +153,12 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new().set_data(ack_fail(err))),
         },
-        TRANSFER_BACK_FAILURE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => Ok(Response::new()
-                .set_data(ack_fail(err.clone()))
-                .add_attribute("error_refund_cw20_tokens", err)),
-        },
+        // TRANSFER_BACK_FAILURE_ID => match reply.result {
+        //     SubMsgResult::Ok(_) => Ok(Response::new()),
+        //     SubMsgResult::Err(err) => Ok(Response::new()
+        //         .set_data(ack_fail(err.clone()))
+        //         .add_attribute("error_refund_cw20_tokens", err)),
+        // },
         _ => Err(ContractError::UnknownReplyId { id: reply.id }),
     }
 }
@@ -447,7 +447,7 @@ fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicRespon
         attr("receiver", &msg.receiver),
         attr("denom", &msg.denom),
         attr("amount", msg.amount),
-        attr("memo", msg.memo.unwrap_or_default()),
+        attr("memo", msg.memo.unwrap_or("".to_string())),
         attr("success", "true"),
     ];
 
@@ -493,17 +493,21 @@ fn on_packet_failure(
     // since we reduce the channel's balance optimistically when transferring back, we increase it again when receiving failed ack
     increase_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
     let allow_contract = NATIVE_ALLOW_CONTRACT.load(deps.storage)?;
+
+    // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
+    let cw20_mapping = cw20_ics20_denoms().load(deps.storage, &msg.denom)?;
+
     let cosmos_msg = TransferBackFailAckMsg {
-        send_packet: packet.src,
+        original_sender: msg.sender.clone(),
+        amount: Amount::from_parts(cw20_mapping.cw20_denom, msg.amount),
+        from_decimals: cw20_mapping.remote_decimals,
     }
     .into_cosmos_msg(allow_contract)?;
 
-    // TODO: add gas limit to prevent reentrancy / DOS on the allow contract
-    let submsg = SubMsg::reply_on_error(cosmos_msg, TRANSFER_BACK_FAILURE_ID);
-
+    // we wont be using submessage here, because the message could fail when calling the allow_contract. We cannot trust allow_contract. If fail => revert whole tx, the acknowledgement will stay there and get retried by the relayer forever until the allow_contract gets fixed.
     // similar event messages like ibctransfer module
     let res = IbcBasicResponse::new()
-        .add_submessage(submsg)
+        .add_message(cosmos_msg)
         .add_attribute("action", "acknowledge")
         .add_attribute("sender", msg.sender)
         .add_attribute("receiver", msg.receiver)
