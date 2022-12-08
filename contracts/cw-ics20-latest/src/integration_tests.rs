@@ -8,9 +8,7 @@ use cosmwasm_std::{
     to_binary, Addr, Empty, IbcEndpoint, IbcPacket, IbcPacketReceiveMsg, Timestamp, Uint128,
     WasmMsg,
 };
-use cw20::{BalanceResponse, MinterResponse};
 use cw_multi_test::{App, Contract, ContractWrapper, Executor};
-use cw_utils::{Duration, Threshold};
 use receiver_contract;
 
 use crate::contract::{execute, instantiate, query};
@@ -74,7 +72,6 @@ fn initialize_basic_data_for_testings() -> (
     String,
     String,
     u8,
-    Addr,
 ) {
     let mut router = mock_app();
 
@@ -100,27 +97,15 @@ fn initialize_basic_data_for_testings() -> (
     let native_denom = "orai";
     let cw20_denom = "cw20:oraifoobarhelloworld";
     let remote_decimals = 18u8;
+    let cw20_decimals = 18u8;
 
     let receiver_contract_id = router.store_code(contract_receiver());
-
-    let receiver_init_msg = receiver_contract::contract::InitMsg {};
-    let receiver_contract = router
-        .instantiate_contract(
-            receiver_contract_id,
-            addr1.clone(),
-            &receiver_init_msg,
-            &[],
-            "receiver_contract",
-            None,
-        )
-        .unwrap();
 
     let cw20_ics20_init_msg = InitMsg {
         default_gas_limit: Some(20000000u64),
         default_timeout: DEFAULT_TIMEOUT,
         gov_contract: gov_cw20_ics20.to_string(),
         allowlist,
-        native_allow_contract: receiver_contract.clone(),
     };
 
     let cw20_ics20_contract = router
@@ -141,6 +126,7 @@ fn initialize_basic_data_for_testings() -> (
         denom: native_denom.to_string(),
         cw20_denom: cw20_denom.to_string(),
         remote_decimals,
+        cw20_decimals,
     });
     router
         .execute_contract(
@@ -160,7 +146,6 @@ fn initialize_basic_data_for_testings() -> (
         native_denom.to_string(),
         cw20_denom.to_string(),
         remote_decimals,
-        receiver_contract,
     )
 }
 

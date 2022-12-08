@@ -21,9 +21,6 @@ pub const CHANNEL_STATE: Map<(&str, &str), ChannelState> = Map::new("channel_sta
 /// Every cw20 contract we allow to be sent is stored here, possibly with a gas_limit
 pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 
-/// custom contract that handles the native token sent from remote chain.
-pub const NATIVE_ALLOW_CONTRACT: Item<Addr> = Item::new("allow_native_custom_contract");
-
 // Cw20MappingMetadataIndexex structs keeps a list of indexers
 pub struct Cw20MappingMetadataIndexex<'a> {
     // token.identifier
@@ -79,6 +76,7 @@ pub struct Cw20MappingMetadata {
     /// denom should be in form: cw20:...
     pub cw20_denom: String,
     pub remote_decimals: u8,
+    pub cw20_decimals: u8,
 }
 
 #[cw_serde]

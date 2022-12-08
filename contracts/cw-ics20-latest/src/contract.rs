@@ -18,7 +18,6 @@ use crate::msg::{
 use crate::state::{
     cw20_ics20_denoms, get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
     AllowInfo, Config, Cw20MappingMetadata, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_STATE, CONFIG,
-    NATIVE_ALLOW_CONTRACT,
 };
 use cw20_ics20_msg::amount::Amount;
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -44,8 +43,6 @@ pub fn instantiate(
     let admin = deps.api.addr_validate(&msg.gov_contract)?;
     ADMIN.set(deps.branch(), Some(admin))?;
 
-    // save init mapping pair & native allow list
-    NATIVE_ALLOW_CONTRACT.save(deps.storage, &msg.native_allow_contract)?;
     // add all allows
     for allowed in msg.allowlist {
         let contract = deps.api.addr_validate(&allowed.contract)?;
@@ -74,12 +71,6 @@ pub fn execute(
         ExecuteMsg::UpdateCw20MappingPair(msg) => {
             execute_update_cw20_mapping_pair(deps, env, info, msg)
         }
-        ExecuteMsg::UpdateNativeAllowContract(msg) => {
-            execute_update_native_allow_contract(deps, env, info, msg)
-        }
-        ExecuteMsg::TransferBackToRemoteChain(msg) => {
-            execute_transfer_back_to_remote_chain(deps, env, msg, info.sender)
-        }
         ExecuteMsg::Allow(allow) => execute_allow(deps, env, info, allow),
         ExecuteMsg::UpdateAdmin { admin } => {
             let admin = deps.api.addr_validate(&admin)?;
@@ -96,13 +87,26 @@ pub fn execute_receive(
 ) -> Result<Response, ContractError> {
     nonpayable(&info)?;
 
-    let msg: TransferMsg = from_binary(&wrapper.msg)?;
     let amount = Amount::Cw20(Cw20Coin {
         address: info.sender.to_string(),
         amount: wrapper.amount,
     });
     let api = deps.api;
-    return execute_transfer(deps, env, msg, amount, api.addr_validate(&wrapper.sender)?);
+
+    let msg_result: StdResult<TransferMsg> = from_binary(&wrapper.msg);
+    if msg_result.is_ok() {
+        let msg: TransferMsg = msg_result.unwrap();
+        return execute_transfer(deps, env, msg, amount, api.addr_validate(&wrapper.sender)?);
+    }
+
+    let msg: TransferBackMsg = from_binary(&wrapper.msg)?;
+    execute_transfer_back_to_remote_chain(
+        deps,
+        env,
+        msg,
+        amount,
+        api.addr_validate(&wrapper.sender)?,
+    )
 }
 
 pub fn execute_transfer(
@@ -177,21 +181,16 @@ pub fn execute_transfer_back_to_remote_chain(
     deps: DepsMut,
     env: Env,
     msg: TransferBackMsg,
+    amount: Amount,
     sender: Addr,
 ) -> Result<Response, ContractError> {
-    if msg.amount.is_empty() {
+    if amount.is_empty() {
         return Err(ContractError::NoFunds {});
     }
 
     // should be in form port/channel/denom
     let cw20_mapping = get_cw20_mapping_from_cw20_denom(deps.as_ref(), msg.cw20_denom)?;
     let ibc_denom = cw20_mapping.key;
-    let allow_contract = NATIVE_ALLOW_CONTRACT.load(deps.storage)?;
-
-    // needs to be the allow contract
-    if sender.ne(&allow_contract) {
-        return Err(ContractError::NotOnNativeAllowList);
-    }
 
     // ensure the requested channel is registered
     if !CHANNEL_INFO.has(deps.storage, &msg.local_ibc_endpoint.channel_id) {
@@ -208,12 +207,23 @@ pub fn execute_transfer_back_to_remote_chain(
     };
     // timeout is in nanoseconds
     let timeout = env.block.time.plus_seconds(timeout_delta);
+    // need to convert decimal of cw20 to remote decimal before transferring
+    let amount_remote = amount
+        .convert_cw20_to_remote(
+            cw20_mapping.cw20_map.remote_decimals,
+            cw20_mapping.cw20_map.cw20_decimals,
+        )
+        .map_err(|_| {
+            ContractError::Std(StdError::generic_err(
+                "Invalid zero amount when converting from cw20 to remote",
+            ))
+        })?;
 
     // build ics20 packet
     let packet = Ics20Packet::new(
-        msg.amount.amount(),
+        amount_remote.clone(),
         ibc_denom.clone(),
-        &msg.original_sender,
+        sender.as_str(),
         &msg.remote_address,
         msg.memo,
     );
@@ -224,7 +234,7 @@ pub fn execute_transfer_back_to_remote_chain(
         deps.storage,
         &msg.local_ibc_endpoint.channel_id,
         &ibc_denom,
-        msg.amount.amount(),
+        amount_remote,
     )?;
 
     // prepare ibc message
@@ -307,6 +317,7 @@ pub fn execute_update_cw20_mapping_pair(
         Ok(Cw20MappingMetadata {
             cw20_denom: mapping_pair_msg.cw20_denom.clone(),
             remote_decimals: mapping_pair_msg.remote_decimals,
+            cw20_decimals: mapping_pair_msg.cw20_decimals,
         })
     })?;
 
@@ -314,27 +325,6 @@ pub fn execute_update_cw20_mapping_pair(
         .add_attribute("action", "update_cw20_ics20_mapping_pair")
         .add_attribute("denom", mapping_pair_msg.denom)
         .add_attribute("new_cw20", mapping_pair_msg.cw20_denom.clone());
-    Ok(res)
-}
-
-/// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
-/// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
-pub fn execute_update_native_allow_contract(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    native_allow_address: String,
-) -> Result<Response, ContractError> {
-    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
-
-    NATIVE_ALLOW_CONTRACT.save(
-        deps.storage,
-        &deps.api.addr_validate(native_allow_address.as_str())?,
-    )?;
-
-    let res = Response::new()
-        .add_attribute("action", "update_native_allow_list")
-        .add_attribute("contract_address", native_allow_address);
     Ok(res)
 }
 
@@ -364,7 +354,6 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             limit,
             order,
         } => to_binary(&list_allowed(deps, start_after, limit, order)?),
-        QueryMsg::GetNativeAllowAddress {} => to_binary(&get_native_allow_address(deps)?),
         QueryMsg::Cw20Mapping {
             start_after,
             limit,
@@ -471,10 +460,6 @@ fn list_allowed(
     Ok(ListAllowedResponse { allow })
 }
 
-fn get_native_allow_address(deps: Deps) -> StdResult<Addr> {
-    NATIVE_ALLOW_CONTRACT.load(deps.storage)
-}
-
 fn list_cw20_mapping(
     deps: Deps,
     start_after: Option<String>,
@@ -561,8 +546,7 @@ mod test {
 
     #[test]
     fn setup_and_query() {
-        let custom_addr = "custom-addr";
-        let deps = setup(&["channel-3", "channel-7"], &[], &custom_addr);
+        let deps = setup(&["channel-3", "channel-7"], &[]);
 
         let raw_list = query(deps.as_ref(), mock_env(), QueryMsg::ListChannels {}).unwrap();
         let list_res: ListChannelsResponse = from_binary(&raw_list).unwrap();
@@ -599,8 +583,7 @@ mod test {
 
     #[test]
     fn test_update_cw20_mapping() {
-        let custom_addr = "custom-addr";
-        let mut deps = setup(&["channel-3", "channel-7"], &[], &custom_addr);
+        let mut deps = setup(&["channel-3", "channel-7"], &[]);
 
         let update = Cw20PairMsg {
             dest_ibc_endpoint: IbcEndpoint {
@@ -610,6 +593,7 @@ mod test {
             denom: "earth".to_string(),
             cw20_denom: "cw20:foobar".to_string(),
             remote_decimals: 18,
+            cw20_decimals: 18,
         };
 
         // works with proper funds
@@ -657,37 +641,9 @@ mod test {
     }
 
     #[test]
-    fn test_update_native_allow_contract() {
-        let mut deps = setup(&["channel-3", "channel-7"], &[], "xyz");
-
-        // works with proper funds
-        let msg = ExecuteMsg::UpdateNativeAllowContract("foobar".to_string());
-
-        // unauthorized case
-        let info = mock_info("foobar", &coins(1234567, "ucosm"));
-        let res_err = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap_err();
-        assert_eq!(res_err, ContractError::Admin(AdminError::NotAdmin {}));
-
-        let info = mock_info("gov", &coins(1234567, "ucosm"));
-        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // query to verify if the mapping has been updated
-        let mappings = query(
-            deps.as_ref(),
-            mock_env(),
-            QueryMsg::GetNativeAllowAddress {},
-        )
-        .unwrap();
-        let response: Addr = from_binary(&mappings).unwrap();
-        println!("response: {:?}", response);
-        assert_eq!(response, "foobar".to_string());
-    }
-
-    #[test]
     fn proper_checks_on_execute_native() {
         let send_channel = "channel-5";
-        let custom_addr = "custom-addr";
-        let mut deps = setup(&[send_channel, "channel-10"], &[], &custom_addr);
+        let mut deps = setup(&[send_channel, "channel-10"], &[]);
 
         let mut transfer = TransferMsg {
             channel: send_channel.to_string(),
@@ -749,12 +705,7 @@ mod test {
     fn proper_checks_on_execute_cw20() {
         let send_channel = "channel-15";
         let cw20_addr = "my-token";
-        let custom_addr = "custom-addr";
-        let mut deps = setup(
-            &["channel-3", send_channel],
-            &[(cw20_addr, 123456)],
-            &custom_addr,
-        );
+        let mut deps = setup(&["channel-3", send_channel], &[(cw20_addr, 123456)]);
 
         let transfer = TransferMsg {
             channel: send_channel.to_string(),
@@ -800,8 +751,7 @@ mod test {
     #[test]
     fn execute_cw20_fails_if_not_whitelisted_unless_default_gas_limit() {
         let send_channel = "channel-15";
-        let custom_addr = "custom-addr";
-        let mut deps = setup(&[send_channel], &[], &custom_addr);
+        let mut deps = setup(&[send_channel], &[]);
 
         let cw20_addr = "my-token";
         let transfer = TransferMsg {
@@ -876,7 +826,7 @@ mod test {
         let amount = 1234567u128;
         let cw20_denom = "cw20:token-addr";
         let local_channel = "channel-1234";
-        let mut deps = setup(&[remote_channel, local_channel], &[], &custom_addr);
+        let mut deps = setup(&[remote_channel, local_channel], &[]);
 
         let pair = Cw20PairMsg {
             dest_ibc_endpoint: IbcEndpoint {
@@ -886,6 +836,7 @@ mod test {
             denom: denom.to_string(),
             cw20_denom: cw20_denom.to_string(),
             remote_decimals: 18u8,
+            cw20_decimals: 18u8,
         };
 
         let _ = execute(
@@ -904,14 +855,17 @@ mod test {
             },
             remote_address: "foreign-address".to_string(),
             cw20_denom: cw20_denom.to_string(),
-            amount: Amount::from_parts(denom.to_string(), Uint128::from(amount)),
             timeout: Some(DEFAULT_TIMEOUT),
             memo: None,
-            original_sender: original_sender.to_string(),
         };
 
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: original_sender.to_string(),
+            amount: Uint128::from(amount),
+            msg: to_binary(&transfer).unwrap(),
+        });
+
         // insufficient funds case because we need to receive from remote chain first
-        let msg = ExecuteMsg::TransferBackToRemoteChain(transfer.clone());
         let info = mock_info("custom-addr", &[]);
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(res, ContractError::InsufficientFunds {});
@@ -925,20 +879,16 @@ mod test {
         ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
 
         // error cases
-        // recover transfer msg state
-        transfer.local_ibc_endpoint.channel_id = remote_channel.to_string();
-
-        // invalid sender case, not native allow contract
-        let invalid_msg = ExecuteMsg::TransferBackToRemoteChain(transfer.clone());
-        let invalid_info = mock_info("foobar", &[]);
-        let err = execute(deps.as_mut(), mock_env(), invalid_info, invalid_msg).unwrap_err();
-        assert_eq!(err, ContractError::NotOnNativeAllowList);
-
         // revert transfer state to correct state
         transfer.local_ibc_endpoint.channel_id = local_channel.to_string();
+        let invalid_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: original_sender.to_string(),
+            amount: Uint128::from(amount),
+            msg: to_binary(&transfer).unwrap(),
+        });
 
         // now we execute transfer back to remote chain
-        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap();
 
         assert_eq!(res.messages[0].gas_limit, None);
         assert_eq!(1, res.messages.len());
@@ -990,6 +940,7 @@ mod test {
             denom: denom.to_string(),
             cw20_denom: "random_cw20_denom".to_string(),
             remote_decimals: 18u8,
+            cw20_decimals: 18u8,
         };
 
         execute(
@@ -1001,7 +952,11 @@ mod test {
         .unwrap();
 
         transfer.local_ibc_endpoint.channel_id = "not_registered_channel".to_string();
-        let invalid_msg = ExecuteMsg::TransferBackToRemoteChain(transfer.clone());
+        let invalid_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: original_sender.to_string(),
+            amount: Uint128::from(amount),
+            msg: to_binary(&transfer).unwrap(),
+        });
         let err = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap_err();
         assert_eq!(
             err,

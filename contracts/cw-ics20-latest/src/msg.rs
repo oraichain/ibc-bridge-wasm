@@ -13,7 +13,6 @@ pub struct InitMsg {
     pub gov_contract: String,
     /// initial allowlist - all cw20 tokens we will send must be previously allowed by governance
     pub allowlist: Vec<AllowMsg>,
-    pub native_allow_contract: Addr,
     /// If set, contracts off the allowlist will run with this gas limit.
     /// If unset, will refuse to accept any contract off the allow list.
     pub default_gas_limit: Option<u64>,
@@ -36,9 +35,7 @@ pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
     /// This allows us to transfer *exactly one* native token
     Transfer(TransferMsg),
-    TransferBackToRemoteChain(TransferBackMsg),
     UpdateCw20MappingPair(Cw20PairMsg),
-    UpdateNativeAllowContract(String),
     /// This must be called by gov_contract, will allow a new cw20 token to be sent
     Allow(AllowMsg),
     /// Change the admin (must be called by current admin)
@@ -55,6 +52,7 @@ pub struct Cw20PairMsg {
     /// cw20 denom of the local chain. Eg: cw20:orai...
     pub cw20_denom: String,
     pub remote_decimals: u8,
+    pub cw20_decimals: u8,
 }
 
 /// This is the message we accept via Receive
@@ -83,10 +81,6 @@ pub struct TransferBackMsg {
     pub timeout: Option<u64>,
     /// metadata of the transfer to suit the new fungible token transfer
     pub memo: Option<String>,
-    /// native amount of the remote chain
-    pub amount: Amount,
-    /// Original sender that sends the cw20 token
-    pub original_sender: String,
 }
 
 /// This is the message we accept via Receive
@@ -131,7 +125,6 @@ pub enum QueryMsg {
         order: Option<u8>,
     },
     #[returns(Addr)]
-    GetNativeAllowAddress {},
     #[returns(ListCw20MappingResponse)]
     Cw20Mapping {
         start_after: Option<String>,

@@ -66,9 +66,6 @@ pub enum ContractError {
     #[error("You can only send cw20 tokens that have been explicitly allowed by governance")]
     NotOnAllowList,
 
-    #[error("You can only send native tokens to an address that have been explicitly allowed by governance")]
-    NotOnNativeAllowList,
-
     #[error(
         "You can only send native tokens that has a map to the corresponding cw20 address denom"
     )]

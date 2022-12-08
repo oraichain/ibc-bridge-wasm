@@ -57,7 +57,6 @@ pub fn add_channel(mut deps: DepsMut, channel_id: &str) {
 pub fn setup(
     channels: &[&str],
     allow: &[(&str, u64)],
-    native_allow: &str,
 ) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
     let mut deps = mock_dependencies();
 
@@ -75,7 +74,6 @@ pub fn setup(
         default_timeout: DEFAULT_TIMEOUT,
         gov_contract: "gov".to_string(),
         allowlist,
-        native_allow_contract: Addr::unchecked(native_allow),
     };
     let info = mock_info(&String::from("anyone"), &[]);
     let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();

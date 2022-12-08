@@ -1,5 +1,3 @@
-use cw20_ics20_msg::ack_fail::TransferBackFailAckMsg;
-use cw20_ics20_msg::receiver::Cw20Ics20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,14 +6,14 @@ use cosmwasm_std::{
     attr, entry_point, from_binary, to_binary, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
     IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
     IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
-    IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
+    IbcReceiveResponse, Reply, Response, StdError, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
 };
 
 use crate::error::{ContractError, Never};
 use crate::state::{
     cw20_ics20_denoms, get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST,
-    CHANNEL_INFO, CONFIG, NATIVE_ALLOW_CONTRACT, REPLY_ARGS,
+    CHANNEL_INFO, CONFIG, REPLY_ARGS,
 };
 use cw20::Cw20ExecuteMsg;
 use cw20_ics20_msg::amount::Amount;
@@ -347,17 +345,22 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .load(storage, &ibc_denom)
         .map_err(|_| ContractError::NotOnMappingList {})?;
 
-    let native_allow_contract = NATIVE_ALLOW_CONTRACT.load(storage)?;
     let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
-
-    // send token to the custom contract for further handling
-    let cosmos_msg = Cw20Ics20ReceiveMsg {
-        receiver: msg.receiver.clone(),
-        token: to_send,
-        from_decimals: cw20_mapping.remote_decimals,
-        memo: msg.memo.clone(),
+    let cosmos_msg: CosmosMsg = WasmMsg::Execute {
+        contract_addr: to_send.raw_denom(),
+        msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
+            recipient: msg.receiver.clone(),
+            amount: to_send
+                .convert_remote_to_cw20(cw20_mapping.remote_decimals, cw20_mapping.cw20_decimals)
+                .map_err(|_| {
+                    ContractError::Std(StdError::generic_err(
+                        "Invalid zero amount when converting from remote to cw20",
+                    ))
+                })?,
+        })?,
+        funds: vec![],
     }
-    .into_cosmos_msg(native_allow_contract.to_string())?;
+    .into();
 
     let submsg = SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID);
 
@@ -441,15 +444,18 @@ fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicRespon
     let msg: Ics20Packet = from_binary(&packet.data)?;
 
     // similar event messages like ibctransfer module
-    let attributes = vec![
+    let mut attributes = vec![
         attr("action", "acknowledge"),
         attr("sender", &msg.sender),
         attr("receiver", &msg.receiver),
         attr("denom", &msg.denom),
         attr("amount", msg.amount),
-        attr("memo", msg.memo.unwrap_or("".to_string())),
         attr("success", "true"),
     ];
+
+    if let Some(memo) = msg.memo {
+        attributes.push(attr("memo", memo));
+    }
 
     Ok(IbcBasicResponse::new().add_attributes(attributes))
 }
@@ -492,17 +498,26 @@ fn on_packet_failure(
 
     // since we reduce the channel's balance optimistically when transferring back, we increase it again when receiving failed ack
     increase_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
-    let allow_contract = NATIVE_ALLOW_CONTRACT.load(deps.storage)?;
 
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
     let cw20_mapping = cw20_ics20_denoms().load(deps.storage, &msg.denom)?;
-
-    let cosmos_msg = TransferBackFailAckMsg {
-        original_sender: msg.sender.clone(),
-        amount: Amount::from_parts(cw20_mapping.cw20_denom, msg.amount),
-        from_decimals: cw20_mapping.remote_decimals,
+    let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
+    // re-fund for the sender the amount that cannot be transferred
+    let cosmos_msg: CosmosMsg = WasmMsg::Execute {
+        contract_addr: to_send.raw_denom(),
+        msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
+            recipient: msg.sender.clone(),
+            amount: to_send
+                .convert_remote_to_cw20(cw20_mapping.remote_decimals, cw20_mapping.cw20_decimals)
+                .map_err(|_| {
+                    ContractError::Std(StdError::generic_err(
+                        "Invalid zero amount when converting from remote to cw20",
+                    ))
+                })?,
+        })?,
+        funds: vec![],
     }
-    .into_cosmos_msg(allow_contract)?;
+    .into();
 
     // we wont be using submessage here, because the message could fail when calling the allow_contract. We cannot trust allow_contract. If fail => revert whole tx, the acknowledgement will stay there and get retried by the relayer forever until the allow_contract gets fixed.
     // similar event messages like ibctransfer module
@@ -652,13 +667,11 @@ mod test {
     fn send_receive_cw20() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
-        let custom_addr = "custom-addr";
         let cw20_denom = "cw20:token-addr";
         let gas_limit = 1234567;
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
-            &custom_addr,
         );
 
         // prepare some mock packets
@@ -741,8 +754,7 @@ mod test {
     #[test]
     fn send_receive_native() {
         let send_channel = "channel-9";
-        let custom_addr = "custom-addr";
-        let mut deps = setup(&["channel-1", "channel-7", send_channel], &[], &custom_addr);
+        let mut deps = setup(&["channel-1", "channel-7", send_channel], &[]);
 
         let denom = "uatom";
 
@@ -803,9 +815,8 @@ mod test {
     fn check_gas_limit_handles_all_cases() {
         let send_channel = "channel-9";
         let allowed = "foobar";
-        let custom_addr = "custom-addr";
         let allowed_gas = 777666;
-        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)], &custom_addr);
+        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
 
         // allow list will get proper gas
         let limit = check_gas_limit(deps.as_ref(), &Amount::cw20(500, allowed)).unwrap();
@@ -937,7 +948,6 @@ mod test {
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
-            &custom_addr,
         );
 
         // prepare some mock packets
@@ -965,7 +975,6 @@ mod test {
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
-            &custom_addr,
         );
 
         let pair = Cw20PairMsg {
@@ -976,6 +985,7 @@ mod test {
             denom: denom.to_string(),
             cw20_denom: cw20_denom.to_string(),
             remote_decimals: 18u8,
+            cw20_decimals: 18u8,
         };
 
         let _ = execute(
