@@ -316,7 +316,6 @@ dependencies = [
  "cw2 0.16.0",
  "cw20",
  "cw20-ics20-msg",
- "receiver-contract",
  "schemars",
  "semver",
  "serde",
@@ -616,21 +615,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
-]
-
-[[package]]
-name = "receiver-contract"
-version = "0.16.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cw-storage-plus",
- "cw-utils",
- "cw20-ics20-msg",
- "schemars",
- "semver",
- "serde",
- "thiserror",
 ]
 
 [[package]]

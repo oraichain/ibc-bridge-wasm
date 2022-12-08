@@ -9,7 +9,6 @@ use cosmwasm_std::{
     WasmMsg,
 };
 use cw_multi_test::{App, Contract, ContractWrapper, Executor};
-use receiver_contract;
 
 use crate::contract::{execute, instantiate, query};
 use crate::msg::ExecuteMsg;
@@ -20,15 +19,6 @@ fn mock_app() -> App {
 
 pub fn contract_cw20_ics20_latest() -> Box<dyn Contract<Empty>> {
     let contract = ContractWrapper::new(execute, instantiate, query).with_reply(reply);
-    Box::new(contract)
-}
-
-pub fn contract_receiver() -> Box<dyn Contract<Empty>> {
-    let contract = ContractWrapper::new(
-        receiver_contract::contract::execute,
-        receiver_contract::contract::instantiate,
-        receiver_contract::contract::query,
-    );
     Box::new(contract)
 }
 
@@ -98,8 +88,6 @@ fn initialize_basic_data_for_testings() -> (
     let cw20_denom = "cw20:oraifoobarhelloworld";
     let remote_decimals = 18u8;
     let cw20_decimals = 18u8;
-
-    let receiver_contract_id = router.store_code(contract_receiver());
 
     let cw20_ics20_init_msg = InitMsg {
         default_gas_limit: Some(20000000u64),

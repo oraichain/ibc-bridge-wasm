@@ -33,4 +33,3 @@ thiserror = { version = "1.0.23" }
 
 [dev-dependencies]
 cw-multi-test = "0.16.0"
-receiver-contract = { path = "../receiver-contract", features = ["library"] }
