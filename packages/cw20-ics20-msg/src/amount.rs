@@ -77,7 +77,7 @@ impl Amount {
 }
 
 impl Amount {
-    fn div_ratio_decimal(&self, ratio: Decimal) -> StdResult<Uint128> {
+    fn mul_ratio_decimal(&self, ratio: Decimal) -> StdResult<Uint128> {
         Decimal::one()
             .checked_mul(ratio)
             .map_err(|err| StdError::generic_err(err.to_string()))
@@ -89,7 +89,7 @@ impl Amount {
         remote_decimals: u8,
         cw20_decimals: u8,
     ) -> StdResult<Uint128> {
-        self.div_ratio_decimal(Decimal::from_ratio(
+        self.mul_ratio_decimal(Decimal::from_ratio(
             10u128.pow(cw20_decimals as u32),
             10u128.pow(remote_decimals as u32),
         ))
@@ -100,7 +100,7 @@ impl Amount {
         remote_decimals: u8,
         cw20_decimals: u8,
     ) -> StdResult<Uint128> {
-        self.div_ratio_decimal(Decimal::from_ratio(
+        self.mul_ratio_decimal(Decimal::from_ratio(
             10u128.pow(remote_decimals as u32),
             10u128.pow(cw20_decimals as u32),
         ))
