@@ -61,7 +61,7 @@ hermes --config config.toml start
 ```bash
 # from earth to mars on channel
 docker-compose exec earth ash
-oraid tx ibc-transfer transfer transfer channel-0 mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq 1earth --from duc --chain-id Earth -y --keyring-backend test -b block
+oraid tx ibc-transfer transfer transfer channel-0 mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq 1uusd --from duc --chain-id Earth -y --keyring-backend test -b block
 # check mars balance
 docker-compose exec mars ash
 oraid query wasm contract-state smart mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"balance":{"address":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
@@ -78,7 +78,7 @@ oraid query wasm contract-state smart mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcm
 oraid tx wasm execute mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde '{"update_native_allow_contract":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}' --from duc --chain-id $CHAIN_ID -y --keyring-backend test -b block
 
 # call transfer back method
-oraid tx wasm execute mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"send":{"amount":"1","contract":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","msg":"'$(echo '{"local_ibc_endpoint":{"port_id":"wasm:mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","channel_id":"channel-0"},"remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp"}' | base64 -w 0)'"}}' --from mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq --chain-id $CHAIN_ID -y -b block --keyring-backend test
+oraid tx wasm execute mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"send":{"amount":"1","contract":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","msg":"'$(echo '{"local_ibc_endpoint":{"port_id":"wasm:mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","channel_id":"channel-0"},"remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp"}' | base64 -w 0)'"}}' --from duc --chain-id $CHAIN_ID -y -b block --keyring-backend test --gas 2000000
 ```
 
 # TODO: draw a threat model for this
