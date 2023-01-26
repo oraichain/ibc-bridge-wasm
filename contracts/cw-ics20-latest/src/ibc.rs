@@ -1,22 +1,20 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     attr, entry_point, from_binary, to_binary, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
     IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
     IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
-    IbcReceiveResponse, Reply, Response, StdError, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
+    IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
 };
+use oraiswap::asset::AssetInfo;
 
 use crate::error::{ContractError, Never};
 use crate::state::{
-    cw20_ics20_denoms, get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
+    get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST,
     CHANNEL_INFO, CONFIG, REPLY_ARGS,
 };
 use cw20::Cw20ExecuteMsg;
-use cw20_ics20_msg::amount::Amount;
+use cw20_ics20_msg::amount::{convert_remote_to_local, Amount};
 
 pub const ICS20_VERSION: &str = "ics20-1";
 pub const ICS20_ORDERING: IbcOrder = IbcOrder::Unordered;
@@ -24,7 +22,7 @@ pub const ICS20_ORDERING: IbcOrder = IbcOrder::Unordered;
 /// The format for sending an ics20 packet.
 /// Proto defined here: https://github.com/cosmos/cosmos-sdk/blob/v0.42.0/proto/ibc/applications/transfer/v1/transfer.proto#L11-L20
 /// This is compatible with the JSON serialization
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema, Debug, Default)]
+#[cw_serde]
 pub struct Ics20Packet {
     /// amount of tokens to transfer is encoded as a string, but limited to u64 max
     pub amount: Uint128,
@@ -56,7 +54,7 @@ impl Ics20Packet {
     }
 
     pub fn validate(&self) -> Result<(), ContractError> {
-        if self.amount.u128() > (u64::MAX as u128) {
+        if self.amount.u128() > (u128::MAX as u128) {
             Err(ContractError::AmountOverflow {})
         } else {
             Ok(())
@@ -340,28 +338,19 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     // key in form transfer/channel-0/foo
     let ibc_denom = get_key_ics20_ibc_denom(&packet.dest.port_id, &packet.dest.channel_id, denom);
-
-    let cw20_mapping = cw20_ics20_denoms()
+    let pair_mapping = ics20_denoms()
         .load(storage, &ibc_denom)
         .map_err(|_| ContractError::NotOnMappingList {})?;
 
-    let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
-    let cosmos_msg: CosmosMsg = WasmMsg::Execute {
-        contract_addr: to_send.raw_denom(),
-        msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
-            recipient: msg.receiver.clone(),
-            amount: to_send
-                .convert_remote_to_cw20(cw20_mapping.remote_decimals, cw20_mapping.cw20_decimals)
-                .map_err(|_| {
-                    ContractError::Std(StdError::generic_err(
-                        "Invalid zero amount when converting from remote to cw20",
-                    ))
-                })?,
-        })?,
-        funds: vec![],
-    }
-    .into();
-
+    let to_send = Amount::from_parts(
+        parse_asset_info_denom(pair_mapping.asset_info),
+        convert_remote_to_local(
+            msg.amount,
+            pair_mapping.remote_decimals,
+            pair_mapping.asset_info_decimals,
+        )?,
+    );
+    let cosmos_msg = send_amount(to_send, msg.receiver.clone(), None);
     let submsg = SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID);
 
     increase_channel_balance(
@@ -444,7 +433,7 @@ fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicRespon
     let msg: Ics20Packet = from_binary(&packet.data)?;
 
     // similar event messages like ibctransfer module
-    let mut attributes = vec![
+    let attributes = vec![
         attr("action", "acknowledge"),
         attr("sender", &msg.sender),
         attr("receiver", &msg.receiver),
@@ -453,9 +442,9 @@ fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicRespon
         attr("success", "true"),
     ];
 
-    if let Some(memo) = msg.memo {
-        attributes.push(attr("memo", memo));
-    }
+    // if let Some(memo) = msg.memo {
+    //     attributes.push(attr("memo", memo));
+    // }
 
     Ok(IbcBasicResponse::new().add_attributes(attributes))
 }
@@ -469,10 +458,7 @@ fn on_packet_failure(
     let msg: Ics20Packet = from_binary(&packet.data)?;
 
     // in case that the denom is not in the mapping list, meaning that it is not transferred back, but transfer originally from this local chain
-    if cw20_ics20_denoms()
-        .may_load(deps.storage, &msg.denom)?
-        .is_none()
-    {
+    if ics20_denoms().may_load(deps.storage, &msg.denom)?.is_none() {
         // undo the balance update on failure (as we pre-emptively added it on send)
         reduce_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
 
@@ -500,24 +486,16 @@ fn on_packet_failure(
     increase_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
 
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
-    let cw20_mapping = cw20_ics20_denoms().load(deps.storage, &msg.denom)?;
-    let to_send = Amount::from_parts(cw20_mapping.cw20_denom, msg.amount);
-    // re-fund for the sender the amount that cannot be transferred
-    let cosmos_msg: CosmosMsg = WasmMsg::Execute {
-        contract_addr: to_send.raw_denom(),
-        msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
-            recipient: msg.sender.clone(),
-            amount: to_send
-                .convert_remote_to_cw20(cw20_mapping.remote_decimals, cw20_mapping.cw20_decimals)
-                .map_err(|_| {
-                    ContractError::Std(StdError::generic_err(
-                        "Invalid zero amount when converting from remote to cw20",
-                    ))
-                })?,
-        })?,
-        funds: vec![],
-    }
-    .into();
+    let pair_mapping = ics20_denoms().load(deps.storage, &msg.denom)?;
+    let to_send = Amount::from_parts(
+        parse_asset_info_denom(pair_mapping.asset_info),
+        convert_remote_to_local(
+            msg.amount,
+            pair_mapping.remote_decimals,
+            pair_mapping.asset_info_decimals,
+        )?,
+    );
+    let cosmos_msg = send_amount(to_send, msg.sender.clone(), None);
 
     // we wont be using submessage here, because the message could fail when calling the allow_contract. We cannot trust allow_contract. If fail => revert whole tx, the acknowledgement will stay there and get retried by the relayer forever until the allow_contract gets fixed.
     // similar event messages like ibctransfer module
@@ -565,16 +543,28 @@ pub fn send_amount(amount: Amount, recipient: String, msg: Option<Binary>) -> Co
     }
 }
 
+pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
+    match asset_info {
+        AssetInfo::Token { contract_addr } => format!("cw20:{}", contract_addr.to_string()),
+        AssetInfo::NativeToken { denom } => denom,
+    }
+}
+
+pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
+    format!("wasm.{}", contract_addr)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::test_helpers::*;
 
     use crate::contract::{execute, migrate, query_channel};
-    use crate::msg::{Cw20PairMsg, ExecuteMsg, MigrateMsg, TransferMsg};
+    use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg, UpdatePairMsg};
     use cosmwasm_std::testing::{mock_env, mock_info};
-    use cosmwasm_std::{coins, to_vec, IbcEndpoint, IbcMsg, IbcTimeout, Timestamp};
+    use cosmwasm_std::{coins, to_vec, Addr, IbcEndpoint, IbcMsg, IbcTimeout, Timestamp};
     use cw20::Cw20ReceiveMsg;
+    use oraiswap::asset::AssetInfo;
 
     #[test]
     fn check_ack_json() {
@@ -707,7 +697,6 @@ mod test {
             amount: Uint128::new(987654321),
             sender: "local-sender".to_string(),
             receiver: "remote-rcpt".to_string(),
-
             memo: None,
         };
         let timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
@@ -859,7 +848,6 @@ mod test {
             amount: amount.into(),
             sender: "remote-sender".to_string(),
             receiver: receiver.to_string(),
-
             memo: None,
         };
         IbcPacket::new(
@@ -960,7 +948,7 @@ mod test {
         // assert_eq!(res, StdError)
         assert_eq!(
             res.attributes.last().unwrap().value,
-            "You can only send native tokens that has a map to the corresponding cw20 address denom"
+            "You can only send native tokens that has a map to the corresponding asset info"
         );
     }
 
@@ -970,29 +958,28 @@ mod test {
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
         let denom = "uatom";
-        let cw20_denom = "cw20:token-addr";
+        let asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("cw20:token-addr"),
+        };
         let gas_limit = 1234567;
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
         );
 
-        let pair = Cw20PairMsg {
-            dest_ibc_endpoint: IbcEndpoint {
-                port_id: CONTRACT_PORT.to_string(),
-                channel_id: send_channel.to_string(),
-            },
+        let pair = UpdatePairMsg {
+            local_channel_id: send_channel.to_string(),
             denom: denom.to_string(),
-            cw20_denom: cw20_denom.to_string(),
+            asset_info: asset_info,
             remote_decimals: 18u8,
-            cw20_decimals: 18u8,
+            asset_info_decimals: 18u8,
         };
 
         let _ = execute(
             deps.as_mut(),
             mock_env(),
             mock_info("gov", &[]),
-            ExecuteMsg::UpdateCw20MappingPair(pair),
+            ExecuteMsg::UpdateMappingPair(pair),
         )
         .unwrap();
 
