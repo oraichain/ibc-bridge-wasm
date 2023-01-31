@@ -26,18 +26,22 @@ function deployAndGetAddress(deployCommand) {
  * @param {*} createChannelResult - a string including the new channel created
  */
 function parseChannelId(createChannelResult) {
-    const channelSearchString = "channel-";
-    const firstIndexOf = createChannelResult.indexOf(channelSearchString);
-    let lastIndexOf = -1;
-    for (let i = firstIndexOf; i < createChannelResult.length; i++) {
-        // first apprerance should look like this: INFO ThreadId(01) 🎊  Earth => OpenInitChannel(OpenInit { port_id: transfer, channel_id: channel-0, connection_id: None, counterparty_port_id: wasm.mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde, counterparty_channel_id: None }) at height 0-35
-        // then we need to find the character ',' to get the channel id
-        if (createChannelResult[i] === ',')
-            lastIndexOf = i;
-    }
-    if (lastIndexOf === -1) throw "Cannot parse channel id"
-    // lastIndexOf - 1 because we remove ',' character
-    return createChannelResult.substring(firstIndexOf, lastIndexOf - 1);
+    return createChannelResult.match(/channel-\d+/)[0];
+}
+
+function spawnHermes() {
+    const hermesSpawn = cp.spawn('docker-compose', ["exec", "-T", "hermes", "bash", "-c", "hermes --config config.toml start"]);
+    hermesSpawn.stdout.on('data', (data) => {
+        console.log(`stdout: ${data}`);
+    });
+
+    hermesSpawn.stderr.on('data', (data) => {
+        console.error(`stderr: ${data}`);
+    });
+
+    hermesSpawn.on('close', (code) => {
+        console.log(`child process exited with code ${code}`);
+    });
 }
 
 /**
@@ -73,7 +77,7 @@ async function start() {
         assert.notStrictEqual(cwIcs20Address, "");
 
         // deploy cw20 tokens
-        const cw20Address = deployAndGetAddress(`docker-compose exec -T mars ash -c './scripts/deploy_contract.sh .mars/cw20-base.wasm "cw20-base" ${parseDockerMessage({ "name": "EARTH", "symbol": "EARTH", "decimals": 6, "initial_balances": [{ "address": cwIcs20Address, "amount": "100000000000000" }], "mint": { "minter": mainMarsAddress } })}'`);
+        const cw20Address = deployAndGetAddress(`docker-compose exec -T mars ash -c './scripts/deploy_contract.sh .mars/cw20-base.wasm "cw20-base" ${parseDockerMessage({ "name": "EARTH", "symbol": "EARTH", "decimals": 6, "initial_balances": [{ "address": cwIcs20Address, "amount": "100" }], "mint": { "minter": mainMarsAddress } })}'`);
 
         // after deploy the ics20 address, the address must not be empty
         assert.notStrictEqual(cw20Address, "");
@@ -92,12 +96,27 @@ async function start() {
         const channelId = parseChannelId(hermesCreateChannelResult);
         console.log("hermes new channel: ", channelId);
 
-        // create new mapping pair
-        const updateNewMappingPairResult = JSON.parse(Buffer.from(cp.execSync(`docker-compose exec -T mars ash -c 'oraid tx wasm execute ${cwIcs20Address} ${parseDockerMessage({ "update_mapping_pair": { "local_channel_id": "channel-0", "denom": "uusd", "asset_info": { "token": { "contract_addr": cw20Address } }, "remote_decimals": 6, "asset_info_decimals": 6 } })} -y --from $USER --chain-id $CHAIN_ID --keyring-backend test -b block --output json'`)));
+        // create new cw20 mapping pair
+        let updateNewMappingPairResult = JSON.parse(Buffer.from(cp.execSync(`docker-compose exec -T mars ash -c 'oraid tx wasm execute ${cwIcs20Address} ${parseDockerMessage({ "update_mapping_pair": { "local_channel_id": channelId, "denom": "uusd", "asset_info": { "token": { "contract_addr": cw20Address } }, "remote_decimals": 6, "asset_info_decimals": 6 } })} -y --from $USER --chain-id $CHAIN_ID --keyring-backend test -b block --output json'`)));
         console.log("update new mapping pair result: ", updateNewMappingPairResult);
 
         // the update mapping pair tx must succeed before we can do anything else
         assert.deepEqual(updateNewMappingPairResult.code, 0);
+
+        // create new native mapping pair
+        updateNewMappingPairResult = JSON.parse(Buffer.from(cp.execSync(`docker-compose exec -T mars ash -c 'oraid tx wasm execute ${cwIcs20Address} ${parseDockerMessage({ "update_mapping_pair": { "local_channel_id": channelId, "denom": "earth", "asset_info": { "native_token": { "denom": "mars" } }, "remote_decimals": 6, "asset_info_decimals": 6 } })} -y --from $USER --chain-id $CHAIN_ID --keyring-backend test -b block --output json'`)));
+        console.log("update new mapping pair result: ", updateNewMappingPairResult);
+
+        // the update mapping pair tx must succeed before we can do anything else
+        assert.deepEqual(updateNewMappingPairResult.code, 0);
+
+        // write all deployed data to a json file so that other tests can read and use.
+        fs.writeFile(path.join(__dirname, 'test-data.json'), JSON.stringify({ cwIcs20Address, cw20Address, channelId }), (err) => {
+            if (err) throw err;
+        });
+
+        // start hermes
+        spawnHermes();
 
     } catch (error) {
         console.log("error when running the script: ", error);
