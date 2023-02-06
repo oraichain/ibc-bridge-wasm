@@ -3,7 +3,7 @@ const path = require("path");
 
 const { execSync } = require('child_process');
 const assert = require('assert');
-const { queryNativeBalance, queryContractState, executeContract } = require('./utils');
+const { queryNativeBalance, queryContractState, executeContract, spawnHermes } = require('./utils');
 
 // We have this address's key, so it is used to create txs 
 const mainMarsAddress = "mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq";
@@ -41,6 +41,9 @@ async function start() {
         console.log("test ibc transfer from cw20 to native success");
         await testIbcTransferCw20SuccessShouldIncreaseNativeBalanceRemoteToLocal(testData);
 
+        console.log("test transfer native fail out channel balance larger than in channel balance should refund");
+        await testIbcTransferNativeFailOutChannelBalanceLargerThanInChannelBalanceShouldRefundTokensLocalToRemote(testData);
+
         console.log("test done!");
 
     } catch (error) {
@@ -59,7 +62,7 @@ function parseDockerMessage(msg) {
 }
 
 async function sleep(sleepTime = 20000) {
-    console.log("Sleeping to wait for IBC relayer to do its job ...");
+    console.log("Taking a nap ...");
     return await new Promise((resolve) => setTimeout(resolve, sleepTime)); // 20000ms = 20s = 4 blocks, should finish IBC transactions by now
 }
 
@@ -276,6 +279,52 @@ async function testIbcTransferCw20SuccessShouldIncreaseNativeBalanceRemoteToLoca
 
     const balanceAfter = queryNativeBalance(networks.EARTH, mainEarthAddress, coin.denom);
     assert.deepEqual(balanceAfter, balanceBefore);
+}
+
+async function testIbcTransferNativeFailOutChannelBalanceLargerThanInChannelBalanceShouldRefundTokensLocalToRemote(testData) {
+
+    const coin = {
+        amount: 1,
+        denom: networks.EARTH
+    }
+    // first we need to transfer from remote to local successfully, then we transfer back to remote to test
+    await testIbcTransferNativeSuccessShouldIncreaseNativeBalanceRemoteToLocal(testData);
+    await sleep(5000); // sleep 5 sec before creating a new tx so that it does not get account sequence error
+    // query mars balance before transferring back to remote chain
+    const balanceBefore = queryNativeBalance(networks.MARS, mainMarsAddress, networks.MARS);
+
+    const transferBackMsg = JSON.parse(execSync(`docker-compose exec -T mars ash -c 'oraid tx wasm execute ${testData.cwIcs20Address} ${parseDockerMessage({ "transfer_to_remote": { "local_channel_id": testData.channelId, "remote_address": mainEarthAddress, "remote_denom": coin.denom } })} --from duc --chain-id $CHAIN_ID -y -b block --keyring-backend test --output json --gas 2000000 --amount ${coin.amount}${networks.MARS}'`));
+    // should success, but later on channel balance will increase again
+    console.log("transfer back msg: ", transferBackMsg);
+    assert.deepEqual(transferBackMsg.code, 0);
+
+    // query channel balance before
+    let channelBalanceBefore = queryContractState(networks.MARS, testData.cwIcs20Address, parseDockerMessage({
+        "channel": {
+            "id"
+                : testData.channelId
+        }
+    })).data.balances.find(balance => balance.native.denom.includes(coin.denom));
+    channelBalanceBefore = parseInt(channelBalanceBefore.native.amount);
+
+    // we stop hermes docker so that the ibc transfer can timeout => refund
+    execSync(`docker-compose stop hermes`);
+    await sleep(25000); // sleep 25 sec to timeout transaction
+    // start hermes docekr again after killing it
+    execSync(`docker-compose up -d hermes`);
+    spawnHermes(true); // spawn new hermes to create timeout ack
+    await sleep(15000); // wait so hermes can create timeout ack tx
+    console.log("after spawning hermes & relaying timeout ack");
+
+    const channelBalanceAfter = parseInt(queryContractState(networks.MARS, testData.cwIcs20Address, parseDockerMessage({
+        "channel": {
+            "id"
+                : testData.channelId
+        }
+    })).data.balances.find(balance => balance.native.denom.includes(coin.denom)).native.amount);
+    assert.deepEqual(channelBalanceAfter, channelBalanceBefore + 1); // should refund because out channel balance > in channel balance.
+    const balanceAfter = queryNativeBalance(networks.MARS, mainMarsAddress, networks.MARS);
+    assert.deepEqual(balanceBefore, balanceAfter); // should refund because out channel balance > in channel balance.
 }
 
 start();

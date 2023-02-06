@@ -1,6 +1,4 @@
-const fs = require('fs');
-const path = require("path");
-
+const cp = require('child_process');
 const { execSync } = require('child_process');
 
 /**
@@ -36,8 +34,27 @@ function executeContract(network, address, msg) {
     return JSON.parse(Buffer.from(execSync(`docker-compose exec -T ${network} ash -c 'oraid tx wasm execute ${address} ${msg} --from $USER --chain-id $CHAIN_ID -y -b block --keyring-backend test --gas 20000000 --output json'`)));
 }
 
+function spawnHermes(background = false) {
+    let args = ["exec", "-T", "hermes", "bash", "-c", "hermes --config config.toml start"];
+    if (background) args = ["exec", "-d", "-T", "hermes", "bash", "-c", "hermes --config config.toml start"];
+
+    const hermesSpawn = cp.spawn('docker-compose', args);
+    hermesSpawn.stdout.on('data', (data) => {
+        console.log(`stdout: ${data}`);
+    });
+
+    hermesSpawn.stderr.on('data', (data) => {
+        console.error(`stderr: ${data}`);
+    });
+
+    hermesSpawn.on('close', (code) => {
+        console.log(`child process exited with code ${code}`);
+    });
+}
+
 module.exports = {
     queryNativeBalance,
     queryContractState,
-    executeContract
+    executeContract,
+    spawnHermes
 }

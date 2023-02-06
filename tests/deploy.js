@@ -3,6 +3,7 @@ const path = require("path");
 
 const cp = require('child_process');
 const assert = require('assert');
+const { spawnHermes } = require('./utils');
 
 // We have this address's key, so it is used to create txs 
 const mainMarsAddress = "mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq";
@@ -27,21 +28,6 @@ function deployAndGetAddress(deployCommand) {
  */
 function parseChannelId(createChannelResult) {
     return createChannelResult.match(/channel-\d+/)[0];
-}
-
-function spawnHermes() {
-    const hermesSpawn = cp.spawn('docker-compose', ["exec", "-T", "hermes", "bash", "-c", "hermes --config config.toml start"]);
-    hermesSpawn.stdout.on('data', (data) => {
-        console.log(`stdout: ${data}`);
-    });
-
-    hermesSpawn.stderr.on('data', (data) => {
-        console.error(`stderr: ${data}`);
-    });
-
-    hermesSpawn.on('close', (code) => {
-        console.log(`child process exited with code ${code}`);
-    });
 }
 
 /**
@@ -71,7 +57,7 @@ async function start() {
         console.log("copy cw20 wasm result: ", copyWasmResult);
 
         // deploy cw ics20. -T flag is used to fix error: input device is not a tty. Ref: https://stackoverflow.com/questions/43099116/error-the-input-device-is-not-a-tty
-        const cwIcs20Address = deployAndGetAddress(`docker-compose exec -T mars ash -c './scripts/deploy_contract.sh .mars/cw-ics20-latest.wasm "cw20-ics20-latest" ${parseDockerMessage({ "default_timeout": 180, "gov_contract": mainMarsAddress, "allowlist": [] })}'`);
+        const cwIcs20Address = deployAndGetAddress(`docker-compose exec -T mars ash -c './scripts/deploy_contract.sh .mars/cw-ics20-latest.wasm "cw20-ics20-latest" ${parseDockerMessage({ "default_timeout": 20, "gov_contract": mainMarsAddress, "allowlist": [] })}'`);
 
         // after deploy the ics20 address, the address must not be empty
         assert.notStrictEqual(cwIcs20Address, "");
