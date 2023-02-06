@@ -511,11 +511,12 @@ fn on_packet_failure(
         )?,
     );
     let cosmos_msg = send_amount(to_send, msg.sender.clone(), None);
+    let submsg = SubMsg::reply_on_error(cosmos_msg, ACK_FAILURE_ID);
 
-    // we wont be using submessage here, because the message could fail when calling the allow_contract. We cannot trust allow_contract. If fail => revert whole tx, the acknowledgement will stay there and get retried by the relayer forever until the allow_contract gets fixed.
+    // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
     // similar event messages like ibctransfer module
     let res = IbcBasicResponse::new()
-        .add_message(cosmos_msg)
+        .add_submessage(submsg)
         .add_attribute("action", "acknowledge")
         .add_attribute("sender", msg.sender)
         .add_attribute("receiver", msg.receiver)
