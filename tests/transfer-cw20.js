@@ -44,6 +44,9 @@ async function start() {
         console.log("test transfer native fail out channel balance larger than in channel balance should refund");
         await testIbcTransferNativeFailOutChannelBalanceLargerThanInChannelBalanceShouldRefundTokensLocalToRemote(testData);
 
+        console.log("test transfer native success remote chain balance should increase");
+        await testIbcTransferNativeSuccessShouldIncreaseBalanceTokensLocalToRemote(testData);
+
         console.log("test done!");
 
     } catch (error) {
@@ -325,6 +328,47 @@ async function testIbcTransferNativeFailOutChannelBalanceLargerThanInChannelBala
     assert.deepEqual(channelBalanceAfter, channelBalanceBefore + 1); // should refund because out channel balance > in channel balance.
     const balanceAfter = queryNativeBalance(networks.MARS, mainMarsAddress, networks.MARS);
     assert.deepEqual(balanceBefore, balanceAfter); // should refund because out channel balance > in channel balance.
+}
+
+async function testIbcTransferNativeSuccessShouldIncreaseBalanceTokensLocalToRemote(testData) {
+
+    const coin = {
+        amount: 1,
+        denom: networks.EARTH
+    }
+    const balanceRemoteChainBefore = queryNativeBalance(networks.EARTH, mainEarthAddress, networks.EARTH);
+    // first we need to transfer from remote to local successfully, then we transfer back to remote to test
+    await testIbcTransferNativeSuccessShouldIncreaseNativeBalanceRemoteToLocal(testData);
+    await sleep(5000); // sleep 5 sec before creating a new tx so that it does not get account sequence error
+    // query mars balance before transferring back to remote chain
+    const balanceBefore = queryNativeBalance(networks.MARS, mainMarsAddress, networks.MARS);
+
+    const transferBackMsg = JSON.parse(execSync(`docker-compose exec -T mars ash -c 'oraid tx wasm execute ${testData.cwIcs20Address} ${parseDockerMessage({ "transfer_to_remote": { "local_channel_id": testData.channelId, "remote_address": mainEarthAddress, "remote_denom": coin.denom } })} --from duc --chain-id $CHAIN_ID -y -b block --keyring-backend test --output json --gas 2000000 --amount ${coin.amount}${networks.MARS}'`));
+    // should success, but later on channel balance will increase again
+    console.log("transfer back msg: ", transferBackMsg);
+    assert.deepEqual(transferBackMsg.code, 0);
+
+    // query channel balance before
+    let channelBalanceBefore = queryContractState(networks.MARS, testData.cwIcs20Address, parseDockerMessage({
+        "channel": {
+            "id"
+                : testData.channelId
+        }
+    })).data.balances.find(balance => balance.native.denom.includes(coin.denom));
+    channelBalanceBefore = parseInt(channelBalanceBefore.native.amount);
+
+    await sleep(); // sleep and wait for relayer to process ibc
+    const channelBalanceAfter = parseInt(queryContractState(networks.MARS, testData.cwIcs20Address, parseDockerMessage({
+        "channel": {
+            "id"
+                : testData.channelId
+        }
+    })).data.balances.find(balance => balance.native.denom.includes(coin.denom)).native.amount);
+    assert.deepEqual(channelBalanceAfter, channelBalanceBefore); // should be equal because transaction is successful, channel after relaying = before relaying
+    const balanceAfter = queryNativeBalance(networks.MARS, mainMarsAddress, networks.MARS);
+    const balanceRemoteChainAfter = queryNativeBalance(networks.EARTH, mainEarthAddress, networks.EARTH);
+    assert.deepEqual(balanceAfter, balanceBefore - coin.amount); // should not refund
+    assert.deepEqual(balanceRemoteChainBefore, balanceRemoteChainAfter + coin.amount); // should increase EARTH balance after relaying
 }
 
 start();
