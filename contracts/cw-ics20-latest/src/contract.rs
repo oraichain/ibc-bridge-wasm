@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, IbcMsg, IbcQuery, MessageInfo, Order,
-    PortIdResponse, Response, StdResult,
+    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, IbcEndpoint, IbcMsg, IbcQuery,
+    MessageInfo, Order, PortIdResponse, Response, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -10,7 +10,7 @@ use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
 
 use crate::error::ContractError;
-use crate::ibc::{parse_ibc_wasm_port_id, Ics20Packet};
+use crate::ibc::{parse_ibc_wasm_port_id, parse_voucher_denom, Ics20Packet};
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
     ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, ListMappingResponse,
@@ -211,18 +211,30 @@ pub fn execute_transfer_back_to_remote_chain(
         },
     )?;
 
-    let mapping_search_result = mappings
-        .into_iter()
-        .find(|pair| pair.key.contains(&msg.remote_denom));
-
+    // parse denom & compare with user input. Should not use string.includes() because hacker can fake a port that has the same remote denom to return true
+    let mapping_search_result = mappings.into_iter().find(|pair| -> bool {
+        let (denom, is_native) = parse_voucher_denom(
+            pair.key.as_str(),
+            &IbcEndpoint {
+                port_id: parse_ibc_wasm_port_id(env.contract.address.clone().into_string()),
+                channel_id: msg.local_channel_id.clone(), // also verify local channel id
+            },
+        )
+        .unwrap_or_else(|_| ("", true)); // if there's an error, change is_native to true so it automatically returns false
+        if is_native {
+            return false;
+        }
+        if denom.eq(&msg.remote_denom) {
+            return true;
+        }
+        return false;
+    });
     if mapping_search_result.is_none() {
         return Err(ContractError::MappingPairNotFound {});
     }
 
     let mapping = mapping_search_result.unwrap();
-
     let ibc_denom = mapping.key;
-
     // ensure the requested channel is registered
     if !CHANNEL_INFO.has(deps.storage, &msg.local_channel_id) {
         return Err(ContractError::NoSuchChannel {
@@ -1184,7 +1196,7 @@ mod test {
             )]
         );
 
-        // reject case with bad channel id
+        // mapping pair error with wrong voucher denom
         let pair = UpdatePairMsg {
             local_channel_id: "not_registered_channel".to_string(),
             denom: denom.to_string(),
@@ -1210,11 +1222,6 @@ mod test {
             msg: to_binary(&transfer).unwrap(),
         });
         let err = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap_err();
-        assert_eq!(
-            err,
-            ContractError::NoSuchChannel {
-                id: "not_registered_channel".to_string()
-            }
-        );
+        assert_eq!(err, ContractError::MappingPairNotFound {});
     }
 }

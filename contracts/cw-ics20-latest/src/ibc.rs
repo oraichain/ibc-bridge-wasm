@@ -249,7 +249,7 @@ pub fn ibc_packet_receive(
 
 // Returns local denom if the denom is an encoded voucher from the expected endpoint
 // Otherwise, error
-fn parse_voucher_denom<'a>(
+pub fn parse_voucher_denom<'a>(
     voucher_denom: &'a str,
     remote_endpoint: &IbcEndpoint,
 ) -> Result<(&'a str, bool), ContractError> {
