@@ -1,5 +1,6 @@
 [workspace]
 members = ["contracts/*"]
+exclude = ["contracts/cw20-ics20"]
 
 [profile.release]
 opt-level = 3

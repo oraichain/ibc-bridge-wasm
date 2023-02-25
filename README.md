@@ -3,7 +3,7 @@
 ```bash
 
 # run the build container for oraid. Wait for it to finish
-docker compose -f docker-compose.build.yml up
+docker-compose -f docker-compose.build.yml up
 ```
 
 ## Start the networks
@@ -16,26 +16,29 @@ docker-compose up -d
 
 ```bash
 # build smart contract
-./scripts/build_contract.sh contracts/cw20-ics20
-cp contracts/cw20-ics20/artifacts/cw20-ics20.wasm .mars
+./scripts/build_contract.sh contracts/cw-ics20-latest
+sudo cp contracts/cw-ics20-latest/artifacts/cw-ics20-latest.wasm .mars
 
 # build cw20
 ./scripts/build_contract.sh contracts/cw20-base
 cp contracts/cw20-base/artifacts/cw20-base.wasm .mars
 
 # go to mars network
-docker compose exec mars ash
+docker-compose exec mars ash
 
-./scripts/deploy_contract.sh .mars/cw20-ics20.wasm 'cw20-ics20' '{"default_timeout":90}'
+./scripts/deploy_contract.sh .mars/cw-ics20-latest.wasm 'cw20-ics20-latest' '{"default_timeout":180,"gov_contract":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq","allowlist":[]}'
+# mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde
 
-./scripts/deploy_contract.sh .mars/cw20-base.wasm 'cw20-base' '{"name":"EARTH","symbol":"EARTH","decimals":6,"initial_balances":[{"address":"mars10pyejy66429refv3g35g2t7am0was7ya90pn2w","amount":"100000000000000"}],"mint":{"minter":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
+./scripts/deploy_contract.sh .mars/cw20-base.wasm 'cw20-base' '{"name":"EARTH","symbol":"EARTH","decimals":6,"initial_balances":[{"address":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","amount":"100"}],"mint":{"minter":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
+# mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l
 
 # mint token for cw20-ics20 (optional)
-oraid tx wasm execute mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 '{"mint":{"recipient":"mars10pyejy66429refv3g35g2t7am0was7ya90pn2w","amount":"100000000000000000000000"}}' --keyring-backend test --from $USER --chain-id $CHAIN_ID -y
+oraid tx wasm execute mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"mint":{"recipient":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","amount":"100000000000000000000000"}}' --keyring-backend test --from $USER --chain-id $CHAIN_ID -y -b block
 
+oraid tx wasm execute mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde '{"update_mapping_pair":{"local_channel_id":"channel-0","denom":"uusd","asset_info":{"token":{"contract_addr":"mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l"}},"remote_decimals":6,"asset_info_decimals":6}}' --from $USER --chain-id $CHAIN_ID -y --keyring-backend test -b block
 
 # migrate contract
-./scripts/migrate_contract.sh .mars/cw20-ics20.wasm mars10pyejy66429refv3g35g2t7am0was7ya90pn2w # migrate to test changing cw20 contract
+./scripts/migrate_contract.sh .mars/cw-ics20-latest.wasm mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde # migrate to test changing cw20 contract
 ```
 
 ## start relayer
@@ -47,7 +50,7 @@ hermes --config config.toml keys add --chain Earth --mnemonic-file accounts/Eart
 hermes --config config.toml keys add --chain Mars --mnemonic-file accounts/Mars.txt
 
 # create a channel
-hermes --config config.toml create channel --a-chain Earth --b-chain Mars --a-port transfer --b-port wasm.mars10pyejy66429refv3g35g2t7am0was7ya90pn2w --new-client-connection
+hermes --config config.toml create channel --a-chain Earth --b-chain Mars --a-port transfer --b-port wasm.mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde --new-client-connection
 
 # start hermes
 hermes --config config.toml start
@@ -57,17 +60,25 @@ hermes --config config.toml start
 
 ```bash
 # from earth to mars on channel
-docker compose exec earth ash
-oraid tx ibc-transfer transfer transfer channel-0 mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq 10000000earth --from duc --chain-id Earth -y --keyring-backend test
+docker-compose exec earth ash
+oraid tx ibc-transfer transfer transfer channel-0 mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq 1uusd --from duc --chain-id Earth -y --keyring-backend test -b block
 # check mars balance
-docker compose exec mars ash
-oraid query wasm contract-state smart mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 '{"balance":{"address":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
+docker-compose exec mars ash
+oraid query wasm contract-state smart mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"balance":{"address":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
 
-# from mars to earth send back
-# send back command
-oraid tx wasm execute mars18vd8fpwxzck93qlwghaj6arh4p7c5n89plpqv0 '{"send":{"amount":"10000000","contract":"mars10pyejy66429refv3g35g2t7am0was7ya90pn2w","msg":"'$(echo '{"channel":"channel-0","remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp"}' | base64 -w 0)'"}}' --from $USER --chain-id $CHAIN_ID -y --keyring-backend test
+# query channel
+oraid query wasm contract-state smart mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde '{"channel":{"id":"channel-0"}}'
 ```
 
-# TODO:
+## test send back to remote chain
 
-remove hard code & update dynamic logic for cw20-ics20. Now the demo is for prototype only (proof of concept)
+```bash
+
+# update the native allow contract to admin so we dont need to call cross contract for testing
+oraid tx wasm execute mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde '{"update_native_allow_contract":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}' --from duc --chain-id $CHAIN_ID -y --keyring-backend test -b block
+
+# call transfer back method
+oraid tx wasm execute mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"send":{"amount":"1","contract":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","msg":"'$(echo '{"local_channel_id":"channel-0","remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp","remote_denom":"uusd"}' | base64 -w 0)'"}}' --from duc --chain-id $CHAIN_ID -y -b block --keyring-backend test --gas 2000000
+```
+
+# TODO: draw a threat model for this

@@ -1,6 +1,8 @@
 #!/bin/sh
 #set -o errexit -o nounset -o pipefail
 
+apk add build-base;
+
 if [ -z "$PASSWORD" ]; then
     echo -n "Enter passphrase:"
     read -s PASSWORD
@@ -12,7 +14,7 @@ MONIKER=${MONIKER:-node001}
 MNEMONIC=$(cat ibc/accounts/$CHAIN_ID.txt)
 
 # mannually reset
-# rm -rf "$PWD"/.$DENOM/*
+rm -rf "$PWD"/.$DENOM/*
 if [ ! -d "$PWD/.$DENOM/data" ]; then
     oraid init --chain-id $CHAIN_ID "$MONIKER"
 

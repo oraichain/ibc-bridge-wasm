@@ -10,6 +10,8 @@ services:
       - CHAIN_ID=Earth
     working_dir: /workspace
     command: /workspace/scripts/setup_genesis.sh
+    ports:
+      - 26657:26657
     volumes:
       - ./.earth:/workspace/.earth
       - ./scripts:/workspace/scripts
@@ -25,6 +27,8 @@ services:
       - DENOM=mars
       - CHAIN_ID=Mars
     working_dir: /workspace
+    ports:
+      - 36657:26657
     command: /workspace/scripts/setup_genesis.sh
     volumes:
       - ./.mars:/workspace/.mars
@@ -33,7 +37,7 @@ services:
       - ./ibc-proxy:/workspace/ibc
 
   hermes:
-    image: informalsystems/hermes:1.0.0
+    image: informalsystems/hermes:1.2.0
     working_dir: /workspace
     tty: true
     entrypoint: tail -f /dev/null
