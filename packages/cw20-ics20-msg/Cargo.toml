@@ -4,9 +4,11 @@ version = "0.0.1"
 authors = ["Oraichain Labs"]
 edition = "2021"
 description = "Definition and types for the cw20-ics20-msg interface"
-license = "Apache-2.0"
+license = "MIT"
 repository = "https://github.com/Oraichain/ibc-bridge-wasm"
 homepage = "https://orai.io"
+documentation = "https://docs.orai.io"
+readme = "README.md"
 
 [dependencies]
 cosmwasm-schema = "1.1.9"
