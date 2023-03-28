@@ -1,11 +1,13 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
+    attr, entry_point, from_binary, to_binary, Api, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
     IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
     IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
-    IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
+    IbcReceiveResponse, QuerierWrapper, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128,
+    WasmMsg,
 };
 use oraiswap::asset::AssetInfo;
+use oraiswap::router::SwapOperation;
 
 use crate::error::{ContractError, Never};
 use crate::state::{
@@ -85,7 +87,8 @@ fn ack_fail(err: String) -> Binary {
 
 const RECEIVE_ID: u64 = 1337;
 const NATIVE_RECEIVE_ID: u64 = 1338;
-const ACK_FAILURE_ID: u64 = 0xfa17;
+const ORAI_FEE_SWAP_ID: u64 = 1339;
+const ACK_FAILURE_ID: u64 = 64023;
 // const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
 #[entry_point]
@@ -146,6 +149,12 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     .set_data(ack_fail(err.clone()))
                     .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
             }
+        },
+        ORAI_FEE_SWAP_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            SubMsgResult::Err(err) => Ok(Response::new()
+                .set_data(ack_fail(err.clone()))
+                .add_attribute("error_orai_fee_swap", err)),
         },
         ACK_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
@@ -294,6 +303,8 @@ fn do_ibc_packet_receive(
     if denom.1 {
         return handle_ibc_packet_receive_native_remote_chain(
             deps.storage,
+            deps.api,
+            &deps.querier,
             &denom.0,
             &packet,
             &msg,
@@ -332,6 +343,8 @@ fn do_ibc_packet_receive(
 
 fn handle_ibc_packet_receive_native_remote_chain(
     storage: &mut dyn Storage,
+    api: &dyn Api,
+    querier: &QuerierWrapper,
     denom: &str,
     packet: &IbcPacket,
     msg: &Ics20Packet,
@@ -352,8 +365,16 @@ fn handle_ibc_packet_receive_native_remote_chain(
             pair_mapping.asset_info_decimals,
         )?,
     );
-    let cosmos_msg = send_amount(to_send, msg.receiver.clone(), None);
-    let submsg = SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID);
+    let cosmos_msg = send_amount(to_send.clone(), msg.receiver.clone(), None);
+    let mut submsgs: Vec<SubMsg> = vec![SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID)];
+    // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
+    if let Some(swap_msg) =
+        get_orai_fee_swap_msg(storage, api, querier, &to_send, &msg.receiver).ok()
+    {
+        if let Some(swap_msg) = swap_msg {
+            submsgs.push(SubMsg::reply_on_error(swap_msg, ORAI_FEE_SWAP_ID));
+        }
+    }
 
     increase_channel_balance(
         storage,
@@ -373,7 +394,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
-        .add_submessage(submsg)
+        .add_submessages(submsgs)
         .add_attribute("action", "receive_native")
         .add_attribute("sender", msg.sender.clone())
         .add_attribute("receiver", msg.receiver.clone())
@@ -382,6 +403,54 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .add_attribute("success", "true");
 
     Ok(res)
+}
+
+// TODO: add unit & e2e tests for this function
+fn get_orai_fee_swap_msg(
+    storage: &mut dyn Storage,
+    api: &dyn Api,
+    querier: &QuerierWrapper,
+    to_send: &Amount,
+    receiver: &str,
+) -> Result<Option<CosmosMsg>, ContractError> {
+    let config = CONFIG.load(storage)?;
+    let recevier_balance = querier.query_balance(receiver.to_string(), config.fee_denom.clone());
+    // if the query returns results, we try to do swapping to collect some fees if the balance is 0
+    if let Some(receiver_balance) = recevier_balance.ok() {
+        if !receiver_balance.amount.is_zero() {
+            return Ok(None);
+        }
+        let swap_amount = to_send.amount() * config.default_orai_fee_swap;
+        // we cannot swap if the receiving amount is too small => won't swap
+        if swap_amount.is_zero() {
+            return Ok(None);
+        }
+        // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just a submsg)
+        let cw20_address = api.addr_validate(&to_send.raw_denom())?;
+        let cosmos_msg: CosmosMsg = WasmMsg::Execute {
+            contract_addr: cw20_address.clone().into_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: config.swap_router_contract,
+                amount: swap_amount,
+                msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
+                    operations: vec![SwapOperation::OraiSwap {
+                        offer_asset_info: AssetInfo::Token {
+                            contract_addr: cw20_address,
+                        },
+                        ask_asset_info: AssetInfo::NativeToken {
+                            denom: config.fee_denom,
+                        },
+                    }],
+                    minimum_receive: None,
+                    to: Some(receiver.to_string()),
+                })?,
+            })?,
+            funds: vec![],
+        }
+        .into();
+        return Ok(Some(cosmos_msg));
+    }
+    Ok(None)
 }
 
 fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
@@ -578,7 +647,7 @@ mod test {
     use crate::contract::{execute, migrate, query_channel};
     use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg, UpdatePairMsg};
     use cosmwasm_std::testing::{mock_env, mock_info};
-    use cosmwasm_std::{coins, to_vec, Addr, IbcEndpoint, IbcMsg, IbcTimeout, Timestamp};
+    use cosmwasm_std::{coins, to_vec, Addr, Decimal, IbcEndpoint, IbcMsg, IbcTimeout, Timestamp};
     use cw20::Cw20ReceiveMsg;
     use oraiswap::asset::AssetInfo;
 
@@ -838,6 +907,10 @@ mod test {
             mock_env(),
             MigrateMsg {
                 default_gas_limit: Some(def_limit),
+                default_timeout: 100u64,
+                default_orai_fee_swap: Decimal::percent(5),
+                fee_denom: "orai".to_string(),
+                swap_router_contract: "foobar".to_string(),
             },
         )
         .unwrap();
@@ -1007,7 +1080,7 @@ mod test {
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         println!("res: {:?}", res);
-        assert_eq!(res.messages.len(), 1);
+        assert_eq!(res.messages.len(), 2);
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
         println!("ack: {:?}", ack);
         assert!(matches!(ack, Ics20Ack::Result(_)));

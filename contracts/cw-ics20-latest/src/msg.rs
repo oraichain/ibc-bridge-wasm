@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Binary, IbcEndpoint};
+use cosmwasm_std::{Addr, Binary, Decimal, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
@@ -17,6 +17,8 @@ pub struct InitMsg {
     /// If set, contracts off the allowlist will run with this gas limit.
     /// If unset, will refuse to accept any contract off the allow list.
     pub default_gas_limit: Option<u64>,
+    /// router contract for fee swap
+    pub swap_router_contract: String,
 }
 
 #[cw_serde]
@@ -27,7 +29,11 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
+    pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
+    pub default_orai_fee_swap: Decimal,
+    pub fee_denom: String,
+    pub swap_router_contract: String,
 }
 
 #[cw_serde]
