@@ -221,6 +221,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cw-ics20"
+version = "1.0.1"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-controllers",
+ "cw-multi-test",
+ "cw-storage-plus 1.0.1",
+ "cw-utils 0.16.0",
+ "cw2 1.0.1",
+ "cw20 1.0.1",
+ "cw20-ics20-msg",
+ "oraiswap",
+ "schemars",
+ "semver",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "cw-multi-test"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -388,28 +408,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "cw20-ics20-latest"
-version = "0.16.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cw-controllers",
- "cw-multi-test",
- "cw-storage-plus 1.0.1",
- "cw-utils 0.16.0",
- "cw2 1.0.1",
- "cw20 1.0.1",
- "cw20-ics20-msg",
- "oraiswap",
- "schemars",
- "semver",
- "serde",
- "thiserror",
-]
-
-[[package]]
 name = "cw20-ics20-msg"
 version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf92cada0a6f120a4fa60f82f5ed2160b21eeb7cfcfd5e43bdcf6264fc13433"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
@@ -639,6 +641,8 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "oraiswap"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d647cd0b70b11b8b78364ca2f885753b0c870785788bcf9d3d05f522fe54344e"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",

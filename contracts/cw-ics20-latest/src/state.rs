@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
+use cosmwasm_std::{Addr, Decimal, IbcEndpoint, StdResult, Storage, Uint128};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use oraiswap::asset::AssetInfo;
@@ -8,7 +8,7 @@ use crate::ContractError;
 
 pub const ADMIN: Admin = Admin::new("admin");
 
-pub const CONFIG: Item<Config> = Item::new("ics20_config");
+pub const CONFIG: Item<Config> = Item::new("ics20_config_v11");
 
 // Used to pass info from the ibc_packet_receive to the reply handler
 pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args");
@@ -64,6 +64,9 @@ pub struct ChannelState {
 pub struct Config {
     pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
+    pub default_orai_fee_swap: Decimal,
+    pub fee_denom: String,
+    pub swap_router_contract: String,
 }
 
 #[cw_serde]

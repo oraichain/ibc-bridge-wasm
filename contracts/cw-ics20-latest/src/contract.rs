@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, IbcEndpoint, IbcMsg, IbcQuery,
-    MessageInfo, Order, PortIdResponse, Response, StdResult,
+    from_binary, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, IbcEndpoint, IbcMsg,
+    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -39,6 +39,9 @@ pub fn instantiate(
     let cfg = Config {
         default_timeout: msg.default_timeout,
         default_gas_limit: msg.default_gas_limit,
+        default_orai_fee_swap: Decimal::percent(20u64),
+        fee_denom: "orai".to_string(),
+        swap_router_contract: msg.swap_router_contract,
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -400,12 +403,16 @@ pub fn execute_delete_mapping_pair(
 #[entry_point]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
     // we don't need to save anything if migrating from the same version
-    if msg.default_gas_limit.is_some() {
-        CONFIG.update(deps.storage, |mut old| -> StdResult<_> {
-            old.default_gas_limit = msg.default_gas_limit;
-            Ok(old)
-        })?;
-    }
+    CONFIG.save(
+        deps.storage,
+        &Config {
+            default_timeout: msg.default_timeout,
+            default_gas_limit: msg.default_gas_limit,
+            default_orai_fee_swap: msg.default_orai_fee_swap,
+            fee_denom: msg.fee_denom,
+            swap_router_contract: msg.swap_router_contract,
+        },
+    )?;
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     Ok(Response::new())
 }
@@ -657,10 +664,7 @@ mod test {
             },
         )
         .unwrap_err();
-        assert_eq!(
-            err,
-            StdError::not_found("cw20_ics20_latest::state::ChannelInfo")
-        );
+        assert_eq!(err, StdError::not_found("cw_ics20::state::ChannelInfo"));
     }
 
     #[test]
@@ -1044,6 +1048,10 @@ mod test {
             mock_env(),
             MigrateMsg {
                 default_gas_limit: Some(123456),
+                default_orai_fee_swap: Decimal::percent(5),
+                default_timeout: 100u64,
+                fee_denom: "orai".to_string(),
+                swap_router_contract: "foobar".to_string(),
             },
         )
         .unwrap();
