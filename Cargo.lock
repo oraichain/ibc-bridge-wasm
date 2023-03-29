@@ -231,7 +231,7 @@ dependencies = [
  "cw-storage-plus 1.0.1",
  "cw-utils 0.16.0",
  "cw2 1.0.1",
- "cw20 1.0.1",
+ "cw20",
  "cw20-ics20-msg",
  "oraiswap",
  "schemars",
@@ -289,7 +289,7 @@ checksum = "d6a84c6c1c0acc3616398eba50783934bd6c964bad6974241eaee3460c8f5b26"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw2 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cw2 0.16.0",
  "schemars",
  "semver",
  "serde",
@@ -309,17 +309,6 @@ dependencies = [
  "semver",
  "serde",
  "thiserror",
-]
-
-[[package]]
-name = "cw2"
-version = "0.16.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cw-storage-plus 0.16.0",
- "schemars",
- "serde",
 ]
 
 [[package]]
@@ -350,17 +339,6 @@ dependencies = [
 
 [[package]]
 name = "cw20"
-version = "0.16.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cw-utils 0.16.0",
- "schemars",
- "serde",
-]
-
-[[package]]
-name = "cw20"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91666da6c7b40c8dd5ff94df655a28114efc10c79b70b4d06f13c31e37d60609"
@@ -374,23 +352,6 @@ dependencies = [
 
 [[package]]
 name = "cw20-base"
-version = "0.16.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cw-multi-test",
- "cw-storage-plus 0.16.0",
- "cw-utils 0.16.0",
- "cw2 0.16.0",
- "cw20 0.16.0",
- "schemars",
- "semver",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "cw20-base"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afcd279230b08ed8afd8be5828221622bd5b9ce25d0b01d58bad626c6ce0169c"
@@ -400,7 +361,7 @@ dependencies = [
  "cw-storage-plus 1.0.1",
  "cw-utils 1.0.1",
  "cw2 1.0.1",
- "cw20 1.0.1",
+ "cw20",
  "schemars",
  "semver",
  "serde",
@@ -414,7 +375,7 @@ dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw-storage-plus 1.0.1",
- "cw20 1.0.1",
+ "cw20",
  "schemars",
  "serde",
 ]
@@ -646,8 +607,8 @@ dependencies = [
  "cosmwasm-std",
  "cosmwasm-storage",
  "cw-multi-test",
- "cw20 1.0.1",
- "cw20-base 1.0.1",
+ "cw20",
+ "cw20-base",
  "protobuf",
  "schemars",
  "thiserror",

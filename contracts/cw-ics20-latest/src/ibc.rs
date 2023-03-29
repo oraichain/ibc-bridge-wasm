@@ -413,10 +413,12 @@ fn get_follow_up_msgs(
 ) -> Result<Vec<CosmosMsg>, ContractError> {
     let config = CONFIG.load(storage)?;
     let is_channel_empty = receiver.destination_channel.is_empty();
+    // if both fields are empty, then we simply transfers cw20 to the receiver address.
     if receiver.destination_denom.is_empty() {
         if is_channel_empty {
             return Ok(vec![send_amount(to_send, receiver.receiver.clone(), None)]);
         }
+        // we cannot transfer to wanted channel if we dont have the appropriate denom => error
         return Err(ContractError::Std(StdError::generic_err("Invalid destination info. Must have destination denom if there's a destination channel")));
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just a submsg)
