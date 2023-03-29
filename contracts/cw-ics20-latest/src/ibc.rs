@@ -2,10 +2,11 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     attr, entry_point, from_binary, to_binary, Api, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
     IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
-    IbcReceiveResponse, QuerierWrapper, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128,
-    WasmMsg,
+    IbcEndpoint, IbcMsg, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg,
+    IbcPacketTimeoutMsg, IbcReceiveResponse, QuerierWrapper, Reply, Response, StdError, Storage,
+    SubMsg, SubMsgResult, Uint128, WasmMsg,
 };
+use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
 use oraiswap::router::SwapOperation;
 
@@ -87,7 +88,7 @@ fn ack_fail(err: String) -> Binary {
 
 const RECEIVE_ID: u64 = 1337;
 const NATIVE_RECEIVE_ID: u64 = 1338;
-const ORAI_FEE_SWAP_ID: u64 = 1339;
+const FOLLOW_UP_MSGS_ID: u64 = 1339;
 const ACK_FAILURE_ID: u64 = 64023;
 // const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
@@ -150,11 +151,11 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
             }
         },
-        ORAI_FEE_SWAP_ID => match reply.result {
+        FOLLOW_UP_MSGS_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new()
                 .set_data(ack_fail(err.clone()))
-                .add_attribute("error_orai_fee_swap", err)),
+                .add_attribute("error_follow_up_msgs", err)),
         },
         ACK_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
@@ -265,7 +266,6 @@ pub fn parse_voucher_denom<'a>(
     let split_denom: Vec<&str> = voucher_denom.splitn(3, '/').collect();
 
     // if it is a packet_receive of native token from chain A or IBC token that was sent from chain B.
-    // TODO: What about native token x from chain C -> chain A -> chain B (chain B has ibc wasm)
     if split_denom.len() == 1 {
         return Ok((voucher_denom, true));
     }
@@ -365,16 +365,13 @@ fn handle_ibc_packet_receive_native_remote_chain(
             pair_mapping.asset_info_decimals,
         )?,
     );
-    let cosmos_msg = send_amount(to_send.clone(), msg.receiver.clone(), None);
-    let mut submsgs: Vec<SubMsg> = vec![SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID)];
+    let receiver: DestinationInfo = DestinationInfo::from_str(&msg.receiver);
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
-    if let Some(swap_msg) =
-        get_orai_fee_swap_msg(storage, api, querier, &to_send, &msg.receiver).ok()
-    {
-        if let Some(swap_msg) = swap_msg {
-            submsgs.push(SubMsg::reply_on_error(swap_msg, ORAI_FEE_SWAP_ID));
-        }
-    }
+    let submsgs: Vec<SubMsg> =
+        get_follow_up_msgs(storage, api, querier, to_send, &receiver, packet)?
+            .into_iter()
+            .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_MSGS_ID))
+            .collect();
 
     increase_channel_balance(
         storage,
@@ -406,51 +403,93 @@ fn handle_ibc_packet_receive_native_remote_chain(
 }
 
 // TODO: add unit & e2e tests for this function
-fn get_orai_fee_swap_msg(
+fn get_follow_up_msgs(
     storage: &mut dyn Storage,
     api: &dyn Api,
     querier: &QuerierWrapper,
-    to_send: &Amount,
-    receiver: &str,
-) -> Result<Option<CosmosMsg>, ContractError> {
+    to_send: Amount,
+    receiver: &DestinationInfo,
+    packet: &IbcPacket,
+) -> Result<Vec<CosmosMsg>, ContractError> {
     let config = CONFIG.load(storage)?;
-    let recevier_balance = querier.query_balance(receiver.to_string(), config.fee_denom.clone());
-    // if the query returns results, we try to do swapping to collect some fees if the balance is 0
-    if let Some(receiver_balance) = recevier_balance.ok() {
-        if !receiver_balance.amount.is_zero() {
-            return Ok(None);
+    let is_channel_empty = receiver.destination_channel.is_empty();
+    if receiver.destination_denom.is_empty() {
+        if is_channel_empty {
+            return Ok(vec![send_amount(to_send, receiver.receiver.clone(), None)]);
         }
-        let swap_amount = to_send.amount() * config.default_orai_fee_swap;
-        // we cannot swap if the receiving amount is too small => won't swap
-        if swap_amount.is_zero() {
-            return Ok(None);
+        return Err(ContractError::Std(StdError::generic_err("Invalid destination info. Must have destination denom if there's a destination channel")));
+    }
+    // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just a submsg)
+    let cw20_address = api.addr_validate(&to_send.raw_denom())?;
+    let mut swap_operations = vec![SwapOperation::OraiSwap {
+        offer_asset_info: AssetInfo::Token {
+            contract_addr: cw20_address.clone(),
+        },
+        ask_asset_info: AssetInfo::NativeToken {
+            denom: config.fee_denom.clone(),
+        },
+    }];
+    // config.fee_denom is likely to be ORAI, we can use it to deduct relayer fee. It is also used to confirm multiple swap ops
+    if !receiver.destination_denom.eq(&config.fee_denom) {
+        // if we can parse the denom into a valid orai address => it is a cw20 contract addr, otherwise it is native token
+        swap_operations.push(SwapOperation::OraiSwap {
+            offer_asset_info: AssetInfo::NativeToken {
+                denom: config.fee_denom,
+            },
+            ask_asset_info: if let Some(contract_addr) =
+                api.addr_validate(&receiver.destination_denom).ok()
+            {
+                AssetInfo::Token { contract_addr }
+            } else {
+                AssetInfo::NativeToken {
+                    denom: receiver.destination_denom.clone(),
+                }
+            },
+        });
+    }
+    let mut minimum_receive = None;
+    let mut to: Option<String> = Some(receiver.receiver.clone());
+    let mut ibc_msg: Option<CosmosMsg> = None;
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+    let swap_amount = to_send.amount();
+    // if there's destination denom then it means we'll have to create a new ibc transfer msg after swapping => need to simulate swap to get receiving amount
+    // another case is evm-prefix address, which will automatically be forwarded using the ibc transfer. For this case, it should have no channel, and receiver addr should not be in orai... format
+    if !is_channel_empty || (is_channel_empty && api.addr_validate(&receiver.receiver).is_err()) {
+        minimum_receive = Some(querier.query_wasm_smart(
+            config.swap_router_contract.clone(),
+            &oraiswap::router::QueryMsg::SimulateSwapOperations {
+                offer_amount: swap_amount.clone(),
+                operations: swap_operations.clone(),
+            },
+        )?);
+        // 'to' is also adjusted to None, because this contract will receive the ask amount & send them using ibc
+        to = None;
+
+        // TODO: if receiver is in form of cosmos token then we create ibc transfer msg, else we create ibc wasm transfer msg for evm case
+        if receiver.is_receiver_evm_based() {
+        } else {
         }
-        // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just a submsg)
-        let cw20_address = api.addr_validate(&to_send.raw_denom())?;
-        let cosmos_msg: CosmosMsg = WasmMsg::Execute {
-            contract_addr: cw20_address.clone().into_string(),
+    }
+    cosmos_msgs.push(
+        WasmMsg::Execute {
+            contract_addr: cw20_address.into_string(),
             msg: to_binary(&Cw20ExecuteMsg::Send {
                 contract: config.swap_router_contract,
                 amount: swap_amount,
                 msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
-                    operations: vec![SwapOperation::OraiSwap {
-                        offer_asset_info: AssetInfo::Token {
-                            contract_addr: cw20_address,
-                        },
-                        ask_asset_info: AssetInfo::NativeToken {
-                            denom: config.fee_denom,
-                        },
-                    }],
-                    minimum_receive: None,
-                    to: Some(receiver.to_string()),
+                    operations: swap_operations,
+                    minimum_receive,
+                    to,
                 })?,
             })?,
             funds: vec![],
         }
-        .into();
-        return Ok(Some(cosmos_msg));
+        .into(),
+    );
+    if let Some(ibc_msg) = ibc_msg {
+        cosmos_msgs.push(ibc_msg.into());
     }
-    Ok(None)
+    return Ok(cosmos_msgs);
 }
 
 fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
@@ -479,7 +518,6 @@ pub fn ibc_packet_ack(
     msg: IbcPacketAckMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
     // Design decision: should we trap error like in receive?
-    // TODO: unsure... as it is now a failed ack handling would revert the tx and would be
     // retried again and again. is that good?
     let ics20msg: Ics20Ack = from_binary(&msg.acknowledgement.data)?;
     match ics20msg {
@@ -495,7 +533,6 @@ pub fn ibc_packet_timeout(
     _env: Env,
     msg: IbcPacketTimeoutMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
-    // TODO: trap error like in receive? (same question as ack above)
     let packet = msg.packet;
     on_packet_failure(deps, packet, "timeout".to_string())
 }
@@ -816,8 +853,6 @@ mod test {
         );
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
         assert!(matches!(ack, Ics20Ack::Result(_)));
-
-        // TODO: we need to call the reply block
 
         // query channel state
         let state = query_channel(deps.as_ref(), send_channel.to_string(), Some(true)).unwrap();

@@ -8,7 +8,6 @@ use cosmwasm_std::{
 };
 use cw_storage_plus::Item;
 
-// TODO: should the return values end up in utils, so eg. cw4 can import them as well as this module?
 /// Returned from Admin.query_admin()
 #[cw_serde]
 pub struct AdminResponse {

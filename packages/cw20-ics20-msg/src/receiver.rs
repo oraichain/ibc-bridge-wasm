@@ -32,10 +32,18 @@ impl DestinationInfo {
             destination_denom: denom.to_string(),
         }
     }
+
+    pub fn is_receiver_evm_based(&self) -> bool {
+        match self.receiver.split_once("0x") {
+            Some((_, _)) => true,
+            None => false,
+        }
+    }
 }
 
 #[test]
 fn parse_destination_info() {
+    // swap to orai then orai to atom, then use swapped amount to transfer ibc to destination
     let d1 =
         DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:atom");
     assert_eq!(
@@ -46,10 +54,40 @@ fn parse_destination_info() {
             destination_denom: "atom".to_string()
         }
     );
-    let d2 =
-        DestinationInfo::from_str("trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt");
+    // swap to orai then orai to usdt with 'to' as the receiver when swapping, then we're done
+    let d2 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573:usdt");
     assert_eq!(
         d2,
+        DestinationInfo {
+            receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
+            destination_channel: "".to_string(),
+            destination_denom: "usdt".to_string()
+        }
+    );
+    // this case returns an error (because it has channel but no destination denom)
+    let d3 = DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
+    assert_eq!(
+        d3,
+        DestinationInfo {
+            receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
+            destination_channel: "".to_string(),
+            destination_denom: "usdt".to_string()
+        }
+    );
+    // this case returns an error (because it has channel but no destination denom)
+    let d4 = DestinationInfo::from_str("channel-15/orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
+    assert_eq!(
+        d4,
+        DestinationInfo {
+            receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
+            destination_channel: "".to_string(),
+            destination_denom: "usdt".to_string()
+        }
+    );
+    let d5 =
+        DestinationInfo::from_str("trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt");
+    assert_eq!(
+        d5,
         DestinationInfo {
             receiver: "0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
             destination_channel: "trx-mainnet".to_string(),
@@ -57,9 +95,9 @@ fn parse_destination_info() {
         }
     );
 
-    let d3 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
+    let d6 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
     assert_eq!(
-        d3,
+        d6,
         DestinationInfo {
             receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
             destination_channel: "".to_string(),
