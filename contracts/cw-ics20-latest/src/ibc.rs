@@ -467,6 +467,7 @@ fn get_follow_up_msgs(
 
         // TODO: if receiver is in form of cosmos token then we create ibc transfer msg, else we create ibc wasm transfer msg for evm case
         if receiver.is_receiver_evm_based() {
+            // use sender from ICS20Packet as receiver when transferring back
         } else {
         }
     }
