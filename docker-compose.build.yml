@@ -1,9 +1,0 @@
-version: '3.3'
-services:
-  build:
-    image: oraichain/foundation-orai:0.41.0-alpine-dev
-    tty: true
-    command: sh -c "wget https://github.com/oraichain/orai/releases/download/release-libwasmvm/libwasmvm_muslc_latest.a -O /lib/libwasmvm_muslc.a; apk add upx build-base coreutils; make build; upx --best --lzma build/oraid"
-    # build: apk add upx;make build;upx --best --lzma build/oraid
-    volumes:
-      - ./:/workspace

@@ -1,8 +1,0 @@
-{
-    "hostMap": {
-        "lcd.earth.orai.io": "earth:1317",
-        "rpc.earth.orai.io": "earth:26657",
-        "lcd.mars.orai.io": "mars:1317",
-        "rpc.mars.orai.io": "mars:26657"
-    }
-}
