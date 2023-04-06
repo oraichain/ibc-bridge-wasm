@@ -4,13 +4,13 @@ use cosmwasm_schema::cw_serde;
 pub struct DestinationInfo {
     pub receiver: String,
     pub destination_channel: String,
+    /// destination denom can be in cw20 form or ibc/<hash>
     pub destination_denom: String,
 }
 
 impl DestinationInfo {
-    // string format: <destination-channel>/<receiver>:<denom>
+    // destination string format: <destination-channel>/<receiver>:<denom>
     pub fn from_str(value: &str) -> Self {
-        // TODO: Change to splitn to receive source channel & destination channel
         let (destination, denom) = match value.split_once(':') {
             Some((destination, denom)) => (destination, denom),
             None => (value, ""),
@@ -28,20 +28,26 @@ impl DestinationInfo {
         }
     }
 
-    pub fn is_receiver_evm_based(&self) -> bool {
+    pub fn is_receiver_evm_based(&self) -> (bool, Self) {
+        let mut new_destination: DestinationInfo = DestinationInfo {
+            receiver: self.receiver.clone(),
+            destination_channel: self.destination_channel.clone(),
+            destination_denom: self.destination_denom.clone(),
+        };
         match self.receiver.split_once("0x") {
             Some((evm_prefix, address)) => {
                 // has to have evm_prefix, otherwise we would not be able to know the real denom
                 if evm_prefix.is_empty() {
-                    return false;
+                    return (false, new_destination);
                 }
                 // after spliting (removing 0x) => size 40 for eth address
                 if address.len() != 40usize {
-                    return false;
+                    return (false, new_destination);
                 }
-                true
+                new_destination.destination_channel = evm_prefix.to_string();
+                (true, new_destination)
             }
-            None => false,
+            None => (false, new_destination),
         }
     }
 }
@@ -49,18 +55,18 @@ impl DestinationInfo {
 #[test]
 fn test_is_evm_based() {
     let d1 = DestinationInfo::from_str("cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
-    assert_eq!(false, d1.is_receiver_evm_based());
+    assert_eq!(false, d1.is_receiver_evm_based().0);
     let d1 = DestinationInfo::from_str("0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222");
     // false here because we need the evm-prefix as well!
-    assert_eq!(false, d1.is_receiver_evm_based());
+    assert_eq!(false, d1.is_receiver_evm_based().0);
     let d1 = DestinationInfo::from_str("foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278b");
     // false here because of the wrong eth address
-    assert_eq!(false, d1.is_receiver_evm_based());
+    assert_eq!(false, d1.is_receiver_evm_based().0);
     let d1 = DestinationInfo::from_str(
         "channel-15/foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222:usdt",
     );
     // false here because we need the evm-prefix as well!
-    assert_eq!(true, d1.is_receiver_evm_based());
+    assert_eq!(true, d1.is_receiver_evm_based().0);
 }
 
 #[test]

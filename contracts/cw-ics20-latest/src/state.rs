@@ -16,11 +16,11 @@ pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args");
 /// static info on one channel that doesn't change
 pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
 
-/// indexed by (channel_id, denom) maintaining the balance of the channel in that currency. Forward channel state is used when local chain initiates ibc transfer to remote chain
+/// Forward channel state is used when LOCAL chain initiates ibc transfer to remote chain
 pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
     Map::new("channel_forward_state");
 
-/// indexed by (channel_id, denom) maintaining the balance of the channel in that currency. Reverse channel state is used when remote chain initiates ibc transfer to local chain
+/// Reverse channel state is used when REMOTE chain initiates ibc transfer to local chain
 pub const CHANNEL_REVERSE_STATE: Map<(&str, &str), ChannelState> =
     Map::new("channel_reverse_state");
 
