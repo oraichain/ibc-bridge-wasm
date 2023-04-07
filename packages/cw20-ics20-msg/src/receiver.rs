@@ -44,6 +44,7 @@ impl DestinationInfo {
                 if address.len() != 40usize {
                     return (false, new_destination);
                 }
+                // we store evm-preifx as destination channel so we can filter in the pair mapping based on asset info
                 new_destination.destination_channel = evm_prefix.to_string();
                 (true, new_destination)
             }
@@ -60,13 +61,14 @@ fn test_is_evm_based() {
     // false here because we need the evm-prefix as well!
     assert_eq!(false, d1.is_receiver_evm_based().0);
     let d1 = DestinationInfo::from_str("foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278b");
-    // false here because of the wrong eth address
+    // false here because of the wrong eth address, not enough in length
     assert_eq!(false, d1.is_receiver_evm_based().0);
     let d1 = DestinationInfo::from_str(
         "channel-15/foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222:usdt",
     );
-    // false here because we need the evm-prefix as well!
-    assert_eq!(true, d1.is_receiver_evm_based().0);
+    let (is_evm_based, d1) = d1.is_receiver_evm_based();
+    assert_eq!(true, is_evm_based);
+    assert_eq!("foobar".to_string(), d1.destination_channel);
 }
 
 #[test]
@@ -97,39 +99,41 @@ fn test_parse_destination_info() {
     assert_eq!(
         d3,
         DestinationInfo {
-            receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
-            destination_channel: "".to_string(),
-            destination_denom: "usdt".to_string()
+            receiver: "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz".to_string(),
+            destination_channel: "channel-15".to_string(),
+            destination_denom: "".to_string()
         }
     );
-    // this case returns an error (because it has channel but no destination denom)
-    let d4 = DestinationInfo::from_str("channel-15/orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
+    let d4 =
+        DestinationInfo::from_str("trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt");
     assert_eq!(
         d4,
         DestinationInfo {
-            receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
+            receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
             destination_channel: "".to_string(),
-            destination_denom: "usdt".to_string()
-        }
-    );
-    let d5 =
-        DestinationInfo::from_str("trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt");
-    assert_eq!(
-        d5,
-        DestinationInfo {
-            receiver: "0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
-            destination_channel: "trx-mainnet".to_string(),
             destination_denom: "usdt".to_string()
         }
     );
 
-    let d6 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
+    let d5 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
     assert_eq!(
-        d6,
+        d5,
         DestinationInfo {
             receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
             destination_channel: "".to_string(),
             destination_denom: "".to_string()
+        }
+    );
+
+    let d6 = DestinationInfo::from_str(
+        "channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt",
+    );
+    assert_eq!(
+        d6,
+        DestinationInfo {
+            receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
+            destination_channel: "channel-5".to_string(),
+            destination_denom: "usdt".to_string()
         }
     );
 }

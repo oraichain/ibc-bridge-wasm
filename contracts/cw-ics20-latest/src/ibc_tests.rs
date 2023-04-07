@@ -1,19 +1,24 @@
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::ibc::{
-        check_gas_limit, ibc_packet_receive, parse_voucher_denom, Ics20Ack, Ics20Packet, RECEIVE_ID,
-    };
-    use crate::test_helpers::*;
-    use cosmwasm_std::{
-        from_binary, to_binary, Addr, BankMsg, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg,
-        IbcTimeout, SubMsg, Timestamp, Uint128, WasmMsg,
-    };
+    use cosmwasm_std::{coin, Addr, CosmosMsg, StdError};
+    use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
 
+    use crate::ibc::{
+        build_ibc_msg, check_gas_limit, ibc_packet_receive, parse_voucher_denom, Ics20Ack,
+        Ics20Packet, RECEIVE_ID,
+    };
+    use crate::ibc::{build_swap_operations, get_follow_up_msgs};
+    use crate::test_helpers::*;
+    use cosmwasm_std::{
+        from_binary, to_binary, BankMsg, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg,
+        IbcTimeout, SubMsg, Timestamp, Uint128, WasmMsg,
+    };
+
     use crate::error::ContractError;
-    use crate::state::get_key_ics20_ibc_denom;
-    use cw20::Cw20ExecuteMsg;
+    use crate::state::{get_key_ics20_ibc_denom, increase_channel_balance};
+    use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::Amount;
 
     use crate::contract::{execute, migrate, query_channel};
@@ -449,7 +454,7 @@ mod test {
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         println!("res: {:?}", res);
-        assert_eq!(res.messages.len(), 2);
+        assert_eq!(res.messages.len(), 1);
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
         println!("ack: {:?}", ack);
         assert!(matches!(ack, Ics20Ack::Result(_)));
@@ -469,6 +474,237 @@ mod test {
                 876543210,
                 &get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom)
             )]
+        );
+    }
+
+    #[test]
+    fn test_swap_operations() {
+        let receiver_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("foobar"),
+        };
+        let cw20_address = Addr::unchecked("addr");
+        let fee_denom = "orai".to_string();
+        let destination: DestinationInfo = DestinationInfo {
+            receiver: "cosmos".to_string(),
+            destination_channel: "channel-1".to_string(),
+            destination_denom: "foobar".to_string(),
+        };
+
+        let operations = build_swap_operations(
+            receiver_asset_info.clone(),
+            cw20_address.clone(),
+            fee_denom.as_str(),
+            &destination,
+        );
+        assert_eq!(operations.len(), 2);
+
+        let fee_denom = "foobar".to_string();
+        let operations =
+            build_swap_operations(receiver_asset_info, cw20_address, &fee_denom, &destination);
+        assert_eq!(operations.len(), 1);
+    }
+
+    #[test]
+    fn test_get_ibc_msg() {
+        let send_channel = "channel-9";
+        let receive_channel = "channel-1";
+        let allowed = "foobar";
+        let allowed_gas = 777666;
+        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
+        let receiver_asset_info = AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        };
+        let amount = Uint128::from(10u128);
+        let remote_address = "eth-mainnet0x1235";
+        let ibc_wasm_addr = "addr";
+        let mut destination = DestinationInfo {
+            receiver: "0x1234".to_string(),
+            destination_channel: "channel-10".to_string(),
+            destination_denom: "atom".to_string(),
+        };
+        let timeout = 1000u64;
+
+        // first case, destination channel empty
+        destination.destination_channel = "".to_string();
+
+        let err = build_ibc_msg(
+            deps.as_mut().storage,
+            &receiver_asset_info.to_string(),
+            receive_channel,
+            amount,
+            remote_address,
+            ibc_wasm_addr,
+            &destination,
+            timeout,
+        )
+        .unwrap_err();
+        assert_eq!(err, StdError::generic_err("Destination channel empty"));
+
+        // not evm based case, should be successful & cosmos msg is ibc transfer
+        destination.destination_channel = "channel-10".to_string();
+        let result = build_ibc_msg(
+            deps.as_mut().storage,
+            &receiver_asset_info.to_string(),
+            receive_channel,
+            amount,
+            remote_address,
+            ibc_wasm_addr,
+            &destination,
+            timeout,
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            CosmosMsg::Ibc(IbcMsg::Transfer {
+                channel_id: "channel-10".to_string(),
+                to_address: "0x1234".to_string(),
+                amount: coin(10u128, "atom"),
+                timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(1000u64))
+            })
+        );
+
+        // evm based case, error getting pair mapping
+        destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
+        let err = build_ibc_msg(
+            deps.as_mut().storage,
+            &receiver_asset_info.to_string(),
+            receive_channel,
+            amount,
+            remote_address,
+            ibc_wasm_addr,
+            &destination,
+            timeout,
+        )
+        .unwrap_err();
+        assert_eq!(err, StdError::generic_err("cannot find pair mappings"));
+
+        // add a pair mapping so we can test the happy case
+        let update = UpdatePairMsg {
+            local_channel_id: "mars-channel".to_string(),
+            denom: "trx-mainnet".to_string(),
+            asset_info: receiver_asset_info.clone(),
+            remote_decimals: 18,
+            asset_info_decimals: 18,
+        };
+
+        // works with proper funds
+        let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+
+        let info = mock_info("gov", &coins(1234567, "ucosm"));
+        execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        let pair_mapping_key = format!(
+            "wasm.{}/{}/{}",
+            "cosmos2contract", update.local_channel_id, "trx-mainnet"
+        );
+        increase_channel_balance(
+            deps.as_mut().storage,
+            receive_channel,
+            pair_mapping_key.as_str(),
+            amount.clone(),
+            false,
+        )
+        .unwrap();
+        destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
+        destination.destination_channel = "trx-mainnet".to_string();
+        let result = build_ibc_msg(
+            deps.as_mut().storage,
+            &receiver_asset_info.to_string(),
+            receive_channel,
+            amount,
+            remote_address,
+            ibc_wasm_addr,
+            &destination,
+            timeout,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            CosmosMsg::Ibc(IbcMsg::SendPacket {
+                channel_id: receive_channel.to_string(),
+                data: to_binary(&Ics20Packet::new(
+                    amount.clone(),
+                    pair_mapping_key,
+                    ibc_wasm_addr,
+                    &remote_address,
+                    Some(destination.receiver),
+                ))
+                .unwrap(),
+                timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(1000u64))
+            })
+        );
+    }
+
+    #[test]
+    fn test_follow_up_msgs() {
+        let send_channel = "channel-9";
+        let allowed = "foobar";
+        let allowed_gas = 777666;
+        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
+        let deps_mut = deps.as_mut();
+        let receiver = "foobar";
+        let amount = Uint128::from(1u128);
+        let ibc_wasm_addr = Addr::unchecked("foobar");
+
+        // first case, memo empty => return send amount with receiver input
+        let result = get_follow_up_msgs(
+            deps_mut.storage,
+            deps_mut.api,
+            &deps_mut.querier,
+            ibc_wasm_addr.clone(),
+            Amount::Cw20(Cw20Coin {
+                address: "foobar".to_string(),
+                amount: amount.clone(),
+            }),
+            "foobar",
+            receiver.clone(),
+            "",
+            &mock_receive_packet_remote_to_local("channel", 1u128, "foobar", "foobar"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: ibc_wasm_addr.clone().into_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: receiver.to_string(),
+                    amount: amount.clone()
+                })
+                .unwrap(),
+                funds: vec![]
+            })]
+        );
+
+        // 2nd case, destination denom is empty => destination is collected from memo
+        let memo = "channel-15/cosmosabcd";
+        let result = get_follow_up_msgs(
+            deps_mut.storage,
+            deps_mut.api,
+            &deps_mut.querier,
+            ibc_wasm_addr.clone(),
+            Amount::Cw20(Cw20Coin {
+                address: "foobar".to_string(),
+                amount,
+            }),
+            "foobar",
+            "foobar",
+            memo,
+            &mock_receive_packet_remote_to_local("channel", 1u128, "foobar", "foobar"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: ibc_wasm_addr.clone().into_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: "cosmosabcd".to_string(),
+                    amount: amount.clone()
+                })
+                .unwrap(),
+                funds: vec![]
+            })]
         );
     }
 }

@@ -13,6 +13,8 @@ pub const CONFIG: Item<Config> = Item::new("ics20_config_v11");
 // Used to pass info from the ibc_packet_receive to the reply handler
 pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args");
 
+pub const SINGLE_STEP_REPLY_ARGS: Item<ReplyArgs> = Item::new("single_step_reply_args");
+
 /// static info on one channel that doesn't change
 pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
 
