@@ -427,7 +427,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     Ok(res)
 }
 
-// TODO: add unit & e2e tests for this function
+// TODO: add e2e tests for this function
 pub fn get_follow_up_msgs(
     storage: &mut dyn Storage,
     api: &dyn Api,
@@ -564,7 +564,6 @@ pub fn build_swap_msgs(
     Ok(minimum_receive)
 }
 
-// TODO: add test cases
 pub fn build_ibc_msg(
     storage: &mut dyn Storage,
     receiver_asset_info: &str,

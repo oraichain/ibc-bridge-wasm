@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, IbcEndpoint, IbcMsg,
-    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdResult,
+    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcMsg, IbcQuery,
+    MessageInfo, Order, PortIdResponse, Response, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -39,7 +39,6 @@ pub fn instantiate(
     let cfg = Config {
         default_timeout: msg.default_timeout,
         default_gas_limit: msg.default_gas_limit,
-        default_orai_fee_swap: Decimal::percent(20u64),
         fee_denom: "orai".to_string(),
         swap_router_contract: msg.swap_router_contract,
     };
@@ -81,11 +80,52 @@ pub fn execute(
         ExecuteMsg::UpdateMappingPair(msg) => execute_update_mapping_pair(deps, env, info, msg),
         ExecuteMsg::DeleteMappingPair(msg) => execute_delete_mapping_pair(deps, env, info, msg),
         ExecuteMsg::Allow(allow) => execute_allow(deps, env, info, allow),
-        ExecuteMsg::UpdateAdmin { admin } => {
-            let admin = deps.api.addr_validate(&admin)?;
-            Ok(ADMIN.execute_update_admin(deps, info, Some(admin))?)
-        }
+        ExecuteMsg::UpdateConfig {
+            default_timeout,
+            default_gas_limit,
+            fee_denom,
+            swap_router_contract,
+            admin,
+        } => update_config(
+            deps,
+            info,
+            default_timeout,
+            default_gas_limit,
+            fee_denom,
+            swap_router_contract,
+            admin,
+        ),
     }
+}
+
+pub fn update_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    default_timeout: Option<u64>,
+    default_gas_limit: Option<u64>,
+    fee_denom: Option<String>,
+    swap_router_contract: Option<String>,
+    admin: Option<String>,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+    CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
+        if let Some(default_timeout) = default_timeout {
+            config.default_timeout = default_timeout;
+        }
+        if let Some(fee_denom) = fee_denom {
+            config.fee_denom = fee_denom;
+        }
+        if let Some(swap_router_contract) = swap_router_contract {
+            config.swap_router_contract = swap_router_contract;
+        }
+        config.default_gas_limit = default_gas_limit;
+        Ok(config)
+    })?;
+    if let Some(admin) = admin {
+        let admin = deps.api.addr_validate(&admin)?;
+        ADMIN.execute_update_admin::<Empty, Empty>(deps, info, Some(admin))?;
+    }
+    Ok(Response::default().add_attribute("action", "update_config"))
 }
 
 pub fn execute_receive(
@@ -408,7 +448,6 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
         &Config {
             default_timeout: msg.default_timeout,
             default_gas_limit: msg.default_gas_limit,
-            default_orai_fee_swap: msg.default_orai_fee_swap,
             fee_denom: msg.fee_denom,
             swap_router_contract: msg.swap_router_contract,
         },
@@ -494,6 +533,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let res = ConfigResponse {
         default_timeout: cfg.default_timeout,
         default_gas_limit: cfg.default_gas_limit,
+        fee_denom: cfg.fee_denom,
+        swap_router_contract: cfg.swap_router_contract,
         gov_contract: admin.into(),
     };
     Ok(res)
@@ -1048,7 +1089,6 @@ mod test {
             mock_env(),
             MigrateMsg {
                 default_gas_limit: Some(123456),
-                default_orai_fee_swap: Decimal::percent(5),
                 default_timeout: 100u64,
                 fee_denom: "orai".to_string(),
                 swap_router_contract: "foobar".to_string(),
@@ -1231,5 +1271,26 @@ mod test {
         });
         let err = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap_err();
         assert_eq!(err, ContractError::MappingPairNotFound {});
+    }
+
+    #[test]
+    fn test_update_config() {
+        // arrange
+        let mut deps = setup(&[], &[]);
+        let new_config = ExecuteMsg::UpdateConfig {
+            admin: Some("helloworld".to_string()),
+            default_timeout: Some(1),
+            default_gas_limit: None,
+            fee_denom: Some("hehe".to_string()),
+            swap_router_contract: Some("new_router".to_string()),
+        };
+        let info = mock_info(&String::from("gov"), &[]);
+        execute(deps.as_mut(), mock_env(), info, new_config).unwrap();
+        let config: ConfigResponse =
+            from_binary(&query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap()).unwrap();
+        assert_eq!(config.default_gas_limit, None);
+        assert_eq!(config.default_timeout, 1);
+        assert_eq!(config.fee_denom, "hehe".to_string());
+        assert_eq!(config.swap_router_contract, "new_router".to_string());
     }
 }

@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Binary, Decimal, IbcEndpoint};
+use cosmwasm_std::{Addr, Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
@@ -31,7 +31,6 @@ pub struct AllowMsg {
 pub struct MigrateMsg {
     pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
-    pub default_orai_fee_swap: Decimal,
     pub fee_denom: String,
     pub swap_router_contract: String,
 }
@@ -48,8 +47,12 @@ pub enum ExecuteMsg {
     /// This must be called by gov_contract, will allow a new cw20 token to be sent
     Allow(AllowMsg),
     /// Change the admin (must be called by current admin)
-    UpdateAdmin {
-        admin: String,
+    UpdateConfig {
+        admin: Option<String>,
+        default_timeout: Option<u64>,
+        default_gas_limit: Option<u64>,
+        fee_denom: Option<String>,
+        swap_router_contract: Option<String>,
     },
 }
 
@@ -179,6 +182,8 @@ pub struct PortResponse {
 pub struct ConfigResponse {
     pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
+    pub fee_denom: String,
+    pub swap_router_contract: String,
     pub gov_contract: String,
 }
 

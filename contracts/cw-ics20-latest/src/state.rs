@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Decimal, IbcEndpoint, StdResult, Storage, Uint128};
+use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use oraiswap::asset::AssetInfo;
@@ -66,7 +66,6 @@ pub struct ChannelState {
 pub struct Config {
     pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
-    pub default_orai_fee_swap: Decimal,
     pub fee_denom: String,
     pub swap_router_contract: String,
 }

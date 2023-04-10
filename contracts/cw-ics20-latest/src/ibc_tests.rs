@@ -282,7 +282,6 @@ mod test {
             MigrateMsg {
                 default_gas_limit: Some(def_limit),
                 default_timeout: 100u64,
-                default_orai_fee_swap: Decimal::percent(5),
                 fee_denom: "orai".to_string(),
                 swap_router_contract: "foobar".to_string(),
             },
