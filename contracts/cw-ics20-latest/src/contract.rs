@@ -1284,6 +1284,17 @@ mod test {
             fee_denom: Some("hehe".to_string()),
             swap_router_contract: Some("new_router".to_string()),
         };
+        // unauthorized case
+        let unauthorized_info = mock_info(&String::from("somebody"), &[]);
+        let is_err = execute(
+            deps.as_mut(),
+            mock_env(),
+            unauthorized_info,
+            new_config.clone(),
+        )
+        .is_err();
+        assert_eq!(is_err, true);
+        // valid case
         let info = mock_info(&String::from("gov"), &[]);
         execute(deps.as_mut(), mock_env(), info, new_config).unwrap();
         let config: ConfigResponse =
