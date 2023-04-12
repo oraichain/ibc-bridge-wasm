@@ -9,7 +9,7 @@ use cosmwasm_std::{
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
-use oraiswap::router::SwapOperation;
+use oraiswap::router::{SimulateSwapOperationsResponse, SwapOperation};
 
 use crate::error::{ContractError, Never};
 use crate::state::{
@@ -17,7 +17,7 @@ use crate::state::{
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, MappingMetadata,
     ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
 };
-use cw20::Cw20ExecuteMsg;
+use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
 pub const ICS20_VERSION: &str = "ics20-1";
@@ -456,19 +456,22 @@ pub fn get_follow_up_msgs(
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
     let cw20_address = api.addr_validate(&to_send.raw_denom())?;
     // if there's a receiver => swap receiver is this ibc wasm address
-    let to = if !destination.receiver.is_empty() {
-        None
+    let to = parse_swap_to(&destination.destination_channel, &destination.receiver);
+    let receiver_asset_info = if querier
+        .query_wasm_smart::<TokenInfoResponse>(
+            destination.destination_denom.clone(),
+            &Cw20QueryMsg::TokenInfo {},
+        )
+        .is_ok()
+    {
+        AssetInfo::Token {
+            contract_addr: Addr::unchecked(destination.destination_denom.clone()),
+        }
     } else {
-        Some(destination.receiver.clone())
+        AssetInfo::NativeToken {
+            denom: destination.destination_denom.clone(),
+        }
     };
-    let receiver_asset_info =
-        if let Some(contract_addr) = api.addr_validate(&destination.destination_denom).ok() {
-            AssetInfo::Token { contract_addr }
-        } else {
-            AssetInfo::NativeToken {
-                denom: destination.destination_denom.clone(),
-            }
-        };
     let swap_operations = build_swap_operations(
         receiver_asset_info.clone(),
         cw20_address.clone(),
@@ -529,6 +532,14 @@ pub fn build_swap_operations(
     swap_operations
 }
 
+pub fn parse_swap_to(dest_channel: &str, dest_receiver: &str) -> Option<String> {
+    // if there's a destination channel, then we wont swap to dest receiver, but swap to ibc wasm contract
+    if !dest_channel.is_empty() {
+        return None;
+    }
+    Some(dest_receiver.to_string())
+}
+
 pub fn build_swap_msgs(
     querier: &QuerierWrapper,
     swap_router_contract: &str,
@@ -538,7 +549,7 @@ pub fn build_swap_msgs(
     cosmos_msgs: &mut Vec<CosmosMsg>,
     operations: Vec<SwapOperation>,
 ) -> StdResult<Uint128> {
-    let minimum_receive: Uint128 = querier.query_wasm_smart(
+    let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
         swap_router_contract.clone(),
         &oraiswap::router::QueryMsg::SimulateSwapOperations {
             offer_amount: amount.clone(),
@@ -553,7 +564,7 @@ pub fn build_swap_msgs(
                 amount,
                 msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
                     operations,
-                    minimum_receive: Some(minimum_receive.clone()),
+                    minimum_receive: Some(response.amount.clone()),
                     to,
                 })?,
             })?,
@@ -561,7 +572,7 @@ pub fn build_swap_msgs(
         }
         .into(),
     );
-    Ok(minimum_receive)
+    Ok(response.amount)
 }
 
 pub fn build_ibc_msg(
