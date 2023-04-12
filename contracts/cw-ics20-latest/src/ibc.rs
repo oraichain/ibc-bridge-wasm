@@ -458,10 +458,7 @@ pub fn get_follow_up_msgs(
     // if there's a receiver => swap receiver is this ibc wasm address
     let to = parse_swap_to(&destination.destination_channel, &destination.receiver);
     let receiver_asset_info = if querier
-        .query_wasm_smart::<TokenInfoResponse>(
-            destination.destination_denom.clone(),
-            &Cw20QueryMsg::TokenInfo {},
-        )
+        .query_wasm_contract_info(destination.destination_denom.clone())
         .is_ok()
     {
         AssetInfo::Token {
