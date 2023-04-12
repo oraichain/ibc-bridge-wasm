@@ -136,11 +136,17 @@ pub fn reduce_channel_balance(
         (channel, denom),
         |orig| -> Result<_, ContractError> {
             // this will return error if we don't have the funds there to cover the request (or no denom registered)
-            let mut cur = orig.ok_or(ContractError::InsufficientFunds {})?;
-            cur.outstanding = cur
-                .outstanding
-                .checked_sub(amount)
-                .or(Err(ContractError::InsufficientFunds {}))?;
+            let mut cur = orig.ok_or(ContractError::NoSuchChannelState {
+                id: channel.to_string(),
+                denom: denom.to_string(),
+            })?;
+            cur.outstanding =
+                cur.outstanding
+                    .checked_sub(amount)
+                    .or(Err(ContractError::InsufficientFunds {
+                        id: channel.to_string(),
+                        denom: denom.to_string(),
+                    }))?;
             Ok(cur)
         },
     )?;

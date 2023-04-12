@@ -1181,7 +1181,13 @@ mod test {
         // insufficient funds case because we need to receive from remote chain first
         let info = mock_info(cw20_raw_denom, &[]);
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone()).unwrap_err();
-        assert_eq!(res, ContractError::InsufficientFunds {});
+        assert_eq!(
+            res,
+            ContractError::NoSuchChannelState {
+                id: local_channel.to_string(),
+                denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
+            }
+        );
 
         // prepare some mock packets
         let recv_packet =

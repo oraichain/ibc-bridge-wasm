@@ -382,6 +382,21 @@ fn handle_ibc_packet_receive_native_remote_chain(
             pair_mapping.asset_info_decimals,
         )?,
     );
+    increase_channel_balance(
+        storage,
+        &packet.dest.channel_id,
+        &ibc_denom,
+        msg.amount.clone(),
+        false,
+    )?;
+    // we need to save the data to update the balances in reply
+    let reply_args = ReplyArgs {
+        channel: packet.dest.channel_id.clone(),
+        denom: ibc_denom.clone(),
+        amount: msg.amount,
+    };
+    REPLY_ARGS.save(storage, &reply_args)?;
+
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
     let submsgs: Vec<SubMsg> = get_follow_up_msgs(
         storage,
@@ -397,22 +412,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
     .into_iter()
     .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_MSGS_ID))
     .collect();
-
-    increase_channel_balance(
-        storage,
-        &packet.dest.channel_id,
-        &ibc_denom,
-        msg.amount.clone(),
-        false,
-    )?;
-
-    // we need to save the data to update the balances in reply
-    let reply_args = ReplyArgs {
-        channel: packet.dest.channel_id.clone(),
-        denom: ibc_denom.clone(),
-        amount: msg.amount,
-    };
-    REPLY_ARGS.save(storage, &reply_args)?;
 
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())

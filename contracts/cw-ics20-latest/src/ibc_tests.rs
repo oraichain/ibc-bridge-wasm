@@ -135,7 +135,13 @@ mod test {
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         assert!(res.messages.is_empty());
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        let no_funds = Ics20Ack::Error(ContractError::InsufficientFunds {}.to_string());
+        let no_funds = Ics20Ack::Error(
+            ContractError::NoSuchChannelState {
+                id: send_channel.to_string(),
+                denom: cw20_denom.to_string(),
+            }
+            .to_string(),
+        );
         assert_eq!(ack, no_funds);
 
         // we send some cw20 tokens over
@@ -180,7 +186,16 @@ mod test {
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         assert!(res.messages.is_empty());
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        assert_eq!(ack, no_funds);
+        assert_eq!(
+            ack,
+            Ics20Ack::Error(
+                ContractError::InsufficientFunds {
+                    id: send_channel.to_string(),
+                    denom: cw20_denom.to_string(),
+                }
+                .to_string(),
+            )
+        );
 
         // we can receive less than we sent
         let msg = IbcPacketReceiveMsg::new(recv_packet);
@@ -215,7 +230,13 @@ mod test {
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         assert!(res.messages.is_empty());
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        let no_funds = Ics20Ack::Error(ContractError::InsufficientFunds {}.to_string());
+        let no_funds = Ics20Ack::Error(
+            ContractError::InsufficientFunds {
+                id: send_channel.to_string(),
+                denom: denom.to_string(),
+            }
+            .to_string(),
+        );
         assert_eq!(ack, no_funds);
 
         // we transfer some tokens
@@ -711,7 +732,7 @@ mod test {
     pub fn test_parse_dest_receiver() {
         assert_eq!(parse_swap_to("abcd", ""), None);
         assert_eq!(parse_swap_to("abcd", "abcd"), None);
-        assert_eq!(parse_swap_to("", ""), None);
+        assert_eq!(parse_swap_to("", ""), Some("".to_string()));
         assert_eq!(parse_swap_to("", "abcd"), Some("abcd".to_string()))
     }
 }
