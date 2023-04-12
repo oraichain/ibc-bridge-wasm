@@ -231,7 +231,7 @@ mod test {
         assert!(res.messages.is_empty());
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
         let no_funds = Ics20Ack::Error(
-            ContractError::InsufficientFunds {
+            ContractError::NoSuchChannelState {
                 id: send_channel.to_string(),
                 denom: denom.to_string(),
             }
@@ -259,7 +259,16 @@ mod test {
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         assert!(res.messages.is_empty());
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        assert_eq!(ack, no_funds);
+        assert_eq!(
+            ack,
+            Ics20Ack::Error(
+                ContractError::InsufficientFunds {
+                    id: send_channel.to_string(),
+                    denom: denom.to_string(),
+                }
+                .to_string(),
+            )
+        );
 
         // we can receive less than we sent
         let msg = IbcPacketReceiveMsg::new(recv_packet);
