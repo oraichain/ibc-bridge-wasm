@@ -6,8 +6,8 @@ mod test {
     use oraiswap::asset::AssetInfo;
 
     use crate::ibc::{
-        build_ibc_msg, check_gas_limit, ibc_packet_receive, parse_swap_to, parse_voucher_denom,
-        Ics20Ack, Ics20Packet, RECEIVE_ID,
+        build_ibc_msg, check_gas_limit, ibc_packet_receive, parse_voucher_denom, Ics20Ack,
+        Ics20Packet, RECEIVE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -735,13 +735,5 @@ mod test {
                 funds: vec![]
             })]
         );
-    }
-
-    #[test]
-    pub fn test_parse_dest_receiver() {
-        assert_eq!(parse_swap_to("abcd", ""), None);
-        assert_eq!(parse_swap_to("abcd", "abcd"), None);
-        assert_eq!(parse_swap_to("", ""), Some("".to_string()));
-        assert_eq!(parse_swap_to("", "abcd"), Some("abcd".to_string()))
     }
 }
