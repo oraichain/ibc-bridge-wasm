@@ -426,7 +426,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
     Ok(res)
 }
 
-// TODO: add e2e tests for this function
 pub fn get_follow_up_msgs(
     storage: &mut dyn Storage,
     api: &dyn Api,
@@ -583,7 +582,9 @@ pub fn build_ibc_msg(
 ) -> StdResult<CosmosMsg> {
     // if there's no dest channel then we stop, no need to transfer ibc
     if destination.destination_channel.is_empty() {
-        return Err(StdError::generic_err("Destination channel empty"));
+        return Err(StdError::generic_err(
+            "Destination channel empty in build ibc msg",
+        ));
     }
     let (is_evm_based, destination) = destination.is_receiver_evm_based();
     if is_evm_based {
@@ -596,7 +597,9 @@ pub fn build_ibc_msg(
             .collect();
 
         if pair_mappings.is_err() {
-            return Err(StdError::generic_err("error pair mapping"));
+            return Err(StdError::generic_err(
+                "error querying pair mapping in build ibc msg",
+            ));
         }
         let pair_mappings = pair_mappings
             .unwrap()

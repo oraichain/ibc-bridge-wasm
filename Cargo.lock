@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "cw-ics20"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
