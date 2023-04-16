@@ -1,84 +1,28 @@
-## Installation
+# IBC transfer flow:
 
-```bash
+Let's assume the network that has the contract cw20-ics20 deployed is network B, the other network is A.
+In the cw-ics20-latest contract, there are couple transfer flows in the code below:
 
-# run the build container for oraid. Wait for it to finish
-docker-compose -f docker-compose.build.yml up
-```
+## Network A transfers native tokens to B first (A->B, where native token is not IBC token)
 
-## Start the networks
+In this case, the packet is caught in the `do_ibc_packet_receive` function, we increase the balance's channel then forward the packet to the `allow_contract` contract for minting. Then, the cw-ics20 contract returns an acknowledgement to the network A.
 
-```bash
-docker-compose up -d
-```
+Here, if any line returns an error, then the cw-ics20 contract will send a fail acknowledgement to the network A, and the network A will refund the tokens to the sender according to the `ibctransfer` application.
 
-## deploy smart contract
+## Network A transfers IBC tokens to B (A->B, where IBC tokens are tokens that were previously sent from B to A)
 
-```bash
-# build smart contract
-./scripts/build_contract.sh contracts/cw-ics20-latest
-sudo cp contracts/cw-ics20-latest/artifacts/cw-ics20-latest.wasm .mars
+In this case, the packet is also caught in the `do_ibc_packet_receive`, but we parse the ibc denom to get the original denom instead, and send the same amount that is stored in the cw-ics20 contract to the receiver using SubMsg (with reply on error). This is the logic that the CosmWasm developers wrote.
 
-# build cw20
-./scripts/build_contract.sh contracts/cw20-base
-cp contracts/cw20-base/artifacts/cw20-base.wasm .mars
+## Network B transfers tokens to A (B->A, where tokens are either native or cw20 that originated from B)
 
-# go to mars network
-docker-compose exec mars ash
+In this case, the user will deposit his tokens into the cw-ics20 contract, then the contract will create a new IBCPacket and transfer it to the network A. The cw-ics20 contract then invokes the `ibc_packet_ack` function, which has the acknowledgement packet sent from A. If the ack is a failure, then we refund (using SubMsg with reply on error) the original sender by using the tokens stored on the cw-ics20 contract. This is also the logic that CosmWasm developers wrote.
 
-./scripts/deploy_contract.sh .mars/cw-ics20-latest.wasm 'cw20-ics20-latest' '{"default_timeout":180,"gov_contract":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq","allowlist":[]}'
-# mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde
+## Network B transfers tokens to A (B->A, where tokens are native tokens from A)
 
-./scripts/deploy_contract.sh .mars/cw20-base.wasm 'cw20-base' '{"name":"EARTH","symbol":"EARTH","decimals":6,"initial_balances":[{"address":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","amount":"100"}],"mint":{"minter":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
-# mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l
+In this case, the user will deposit tokens to the `allow_contract`, and the allow contract will call the `execute_transfer_back_to_remote_chain` function. Here, the cw-ics20 contract will not hold any tokens. Instead, it only forwards the logic to the chain A. The cw-ics20 contract then invokes the `ibc_packet_ack` function, which has the acknowledgement packet sent from A. If the ack is a failure, then we refund by calling a message to the `allow_contract` requesting for a refund. We use the `CosmosMsg` instead of the `SubMsg`.
 
-# mint token for cw20-ics20 (optional)
-oraid tx wasm execute mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"mint":{"recipient":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","amount":"100000000000000000000000"}}' --keyring-backend test --from $USER --chain-id $CHAIN_ID -y -b block
+This is really important because by using the CosmosMsg, we force the `allow_contract` to actually refunds successfully. If we use SubMsg, then it could be that the `allow_contract` fails somewhere, and only its state gets reverted, aka the sender receives no refunds.
 
-oraid tx wasm execute mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde '{"update_mapping_pair":{"local_channel_id":"channel-0","denom":"uusd","asset_info":{"token":{"contract_addr":"mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l"}},"remote_decimals":6,"asset_info_decimals":6}}' --from $USER --chain-id $CHAIN_ID -y --keyring-backend test -b block
+If we use CosmosMsg, then the acknowledgement packet will fail entirely, and it will be retried by the relayer as long as we fix the `allow_contract`.
 
-# migrate contract
-./scripts/migrate_contract.sh .mars/cw-ics20-latest.wasm mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde # migrate to test changing cw20 contract
-```
-
-## start relayer
-
-```bash
-
-docker-compose exec hermes bash
-hermes --config config.toml keys add --chain Earth --mnemonic-file accounts/Earth.txt
-hermes --config config.toml keys add --chain Mars --mnemonic-file accounts/Mars.txt
-
-# create a channel
-hermes --config config.toml create channel --a-chain Earth --b-chain Mars --a-port transfer --b-port wasm.mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde --new-client-connection
-
-# start hermes
-hermes --config config.toml start
-```
-
-## send cross-channel
-
-```bash
-# from earth to mars on channel
-docker-compose exec earth ash
-oraid tx ibc-transfer transfer transfer channel-0 mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq 1uusd --from duc --chain-id Earth -y --keyring-backend test -b block
-# check mars balance
-docker-compose exec mars ash
-oraid query wasm contract-state smart mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"balance":{"address":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}}'
-
-# query channel
-oraid query wasm contract-state smart mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde '{"channel":{"id":"channel-0"}}'
-```
-
-## test send back to remote chain
-
-```bash
-
-# update the native allow contract to admin so we dont need to call cross contract for testing
-oraid tx wasm execute mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde '{"update_native_allow_contract":"mars15ez8l0c2qte2sa0a4xsdmaswy96vzj2fl2ephq"}' --from duc --chain-id $CHAIN_ID -y --keyring-backend test -b block
-
-# call transfer back method
-oraid tx wasm execute mars1nc5tatafv6eyq7llkr2gv50ff9e22mnf70qgjlv737ktmt4eswrqhnhf0l '{"send":{"amount":"1","contract":"mars14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9smxjtde","msg":"'$(echo '{"local_channel_id":"channel-0","remote_address":"earth1w84gt7t7dzvj6qmf5q73d2yzyz35uwc7y8fkwp","remote_denom":"uusd"}' | base64 -w 0)'"}}' --from duc --chain-id $CHAIN_ID -y -b block --keyring-backend test --gas 2000000
-```
-
-# TODO: draw a threat model for this
+Normally, if it is a `ibctransfer` application developed as a submodule in Cosmos SDK, then the refund part must not fail, and we can trust that it will not fail. However, the `allow_contract` can be developed by anyone, and can be replaced => cannot be trusted.
