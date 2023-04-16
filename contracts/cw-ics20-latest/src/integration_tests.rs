@@ -83,6 +83,7 @@ fn initialize_basic_data_for_testings() -> (App, Addr, Addr, IbcEndpoint, String
         default_timeout: DEFAULT_TIMEOUT,
         gov_contract: gov_cw20_ics20.to_string(),
         allowlist,
+        swap_router_contract: "router".to_string(),
     };
 
     let cw20_ics20_contract = router

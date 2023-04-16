@@ -24,6 +24,9 @@ pub enum ContractError {
     #[error("Channel doesn't exist: {id}")]
     NoSuchChannel { id: String },
 
+    #[error("Channel state doesn't exist: {id}, {denom}")]
+    NoSuchChannelState { id: String, denom: String },
+
     #[error("Didn't send any funds")]
     NoFunds {},
 
@@ -36,8 +39,8 @@ pub enum ContractError {
     #[error("Only supports unordered channel")]
     OnlyOrderedChannel {},
 
-    #[error("Insufficient funds to redeem voucher on channel")]
-    InsufficientFunds {},
+    #[error("Insufficient funds to redeem voucher on channel {id}, {denom}")]
+    InsufficientFunds { id: String, denom: String },
 
     #[error("Only accepts tokens that originate on this chain or native tokens of remote chain, not other types")]
     NoForeignTokens {},

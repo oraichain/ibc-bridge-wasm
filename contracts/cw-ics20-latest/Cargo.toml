@@ -1,13 +1,13 @@
 [package]
-name = "cw20-ics20-latest"
-version = "0.16.0"
-authors = ["Ethan Frey <ethanfrey@users.noreply.github.com>"]
+name = "cw-ics20"
+version = "1.0.2"
+authors = ["Ethan Frey <ethanfrey@users.noreply.github.com>, Oraichain Labs"]
 edition = "2021"
 description = "IBC Enabled contracts that receives CW20 tokens and sends them over ICS20 to a remote chain"
 license = "Apache-2.0"
-repository = "https://github.com/CosmWasm/cw-plus"
-homepage = "https://cosmwasm.com"
-documentation = "https://docs.cosmwasm.com"
+repository = "https://github.com/oraichain/ibc-bridge-wasm"
+homepage = "https://orai.io"
+documentation = "https://docs.orai.io"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -22,8 +22,8 @@ cosmwasm-schema = "1.1.9"
 cw-utils = "0.16.0"
 cw2 = "1.0.1"
 cw20 = "1.0.1"
-cw20-ics20-msg = { path = "../../packages/cw20-ics20-msg", version = "0.0.1" }
-oraiswap = {path = "../../../oraiswap/packages/oraiswap"}
+cw20-ics20-msg = {path = "../../packages/cw20-ics20-msg"}
+oraiswap = "1.0.0"
 cosmwasm-std = { version = "1.1.0", features = ["stargate"] }
 cw-storage-plus = "1.0.1"
 cw-controllers = "1.0.1"

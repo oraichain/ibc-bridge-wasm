@@ -17,6 +17,8 @@ pub struct InitMsg {
     /// If set, contracts off the allowlist will run with this gas limit.
     /// If unset, will refuse to accept any contract off the allow list.
     pub default_gas_limit: Option<u64>,
+    /// router contract for fee swap
+    pub swap_router_contract: String,
 }
 
 #[cw_serde]
@@ -27,7 +29,10 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
+    pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
+    pub fee_denom: String,
+    pub swap_router_contract: String,
 }
 
 #[cw_serde]
@@ -42,8 +47,12 @@ pub enum ExecuteMsg {
     /// This must be called by gov_contract, will allow a new cw20 token to be sent
     Allow(AllowMsg),
     /// Change the admin (must be called by current admin)
-    UpdateAdmin {
-        admin: String,
+    UpdateConfig {
+        admin: Option<String>,
+        default_timeout: Option<u64>,
+        default_gas_limit: Option<u64>,
+        fee_denom: Option<String>,
+        swap_router_contract: Option<String>,
     },
 }
 
@@ -173,6 +182,8 @@ pub struct PortResponse {
 pub struct ConfigResponse {
     pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
+    pub fee_denom: String,
+    pub swap_router_contract: String,
     pub gov_contract: String,
 }
 

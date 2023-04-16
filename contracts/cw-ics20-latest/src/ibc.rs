@@ -1,20 +1,24 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, BankMsg, Binary, CosmosMsg, Deps, DepsMut, Env,
-    IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcEndpoint, IbcOrder, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
-    IbcReceiveResponse, Reply, Response, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
+    attr, coin, entry_point, from_binary, to_binary, Addr, Api, BankMsg, Binary, CosmosMsg, Deps,
+    DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
+    IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket, IbcPacketAckMsg,
+    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout, Order,
+    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Timestamp,
+    Uint128, WasmMsg,
 };
+use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
+use oraiswap::router::{SimulateSwapOperationsResponse, SwapOperation};
 
 use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, ReplyArgs, ALLOW_LIST,
-    CHANNEL_INFO, CONFIG, REPLY_ARGS,
+    undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, MappingMetadata,
+    ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
 };
-use cw20::Cw20ExecuteMsg;
-use cw20_ics20_msg::amount::{convert_remote_to_local, Amount};
+use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
+use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
 pub const ICS20_VERSION: &str = "ics20-1";
 pub const ICS20_ORDERING: IbcOrder = IbcOrder::Unordered;
@@ -83,9 +87,10 @@ fn ack_fail(err: String) -> Binary {
     to_binary(&res).unwrap()
 }
 
-const RECEIVE_ID: u64 = 1337;
-const NATIVE_RECEIVE_ID: u64 = 1338;
-const ACK_FAILURE_ID: u64 = 0xfa17;
+pub const RECEIVE_ID: u64 = 1337;
+pub const NATIVE_RECEIVE_ID: u64 = 1338;
+pub const FOLLOW_UP_MSGS_ID: u64 = 1339;
+pub const ACK_FAILURE_ID: u64 = 64023;
 // const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
 #[entry_point]
@@ -145,6 +150,25 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                 Ok(Response::new()
                     .set_data(ack_fail(err.clone()))
                     .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
+            }
+        },
+        FOLLOW_UP_MSGS_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            SubMsgResult::Err(err) => {
+                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage).ok();
+                // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
+                if let Some(reply_args) = reply_args {
+                    undo_reduce_channel_balance(
+                        deps.storage,
+                        &reply_args.channel,
+                        &reply_args.denom,
+                        reply_args.amount,
+                        false,
+                    )?;
+                }
+                Ok(Response::new()
+                    .set_data(ack_fail(err.clone()))
+                    .add_attribute("error_follow_up_msgs", err))
             }
         },
         ACK_FAILURE_ID => match reply.result {
@@ -231,12 +255,12 @@ pub fn ibc_channel_close(
 /// We should not return an error if possible, but rather an acknowledgement of failure
 pub fn ibc_packet_receive(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     msg: IbcPacketReceiveMsg,
 ) -> Result<IbcReceiveResponse, Never> {
     let packet = msg.packet;
 
-    do_ibc_packet_receive(deps, &packet).or_else(|err| {
+    do_ibc_packet_receive(deps, env, &packet).or_else(|err| {
         Ok(IbcReceiveResponse::new()
             .set_ack(ack_fail(err.to_string()))
             .add_attributes(vec![
@@ -256,7 +280,6 @@ pub fn parse_voucher_denom<'a>(
     let split_denom: Vec<&str> = voucher_denom.splitn(3, '/').collect();
 
     // if it is a packet_receive of native token from chain A or IBC token that was sent from chain B.
-    // TODO: What about native token x from chain C -> chain A -> chain B (chain B has ibc wasm)
     if split_denom.len() == 1 {
         return Ok((voucher_denom, true));
     }
@@ -281,6 +304,7 @@ pub fn parse_voucher_denom<'a>(
 // this does the work of ibc_packet_receive, we wrap it to turn errors into acknowledgements
 fn do_ibc_packet_receive(
     deps: DepsMut,
+    env: Env,
     packet: &IbcPacket,
 ) -> Result<IbcReceiveResponse, ContractError> {
     let msg: Ics20Packet = from_binary(&packet.data)?;
@@ -294,6 +318,9 @@ fn do_ibc_packet_receive(
     if denom.1 {
         return handle_ibc_packet_receive_native_remote_chain(
             deps.storage,
+            deps.api,
+            &deps.querier,
+            env,
             &denom.0,
             &packet,
             &msg,
@@ -332,6 +359,9 @@ fn do_ibc_packet_receive(
 
 fn handle_ibc_packet_receive_native_remote_chain(
     storage: &mut dyn Storage,
+    api: &dyn Api,
+    querier: &QuerierWrapper,
+    env: Env,
     denom: &str,
     packet: &IbcPacket,
     msg: &Ics20Packet,
@@ -352,9 +382,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
             pair_mapping.asset_info_decimals,
         )?,
     );
-    let cosmos_msg = send_amount(to_send, msg.receiver.clone(), None);
-    let submsg = SubMsg::reply_on_error(cosmos_msg, NATIVE_RECEIVE_ID);
-
     increase_channel_balance(
         storage,
         &packet.dest.channel_id,
@@ -362,7 +389,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         msg.amount.clone(),
         false,
     )?;
-
     // we need to save the data to update the balances in reply
     let reply_args = ReplyArgs {
         channel: packet.dest.channel_id.clone(),
@@ -371,9 +397,25 @@ fn handle_ibc_packet_receive_native_remote_chain(
     };
     REPLY_ARGS.save(storage, &reply_args)?;
 
+    // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
+    let submsgs: Vec<SubMsg> = get_follow_up_msgs(
+        storage,
+        api,
+        querier,
+        env.contract.address,
+        to_send,
+        &msg.sender,
+        &msg.receiver,
+        &msg.memo.clone().unwrap_or_default(),
+        packet,
+    )?
+    .into_iter()
+    .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_MSGS_ID))
+    .collect();
+
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
-        .add_submessage(submsg)
+        .add_submessages(submsgs)
         .add_attribute("action", "receive_native")
         .add_attribute("sender", msg.sender.clone())
         .add_attribute("receiver", msg.receiver.clone())
@@ -384,7 +426,239 @@ fn handle_ibc_packet_receive_native_remote_chain(
     Ok(res)
 }
 
-fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
+pub fn get_follow_up_msgs(
+    storage: &mut dyn Storage,
+    api: &dyn Api,
+    querier: &QuerierWrapper,
+    ibc_wasm_addr: Addr,
+    to_send: Amount,
+    sender: &str,
+    receiver: &str,
+    memo: &str,
+    packet: &IbcPacket,
+) -> Result<Vec<CosmosMsg>, ContractError> {
+    let config = CONFIG.load(storage)?;
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+    if memo.is_empty() {
+        return Ok(vec![send_amount(to_send, receiver.to_string(), None)]);
+    }
+    let destination: DestinationInfo = DestinationInfo::from_str(memo);
+    // if destination denom, then we simply transfers cw20 to the receiver address.
+    if destination.destination_denom.is_empty() {
+        return Ok(vec![send_amount(
+            to_send,
+            destination.receiver.clone(),
+            None,
+        )]);
+    }
+    // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
+    let cw20_address = api.addr_validate(&to_send.raw_denom())?;
+    let receiver_asset_info = if querier
+        .query_wasm_smart::<TokenInfoResponse>(
+            destination.destination_denom.clone(),
+            &Cw20QueryMsg::TokenInfo {},
+        )
+        .is_ok()
+    {
+        AssetInfo::Token {
+            contract_addr: Addr::unchecked(destination.destination_denom.clone()),
+        }
+    } else {
+        AssetInfo::NativeToken {
+            denom: destination.destination_denom.clone(),
+        }
+    };
+    let swap_operations = build_swap_operations(
+        receiver_asset_info.clone(),
+        cw20_address.clone(),
+        config.fee_denom.as_str(),
+        &destination,
+    );
+
+    let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
+        config.swap_router_contract.clone(),
+        &oraiswap::router::QueryMsg::SimulateSwapOperations {
+            offer_amount: to_send.amount().clone(),
+            operations: swap_operations.clone(),
+        },
+    )?;
+
+    let ibc_msg = build_ibc_msg(
+        storage,
+        &receiver_asset_info.to_string(),
+        packet.dest.channel_id.as_str(),
+        response.amount.clone(),
+        &sender,
+        ibc_wasm_addr.as_str(),
+        &destination,
+        config.default_timeout,
+    );
+
+    // by default, the receiver is the original address sent in ics20packet
+    let mut to = Some(receiver.to_string());
+    if let Some(ibc_msg) = ibc_msg.ok() {
+        cosmos_msgs.push(ibc_msg);
+        // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
+        to = None;
+    }
+    build_swap_msgs(
+        response.amount,
+        &config.swap_router_contract,
+        to_send.amount(),
+        cw20_address.as_str(),
+        to,
+        &mut cosmos_msgs,
+        swap_operations,
+    )?;
+    return Ok(cosmos_msgs);
+}
+
+pub fn build_swap_operations(
+    receiver_asset_info: AssetInfo,
+    cw20_address: Addr,
+    fee_denom: &str,
+    destination: &DestinationInfo,
+) -> Vec<SwapOperation> {
+    // always swap with orai first cuz its base denom & every token has a pair with it
+    let mut swap_operations = vec![SwapOperation::OraiSwap {
+        offer_asset_info: AssetInfo::Token {
+            contract_addr: cw20_address.clone(),
+        },
+        ask_asset_info: AssetInfo::NativeToken {
+            denom: fee_denom.to_string(),
+        },
+    }];
+    // if destination denom != orai, then we add another swap op
+    if !destination.destination_denom.eq(&fee_denom) {
+        swap_operations.push(SwapOperation::OraiSwap {
+            offer_asset_info: AssetInfo::NativeToken {
+                denom: fee_denom.to_string(),
+            },
+            ask_asset_info: receiver_asset_info,
+        });
+    }
+    swap_operations
+}
+
+pub fn build_swap_msgs(
+    minimum_receive: Uint128,
+    swap_router_contract: &str,
+    amount: Uint128,
+    swap_address: &str,
+    to: Option<String>,
+    cosmos_msgs: &mut Vec<CosmosMsg>,
+    operations: Vec<SwapOperation>,
+) -> StdResult<()> {
+    // the swap msgs must be executed before other types => insert in first index
+    cosmos_msgs.insert(
+        0,
+        WasmMsg::Execute {
+            contract_addr: swap_address.to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: swap_router_contract.to_string(),
+                amount,
+                msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
+                    operations,
+                    minimum_receive: Some(minimum_receive.clone()),
+                    to,
+                })?,
+            })?,
+            funds: vec![],
+        }
+        .into(),
+    );
+    Ok(())
+}
+
+pub fn build_ibc_msg(
+    storage: &mut dyn Storage,
+    receiver_asset_info: &str,
+    local_channel_id: &str,
+    amount: Uint128,
+    remote_address: &str,
+    ibc_wasm_addr: &str,
+    destination: &DestinationInfo,
+    timeout: u64,
+) -> StdResult<CosmosMsg> {
+    // if there's no dest channel then we stop, no need to transfer ibc
+    if destination.destination_channel.is_empty() {
+        return Err(StdError::generic_err(
+            "Destination channel empty in build ibc msg",
+        ));
+    }
+    let (is_evm_based, destination) = destination.is_receiver_evm_based();
+    if is_evm_based {
+        // use sender from ICS20Packet as receiver when transferring back
+        let pair_mappings: StdResult<Vec<(String, MappingMetadata)>> = ics20_denoms()
+            .idx
+            .asset_info
+            .prefix(receiver_asset_info.to_string())
+            .range(storage, None, None, Order::Ascending)
+            .collect();
+
+        if pair_mappings.is_err() {
+            return Err(StdError::generic_err(
+                "error querying pair mapping in build ibc msg",
+            ));
+        }
+        let pair_mappings = pair_mappings
+            .unwrap()
+            .into_iter()
+            .find(|(key, _)| key.contains(&destination.destination_channel));
+        if let Some(pair_mapping) = pair_mappings {
+            let amount = convert_local_to_remote(
+                amount,
+                pair_mapping.1.remote_decimals,
+                pair_mapping.1.asset_info_decimals,
+            )?;
+
+            // build ics20 packet
+            let packet = Ics20Packet::new(
+                amount.clone(),
+                pair_mapping.0.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
+                ibc_wasm_addr,
+                &remote_address,
+                Some(destination.receiver),
+            );
+            // because we are transferring back, we reduce the channel's balance
+            reduce_channel_balance(
+                storage,
+                &local_channel_id.clone(),
+                &pair_mapping.0.clone(),
+                amount,
+                false,
+            )
+            .map_err(|err| StdError::generic_err(err.to_string()))?;
+            let reply_args = ReplyArgs {
+                channel: local_channel_id.to_string(),
+                denom: pair_mapping.0,
+                amount,
+            };
+            // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on
+            SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
+
+            // prepare ibc message
+            let msg = IbcMsg::SendPacket {
+                channel_id: local_channel_id.to_string(),
+                data: to_binary(&packet)?,
+                timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(timeout)),
+            };
+            return Ok(msg.into());
+        }
+        return Err(StdError::generic_err("cannot find pair mappings"));
+    }
+    // we use ibc transfer so that attackers cannot manipulate the data to send to oraibridge without reducing the channel balance
+    // by using ibc transfer, the contract must actually owns native ibc tokens, which is not possible if it's oraibridge tokens
+    let ibc_msg = IbcMsg::Transfer {
+        channel_id: destination.destination_channel,
+        to_address: destination.receiver,
+        amount: coin(amount.u128(), destination.destination_denom),
+        timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(timeout)),
+    };
+    Ok(ibc_msg.into())
+}
+
+pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
     match amount {
         Amount::Cw20(coin) => {
             // if cw20 token, use the registered gas limit, or error if not whitelisted
@@ -410,7 +684,6 @@ pub fn ibc_packet_ack(
     msg: IbcPacketAckMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
     // Design decision: should we trap error like in receive?
-    // TODO: unsure... as it is now a failed ack handling would revert the tx and would be
     // retried again and again. is that good?
     let ics20msg: Ics20Ack = from_binary(&msg.acknowledgement.data)?;
     match ics20msg {
@@ -426,7 +699,6 @@ pub fn ibc_packet_timeout(
     _env: Env,
     msg: IbcPacketTimeoutMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
-    // TODO: trap error like in receive? (same question as ack above)
     let packet = msg.packet;
     on_packet_failure(deps, packet, "timeout".to_string())
 }
@@ -568,465 +840,4 @@ pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
 
 pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
     format!("wasm.{}", contract_addr)
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::test_helpers::*;
-
-    use crate::contract::{execute, migrate, query_channel};
-    use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg, UpdatePairMsg};
-    use cosmwasm_std::testing::{mock_env, mock_info};
-    use cosmwasm_std::{coins, to_vec, Addr, IbcEndpoint, IbcMsg, IbcTimeout, Timestamp};
-    use cw20::Cw20ReceiveMsg;
-    use oraiswap::asset::AssetInfo;
-
-    #[test]
-    fn check_ack_json() {
-        let success = Ics20Ack::Result(b"1".into());
-        let fail = Ics20Ack::Error("bad coin".into());
-
-        let success_json = String::from_utf8(to_vec(&success).unwrap()).unwrap();
-        assert_eq!(r#"{"result":"MQ=="}"#, success_json.as_str());
-
-        let fail_json = String::from_utf8(to_vec(&fail).unwrap()).unwrap();
-        assert_eq!(r#"{"error":"bad coin"}"#, fail_json.as_str());
-    }
-
-    #[test]
-    fn check_packet_json() {
-        let packet = Ics20Packet::new(
-            Uint128::new(12345),
-            "ucosm",
-            "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n",
-            "wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc",
-            None,
-        );
-        // Example message generated from the SDK
-        let expected = r#"{"amount":"12345","denom":"ucosm","receiver":"wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc","sender":"cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n","memo":null}"#;
-
-        let encdoded = String::from_utf8(to_vec(&packet).unwrap()).unwrap();
-        assert_eq!(expected, encdoded.as_str());
-    }
-
-    fn cw20_payment(
-        amount: u128,
-        address: &str,
-        recipient: &str,
-        gas_limit: Option<u64>,
-    ) -> SubMsg {
-        let msg = Cw20ExecuteMsg::Transfer {
-            recipient: recipient.into(),
-            amount: Uint128::new(amount),
-        };
-        let exec = WasmMsg::Execute {
-            contract_addr: address.into(),
-            msg: to_binary(&msg).unwrap(),
-            funds: vec![],
-        };
-        let mut msg = SubMsg::reply_on_error(exec, RECEIVE_ID);
-        msg.gas_limit = gas_limit;
-        msg
-    }
-
-    fn native_payment(amount: u128, denom: &str, recipient: &str) -> SubMsg {
-        SubMsg::reply_on_error(
-            BankMsg::Send {
-                to_address: recipient.into(),
-                amount: coins(amount, denom),
-            },
-            RECEIVE_ID,
-        )
-    }
-
-    fn mock_receive_packet(
-        my_channel: &str,
-        amount: u128,
-        denom: &str,
-        receiver: &str,
-    ) -> IbcPacket {
-        let data = Ics20Packet {
-            // this is returning a foreign (our) token, thus denom is <port>/<channel>/<denom>
-            denom: format!("{}/{}/{}", REMOTE_PORT, "channel-1234", denom),
-            amount: amount.into(),
-            sender: "remote-sender".to_string(),
-            receiver: receiver.to_string(),
-            memo: None,
-        };
-        IbcPacket::new(
-            to_binary(&data).unwrap(),
-            IbcEndpoint {
-                port_id: REMOTE_PORT.to_string(),
-                channel_id: "channel-1234".to_string(),
-            },
-            IbcEndpoint {
-                port_id: CONTRACT_PORT.to_string(),
-                channel_id: my_channel.to_string(),
-            },
-            3,
-            Timestamp::from_seconds(1665321069).into(),
-        )
-    }
-
-    #[test]
-    fn send_receive_cw20() {
-        let send_channel = "channel-9";
-        let cw20_addr = "token-addr";
-        let cw20_denom = "cw20:token-addr";
-        let gas_limit = 1234567;
-        let mut deps = setup(
-            &["channel-1", "channel-7", send_channel],
-            &[(cw20_addr, gas_limit)],
-        );
-
-        // prepare some mock packets
-        let recv_packet = mock_receive_packet(send_channel, 876543210, cw20_denom, "local-rcpt");
-        let recv_high_packet =
-            mock_receive_packet(send_channel, 1876543210, cw20_denom, "local-rcpt");
-
-        // cannot receive this denom yet
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        assert!(res.messages.is_empty());
-        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        let no_funds = Ics20Ack::Error(ContractError::InsufficientFunds {}.to_string());
-        assert_eq!(ack, no_funds);
-
-        // we send some cw20 tokens over
-        let transfer = TransferMsg {
-            channel: send_channel.to_string(),
-            remote_address: "remote-rcpt".to_string(),
-            timeout: None,
-            memo: None,
-        };
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "local-sender".to_string(),
-            amount: Uint128::new(987654321),
-            msg: to_binary(&transfer).unwrap(),
-        });
-        let info = mock_info(cw20_addr, &[]);
-        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-        assert_eq!(1, res.messages.len());
-        let expected = Ics20Packet {
-            denom: cw20_denom.into(),
-            amount: Uint128::new(987654321),
-            sender: "local-sender".to_string(),
-            receiver: "remote-rcpt".to_string(),
-            memo: None,
-        };
-        let timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
-        assert_eq!(
-            &res.messages[0],
-            &SubMsg::new(IbcMsg::SendPacket {
-                channel_id: send_channel.to_string(),
-                data: to_binary(&expected).unwrap(),
-                timeout: IbcTimeout::with_timestamp(timeout),
-            })
-        );
-
-        // query channel state|_|
-        let state = query_channel(deps.as_ref(), send_channel.to_string(), Some(true)).unwrap();
-        assert_eq!(state.balances, vec![Amount::cw20(987654321, cw20_addr)]);
-        assert_eq!(state.total_sent, vec![Amount::cw20(987654321, cw20_addr)]);
-
-        // cannot receive more than we sent
-        let msg = IbcPacketReceiveMsg::new(recv_high_packet);
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        assert!(res.messages.is_empty());
-        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        assert_eq!(ack, no_funds);
-
-        // we can receive less than we sent
-        let msg = IbcPacketReceiveMsg::new(recv_packet);
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        assert_eq!(1, res.messages.len());
-        assert_eq!(
-            cw20_payment(876543210, cw20_addr, "local-rcpt", Some(gas_limit)),
-            res.messages[0]
-        );
-        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        assert!(matches!(ack, Ics20Ack::Result(_)));
-
-        // TODO: we need to call the reply block
-
-        // query channel state
-        let state = query_channel(deps.as_ref(), send_channel.to_string(), Some(true)).unwrap();
-        assert_eq!(state.balances, vec![Amount::cw20(111111111, cw20_addr)]);
-        assert_eq!(state.total_sent, vec![Amount::cw20(987654321, cw20_addr)]);
-    }
-
-    #[test]
-    fn send_receive_native() {
-        let send_channel = "channel-9";
-        let mut deps = setup(&["channel-1", "channel-7", send_channel], &[]);
-
-        let denom = "uatom";
-
-        // prepare some mock packets
-        let recv_packet = mock_receive_packet(send_channel, 876543210, denom, "local-rcpt");
-        let recv_high_packet = mock_receive_packet(send_channel, 1876543210, denom, "local-rcpt");
-
-        // cannot receive this denom yet
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        assert!(res.messages.is_empty());
-        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        let no_funds = Ics20Ack::Error(ContractError::InsufficientFunds {}.to_string());
-        assert_eq!(ack, no_funds);
-
-        // we transfer some tokens
-        let msg = ExecuteMsg::Transfer(TransferMsg {
-            channel: send_channel.to_string(),
-            remote_address: "my-remote-address".to_string(),
-            timeout: None,
-            memo: Some("memo".to_string()),
-        });
-        let info = mock_info("local-sender", &coins(987654321, denom));
-        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // query channel state|_|
-        let state = query_channel(deps.as_ref(), send_channel.to_string(), Some(true)).unwrap();
-        assert_eq!(state.balances, vec![Amount::native(987654321, denom)]);
-        assert_eq!(state.total_sent, vec![Amount::native(987654321, denom)]);
-
-        // cannot receive more than we sent
-        let msg = IbcPacketReceiveMsg::new(recv_high_packet);
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        assert!(res.messages.is_empty());
-        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        assert_eq!(ack, no_funds);
-
-        // we can receive less than we sent
-        let msg = IbcPacketReceiveMsg::new(recv_packet);
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        assert_eq!(1, res.messages.len());
-        assert_eq!(
-            native_payment(876543210, denom, "local-rcpt"),
-            res.messages[0]
-        );
-        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        assert!(matches!(ack, Ics20Ack::Result(_)));
-
-        // only need to call reply block on error case
-
-        // query channel state
-        let state = query_channel(deps.as_ref(), send_channel.to_string(), Some(true)).unwrap();
-        assert_eq!(state.balances, vec![Amount::native(111111111, denom)]);
-        assert_eq!(state.total_sent, vec![Amount::native(987654321, denom)]);
-    }
-
-    #[test]
-    fn check_gas_limit_handles_all_cases() {
-        let send_channel = "channel-9";
-        let allowed = "foobar";
-        let allowed_gas = 777666;
-        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
-
-        // allow list will get proper gas
-        let limit = check_gas_limit(deps.as_ref(), &Amount::cw20(500, allowed)).unwrap();
-        assert_eq!(limit, Some(allowed_gas));
-
-        // non-allow list will error
-        let random = "tokenz";
-        check_gas_limit(deps.as_ref(), &Amount::cw20(500, random)).unwrap_err();
-
-        // add default_gas_limit
-        let def_limit = 54321;
-        migrate(
-            deps.as_mut(),
-            mock_env(),
-            MigrateMsg {
-                default_gas_limit: Some(def_limit),
-            },
-        )
-        .unwrap();
-
-        // allow list still gets proper gas
-        let limit = check_gas_limit(deps.as_ref(), &Amount::cw20(500, allowed)).unwrap();
-        assert_eq!(limit, Some(allowed_gas));
-
-        // non-allow list will now get default
-        let limit = check_gas_limit(deps.as_ref(), &Amount::cw20(500, random)).unwrap();
-        assert_eq!(limit, Some(def_limit));
-    }
-
-    // test remote chain send native token to local chain
-    fn mock_receive_packet_remote_to_local(
-        my_channel: &str,
-        amount: u128,
-        denom: &str,
-        receiver: &str,
-    ) -> IbcPacket {
-        let data = Ics20Packet {
-            // this is returning a foreign native token, thus denom is <denom>, eg: uatom
-            denom: format!("{}", denom),
-            amount: amount.into(),
-            sender: "remote-sender".to_string(),
-            receiver: receiver.to_string(),
-            memo: None,
-        };
-        IbcPacket::new(
-            to_binary(&data).unwrap(),
-            IbcEndpoint {
-                port_id: REMOTE_PORT.to_string(),
-                channel_id: "channel-1234".to_string(),
-            },
-            IbcEndpoint {
-                port_id: CONTRACT_PORT.to_string(),
-                channel_id: my_channel.to_string(),
-            },
-            3,
-            Timestamp::from_seconds(1665321069).into(),
-        )
-    }
-
-    #[test]
-    fn test_parse_voucher_denom_invalid_length() {
-        let voucher_denom = "foobar/foobar";
-        let ibc_endpoint = IbcEndpoint {
-            port_id: "hello".to_string(),
-            channel_id: "world".to_string(),
-        };
-        // native denom case
-        assert_eq!(
-            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap_err(),
-            ContractError::NoForeignTokens {}
-        );
-    }
-
-    #[test]
-    fn test_parse_voucher_denom_invalid_port() {
-        let voucher_denom = "foobar/abc/xyz";
-        let ibc_endpoint = IbcEndpoint {
-            port_id: "hello".to_string(),
-            channel_id: "world".to_string(),
-        };
-        // native denom case
-        assert_eq!(
-            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap_err(),
-            ContractError::FromOtherPort {
-                port: "foobar".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_voucher_denom_invalid_channel() {
-        let voucher_denom = "hello/abc/xyz";
-        let ibc_endpoint = IbcEndpoint {
-            port_id: "hello".to_string(),
-            channel_id: "world".to_string(),
-        };
-        // native denom case
-        assert_eq!(
-            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap_err(),
-            ContractError::FromOtherChannel {
-                channel: "abc".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn test_parse_voucher_denom_native_denom_valid() {
-        let voucher_denom = "foobar";
-        let ibc_endpoint = IbcEndpoint {
-            port_id: "hello".to_string(),
-            channel_id: "world".to_string(),
-        };
-        assert_eq!(
-            parse_voucher_denom(voucher_denom, &ibc_endpoint).unwrap(),
-            ("foobar", true)
-        );
-    }
-
-    /////////////////////////////// Test cases for native denom transfer from remote chain to local chain
-
-    #[test]
-    fn send_native_from_remote_mapping_not_found() {
-        let send_channel = "channel-9";
-        let cw20_addr = "token-addr";
-        let custom_addr = "custom-addr";
-        let cw20_denom = "cw20:token-addr";
-        let gas_limit = 1234567;
-        let mut deps = setup(
-            &["channel-1", "channel-7", send_channel],
-            &[(cw20_addr, gas_limit)],
-        );
-
-        // prepare some mock packets
-        let recv_packet =
-            mock_receive_packet_remote_to_local(send_channel, 876543210, cw20_denom, custom_addr);
-
-        // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        // assert_eq!(res, StdError)
-        assert_eq!(
-            res.attributes.last().unwrap().value,
-            "You can only send native tokens that has a map to the corresponding asset info"
-        );
-    }
-
-    #[test]
-    fn send_native_from_remote_receive_happy_path() {
-        let send_channel = "channel-9";
-        let cw20_addr = "token-addr";
-        let custom_addr = "custom-addr";
-        let denom = "uatom";
-        let asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("cw20:token-addr"),
-        };
-        let gas_limit = 1234567;
-        let mut deps = setup(
-            &["channel-1", "channel-7", send_channel],
-            &[(cw20_addr, gas_limit)],
-        );
-
-        let pair = UpdatePairMsg {
-            local_channel_id: send_channel.to_string(),
-            denom: denom.to_string(),
-            asset_info: asset_info,
-            remote_decimals: 18u8,
-            asset_info_decimals: 18u8,
-        };
-
-        let _ = execute(
-            deps.as_mut(),
-            mock_env(),
-            mock_info("gov", &[]),
-            ExecuteMsg::UpdateMappingPair(pair),
-        )
-        .unwrap();
-
-        // prepare some mock packets
-        let recv_packet =
-            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
-
-        // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
-        let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        println!("res: {:?}", res);
-        assert_eq!(res.messages.len(), 1);
-        let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        println!("ack: {:?}", ack);
-        assert!(matches!(ack, Ics20Ack::Result(_)));
-
-        // query channel state|_|
-        let state = query_channel(deps.as_ref(), send_channel.to_string(), None).unwrap();
-        assert_eq!(
-            state.balances,
-            vec![Amount::native(
-                876543210,
-                &get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom)
-            )]
-        );
-        assert_eq!(
-            state.total_sent,
-            vec![Amount::native(
-                876543210,
-                &get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom)
-            )]
-        );
-    }
 }
