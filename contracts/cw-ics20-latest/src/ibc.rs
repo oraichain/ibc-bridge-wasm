@@ -402,7 +402,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         storage,
         api,
         querier,
-        env.contract.address,
+        env,
         to_send,
         &msg.sender,
         &msg.receiver,
@@ -430,7 +430,7 @@ pub fn get_follow_up_msgs(
     storage: &mut dyn Storage,
     api: &dyn Api,
     querier: &QuerierWrapper,
-    ibc_wasm_addr: Addr,
+    env: Env,
     to_send: Amount,
     sender: &str,
     receiver: &str,
@@ -485,11 +485,11 @@ pub fn get_follow_up_msgs(
 
     let ibc_msg = build_ibc_msg(
         storage,
+        env,
         &receiver_asset_info.to_string(),
         packet.dest.channel_id.as_str(),
         response.amount.clone(),
         &sender,
-        ibc_wasm_addr.as_str(),
         &destination,
         config.default_timeout,
     );
@@ -572,11 +572,11 @@ pub fn build_swap_msgs(
 
 pub fn build_ibc_msg(
     storage: &mut dyn Storage,
+    env: Env,
     receiver_asset_info: &str,
     local_channel_id: &str,
     amount: Uint128,
     remote_address: &str,
-    ibc_wasm_addr: &str,
     destination: &DestinationInfo,
     timeout: u64,
 ) -> StdResult<CosmosMsg> {
@@ -616,7 +616,7 @@ pub fn build_ibc_msg(
             let packet = Ics20Packet::new(
                 amount.clone(),
                 pair_mapping.0.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
-                ibc_wasm_addr,
+                env.contract.address.as_str(),
                 &remote_address,
                 Some(destination.receiver),
             );
@@ -641,7 +641,7 @@ pub fn build_ibc_msg(
             let msg = IbcMsg::SendPacket {
                 channel_id: local_channel_id.to_string(),
                 data: to_binary(&packet)?,
-                timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(timeout)),
+                timeout: IbcTimeout::with_timestamp(env.block.time.plus_seconds(timeout)),
             };
             return Ok(msg.into());
         }
