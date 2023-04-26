@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Binary, IbcEndpoint};
+use cosmwasm_std::{Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
@@ -144,7 +144,7 @@ pub enum QueryMsg {
         limit: Option<u32>,
         order: Option<u8>,
     },
-    #[returns(Addr)]
+    #[returns(cosmwasm_std::Addr)]
     #[returns(ListMappingResponse)]
     PairMappings {
         start_after: Option<String>,
