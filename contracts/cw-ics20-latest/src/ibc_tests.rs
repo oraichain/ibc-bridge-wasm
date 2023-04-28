@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{assert_approx_eq, coin, Addr, CosmosMsg, StdError};
+    use cosmwasm_std::{coin, Addr, CosmosMsg, StdError};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
     use oraiswap::router::SwapOperation;
@@ -643,6 +643,7 @@ mod test {
             destination_denom: "atom".to_string(),
         };
         let timeout = 1000u64;
+        let local_receiver = "local_receiver";
 
         // first case, destination channel empty
         destination.destination_channel = "".to_string();
@@ -650,7 +651,8 @@ mod test {
         let err = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
-            &receiver_asset_info.to_string(),
+            receiver_asset_info.clone(),
+            local_receiver,
             receive_channel,
             amount,
             remote_address,
@@ -668,7 +670,8 @@ mod test {
         let result = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
-            &receiver_asset_info.to_string(),
+            receiver_asset_info.clone(),
+            local_receiver,
             receive_channel,
             amount,
             remote_address,
@@ -691,7 +694,8 @@ mod test {
         let err = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
-            &receiver_asset_info.to_string(),
+            receiver_asset_info.clone(),
+            local_receiver,
             receive_channel,
             amount,
             remote_address,
@@ -732,7 +736,8 @@ mod test {
         let result = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
-            &receiver_asset_info.to_string(),
+            receiver_asset_info,
+            local_receiver,
             receive_channel,
             amount,
             remote_address,

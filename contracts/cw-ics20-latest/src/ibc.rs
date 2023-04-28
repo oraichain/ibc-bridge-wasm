@@ -14,7 +14,8 @@ use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, MappingMetadata,
-    ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
+    ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, REPLY_ARGS,
+    SINGLE_STEP_REPLY_ARGS,
 };
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
@@ -88,7 +89,8 @@ fn ack_fail(err: String) -> Binary {
 
 pub const RECEIVE_ID: u64 = 1337;
 pub const NATIVE_RECEIVE_ID: u64 = 1338;
-pub const FOLLOW_UP_MSGS_ID: u64 = 1339;
+pub const FOLLOW_UP_FAILURE_ID: u64 = 1339;
+pub const REFUND_FAILURE_ID: u64 = 1340;
 pub const ACK_FAILURE_ID: u64 = 64023;
 // const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
@@ -151,29 +153,22 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
             }
         },
-        FOLLOW_UP_MSGS_ID => match reply.result {
+        FOLLOW_UP_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
-                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage).ok();
-                // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
-                if let Some(reply_args) = reply_args {
-                    undo_reduce_channel_balance(
-                        deps.storage,
-                        &reply_args.channel,
-                        &reply_args.denom,
-                        reply_args.amount,
-                        false,
-                    )?;
-                }
-                // TODO: can we refund the swapped amount to users?
-                Ok(Response::new()
-                    .set_data(ack_fail(err.clone()))
-                    .add_attribute("error_follow_up_msgs", err))
+                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
+                handle_follow_up_failure(deps.storage, reply_args, err)
             }
         },
         ACK_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new().set_data(ack_fail(err))),
+        },
+        REFUND_FAILURE_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            SubMsgResult::Err(err) => Ok(Response::new()
+                .set_data(ack_fail(err.clone()))
+                .add_attribute("error_trying_to_refund_single_step", err)),
         },
         // TRANSFER_BACK_FAILURE_ID => match reply.result {
         //     SubMsgResult::Ok(_) => Ok(Response::new()),
@@ -411,7 +406,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         packet,
     )?
     .into_iter()
-    .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_MSGS_ID))
+    .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
     .collect();
 
     let res = IbcReceiveResponse::new()
@@ -487,7 +482,8 @@ pub fn get_follow_up_msgs(
     let ibc_msg = build_ibc_msg(
         storage,
         env,
-        &receiver_asset_info.to_string(),
+        receiver_asset_info,
+        receiver,
         packet.dest.channel_id.as_str(),
         response.amount.clone(),
         &sender,
@@ -595,7 +591,8 @@ pub fn build_swap_msgs(
 pub fn build_ibc_msg(
     storage: &mut dyn Storage,
     env: Env,
-    receiver_asset_info: &str,
+    receiver_asset_info: AssetInfo,
+    local_receiver: &str,
     local_channel_id: &str,
     amount: Uint128,
     remote_address: &str,
@@ -609,6 +606,13 @@ pub fn build_ibc_msg(
         ));
     }
     let timeout = env.block.time.plus_seconds(default_timeout);
+    let mut reply_args = SingleStepReplyArgs {
+        channel: destination.destination_channel.clone(),
+        refund_asset_info: receiver_asset_info.clone(),
+        ibc_denom: None,
+        receiver: local_receiver.to_string(),
+        amount,
+    };
     let (is_evm_based, destination) = destination.is_receiver_evm_based();
     if is_evm_based {
         // use sender from ICS20Packet as receiver when transferring back
@@ -652,11 +656,7 @@ pub fn build_ibc_msg(
                 false,
             )
             .map_err(|err| StdError::generic_err(err.to_string()))?;
-            let reply_args = ReplyArgs {
-                channel: local_channel_id.to_string(),
-                denom: pair_mapping.0,
-                amount,
-            };
+            reply_args.channel = local_channel_id.to_string();
             // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on
             SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
 
@@ -679,6 +679,41 @@ pub fn build_ibc_msg(
         timeout: timeout.into(),
     };
     Ok(ibc_msg.into())
+}
+
+// TODO: write test for this function
+pub fn handle_follow_up_failure(
+    storage: &mut dyn Storage,
+    reply_args: SingleStepReplyArgs,
+    err: String,
+) -> Result<Response, ContractError> {
+    // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
+    if let Some(ibc_denom) = reply_args.ibc_denom {
+        undo_reduce_channel_balance(
+            storage,
+            &reply_args.channel,
+            &ibc_denom,
+            reply_args.amount,
+            false,
+        )?;
+    }
+    let refund_amount = Amount::from_parts(
+        parse_asset_info_denom(reply_args.refund_asset_info.clone()),
+        reply_args.amount,
+    );
+    // we send refund to the local receiver of the single-step tx because the funds are currently in this contract
+    let send = send_amount(refund_amount, reply_args.receiver, None);
+    Ok(Response::new()
+        .add_submessage(SubMsg::reply_on_error(send, REFUND_FAILURE_ID))
+        .set_data(ack_fail(err.clone()))
+        .add_attributes(vec![
+            attr("error_follow_up_msgs", err),
+            attr(
+                "attempt_refund_denom",
+                reply_args.refund_asset_info.to_string(),
+            ),
+            attr("attempt_refund_amount", reply_args.amount),
+        ]))
 }
 
 pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
