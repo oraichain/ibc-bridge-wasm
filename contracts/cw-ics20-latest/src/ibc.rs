@@ -166,6 +166,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                         false,
                     )?;
                 }
+                // TODO: can we refund the swapped amount to users?
                 Ok(Response::new()
                     .set_data(ack_fail(err.clone()))
                     .add_attribute("error_follow_up_msgs", err))
@@ -402,7 +403,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         storage,
         api,
         querier,
-        env.contract.address,
+        env,
         to_send,
         &msg.sender,
         &msg.receiver,
@@ -430,7 +431,7 @@ pub fn get_follow_up_msgs(
     storage: &mut dyn Storage,
     api: &dyn Api,
     querier: &QuerierWrapper,
-    ibc_wasm_addr: Addr,
+    env: Env,
     to_send: Amount,
     sender: &str,
     receiver: &str,
@@ -452,6 +453,7 @@ pub fn get_follow_up_msgs(
         )]);
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
+    // TODO: bug here. Should check if it's cw20 address or it is native (ORAI case)
     let cw20_address = api.addr_validate(&to_send.raw_denom())?;
     let receiver_asset_info = if querier
         .query_wasm_smart::<TokenInfoResponse>(
@@ -485,11 +487,11 @@ pub fn get_follow_up_msgs(
 
     let ibc_msg = build_ibc_msg(
         storage,
+        env,
         &receiver_asset_info.to_string(),
         packet.dest.channel_id.as_str(),
         response.amount.clone(),
         &sender,
-        ibc_wasm_addr.as_str(),
         &destination,
         config.default_timeout,
     );
@@ -572,13 +574,13 @@ pub fn build_swap_msgs(
 
 pub fn build_ibc_msg(
     storage: &mut dyn Storage,
+    env: Env,
     receiver_asset_info: &str,
     local_channel_id: &str,
     amount: Uint128,
     remote_address: &str,
-    ibc_wasm_addr: &str,
     destination: &DestinationInfo,
-    timeout: u64,
+    default_timeout: u64,
 ) -> StdResult<CosmosMsg> {
     // if there's no dest channel then we stop, no need to transfer ibc
     if destination.destination_channel.is_empty() {
@@ -586,6 +588,7 @@ pub fn build_ibc_msg(
             "Destination channel empty in build ibc msg",
         ));
     }
+    let timeout = env.block.time.plus_seconds(default_timeout);
     let (is_evm_based, destination) = destination.is_receiver_evm_based();
     if is_evm_based {
         // use sender from ICS20Packet as receiver when transferring back
@@ -616,7 +619,7 @@ pub fn build_ibc_msg(
             let packet = Ics20Packet::new(
                 amount.clone(),
                 pair_mapping.0.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
-                ibc_wasm_addr,
+                env.contract.address.as_str(),
                 &remote_address,
                 Some(destination.receiver),
             );
@@ -641,7 +644,7 @@ pub fn build_ibc_msg(
             let msg = IbcMsg::SendPacket {
                 channel_id: local_channel_id.to_string(),
                 data: to_binary(&packet)?,
-                timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(timeout)),
+                timeout: timeout.into(),
             };
             return Ok(msg.into());
         }
@@ -653,7 +656,7 @@ pub fn build_ibc_msg(
         channel_id: destination.destination_channel,
         to_address: destination.receiver,
         amount: coin(amount.u128(), destination.destination_denom),
-        timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(timeout)),
+        timeout: timeout.into(),
     };
     Ok(ibc_msg.into())
 }
