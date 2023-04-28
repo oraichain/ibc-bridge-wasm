@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod test {
-    use super::*;
     use cosmwasm_std::{coin, Addr, CosmosMsg, StdError};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
@@ -24,7 +23,7 @@ mod test {
     use crate::contract::{execute, migrate, query_channel};
     use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg, UpdatePairMsg};
     use cosmwasm_std::testing::{mock_env, mock_info};
-    use cosmwasm_std::{coins, to_vec, Decimal};
+    use cosmwasm_std::{coins, to_vec};
     use cw20::Cw20ReceiveMsg;
 
     #[test]
@@ -663,7 +662,7 @@ mod test {
                     Some(destination.receiver),
                 ))
                 .unwrap(),
-                timeout: mock_env().block.time.plus_seconds(timeout).into()
+                timeout: env.block.time.plus_seconds(timeout).into()
             })
         );
     }
@@ -685,7 +684,7 @@ mod test {
             deps_mut.storage,
             deps_mut.api,
             &deps_mut.querier,
-            mock_env(),
+            env.clone(),
             Amount::Cw20(Cw20Coin {
                 address: "foobar".to_string(),
                 amount: amount.clone(),
