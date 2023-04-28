@@ -1,12 +1,13 @@
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{coin, Addr, CosmosMsg, StdError};
+    use cosmwasm_std::{assert_approx_eq, coin, Addr, CosmosMsg, StdError};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
+    use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        build_ibc_msg, check_gas_limit, ibc_packet_receive, parse_voucher_denom, Ics20Ack,
-        Ics20Packet, RECEIVE_ID,
+        build_ibc_msg, build_swap_msgs, check_gas_limit, ibc_packet_receive, parse_voucher_denom,
+        Ics20Ack, Ics20Packet, RECEIVE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -510,7 +511,9 @@ mod test {
         let receiver_asset_info = AssetInfo::Token {
             contract_addr: Addr::unchecked("foobar"),
         };
-        let cw20_address = Addr::unchecked("addr");
+        let mut initial_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("addr"),
+        };
         let fee_denom = "orai".to_string();
         let destination: DestinationInfo = DestinationInfo {
             receiver: "cosmos".to_string(),
@@ -520,16 +523,104 @@ mod test {
 
         let operations = build_swap_operations(
             receiver_asset_info.clone(),
-            cw20_address.clone(),
+            initial_asset_info.clone(),
             fee_denom.as_str(),
-            &destination,
+            &destination.destination_denom,
         );
         assert_eq!(operations.len(), 2);
 
         let fee_denom = "foobar".to_string();
-        let operations =
-            build_swap_operations(receiver_asset_info, cw20_address, &fee_denom, &destination);
+        let operations = build_swap_operations(
+            receiver_asset_info.clone(),
+            initial_asset_info.clone(),
+            &fee_denom,
+            &destination.destination_denom,
+        );
         assert_eq!(operations.len(), 1);
+        initial_asset_info = AssetInfo::NativeToken {
+            denom: "foobar".to_string(),
+        };
+        let operations = build_swap_operations(
+            receiver_asset_info,
+            initial_asset_info.clone(),
+            &fee_denom,
+            &destination.destination_denom,
+        );
+        assert_eq!(operations.len(), 0);
+    }
+
+    #[test]
+    fn test_build_swap_msgs() {
+        let minimum_receive = Uint128::from(10u128);
+        let swap_router_contract = "router";
+        let amount = Uint128::from(100u128);
+        let mut initial_receive_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("addr"),
+        };
+        let native_denom = "foobar";
+        let to: Option<Addr> = None;
+        let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+        let mut operations: Vec<SwapOperation> = vec![];
+        build_swap_msgs(
+            minimum_receive.clone(),
+            swap_router_contract.clone(),
+            amount.clone(),
+            initial_receive_asset_info.clone(),
+            to.clone(),
+            &mut cosmos_msgs,
+            operations.clone(),
+        )
+        .unwrap();
+        assert_eq!(cosmos_msgs.len(), 0);
+        operations.push(SwapOperation::OraiSwap {
+            offer_asset_info: initial_receive_asset_info.clone(),
+            ask_asset_info: initial_receive_asset_info.clone(),
+        });
+        build_swap_msgs(
+            minimum_receive.clone(),
+            swap_router_contract.clone(),
+            amount.clone(),
+            initial_receive_asset_info.clone(),
+            to.clone(),
+            &mut cosmos_msgs,
+            operations.clone(),
+        )
+        .unwrap();
+        // send in Cw20 send
+        assert_eq!(true, format!("{:?}", cosmos_msgs[0]).contains("send"));
+
+        // reset cosmos msg to continue testing
+        cosmos_msgs.pop();
+        initial_receive_asset_info = AssetInfo::NativeToken {
+            denom: native_denom.to_string(),
+        };
+        build_swap_msgs(
+            minimum_receive.clone(),
+            swap_router_contract.clone(),
+            amount.clone(),
+            initial_receive_asset_info.clone(),
+            to.clone(),
+            &mut cosmos_msgs,
+            operations.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            true,
+            format!("{:?}", cosmos_msgs[0]).contains("execute_swap_operations")
+        );
+        assert_eq!(
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: swap_router_contract.to_string(),
+                msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
+                    operations: operations,
+                    minimum_receive: Some(minimum_receive),
+                    to
+                })
+                .unwrap(),
+                funds: coins(amount.u128(), native_denom)
+            }),
+            cosmos_msgs[0]
+        );
     }
 
     #[test]
@@ -678,6 +769,9 @@ mod test {
         let amount = Uint128::from(1u128);
         let mut env = mock_env();
         env.contract.address = Addr::unchecked("foobar");
+        let initial_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("addr"),
+        };
 
         // first case, memo empty => return send amount with receiver input
         let result = get_follow_up_msgs(
@@ -689,6 +783,7 @@ mod test {
                 address: "foobar".to_string(),
                 amount: amount.clone(),
             }),
+            initial_asset_info.clone(),
             "foobar",
             receiver.clone(),
             "",
@@ -720,6 +815,7 @@ mod test {
                 address: "foobar".to_string(),
                 amount,
             }),
+            initial_asset_info.clone(),
             "foobar",
             "foobar",
             memo,

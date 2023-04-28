@@ -375,7 +375,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map_err(|_| ContractError::NotOnMappingList {})?;
 
     let to_send = Amount::from_parts(
-        parse_asset_info_denom(pair_mapping.asset_info),
+        parse_asset_info_denom(pair_mapping.asset_info.clone()),
         convert_remote_to_local(
             msg.amount,
             pair_mapping.remote_decimals,
@@ -404,6 +404,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         querier,
         env,
         to_send,
+        pair_mapping.asset_info,
         &msg.sender,
         &msg.receiver,
         &msg.memo.clone().unwrap_or_default(),
@@ -432,6 +433,7 @@ pub fn get_follow_up_msgs(
     querier: &QuerierWrapper,
     env: Env,
     to_send: Amount,
+    initial_receive_asset_info: AssetInfo,
     sender: &str,
     receiver: &str,
     memo: &str,
@@ -452,8 +454,6 @@ pub fn get_follow_up_msgs(
         )]);
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
-    // TODO: bug here. Should check if it's cw20 address or it is native (ORAI case)
-    let cw20_address = api.addr_validate(&to_send.raw_denom())?;
     let receiver_asset_info = if querier
         .query_wasm_smart::<TokenInfoResponse>(
             destination.destination_denom.clone(),
@@ -471,9 +471,9 @@ pub fn get_follow_up_msgs(
     };
     let swap_operations = build_swap_operations(
         receiver_asset_info.clone(),
-        cw20_address.clone(),
+        initial_receive_asset_info.clone(),
         config.fee_denom.as_str(),
-        &destination,
+        &destination.destination_denom,
     );
 
     let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
@@ -496,7 +496,7 @@ pub fn get_follow_up_msgs(
     );
 
     // by default, the receiver is the original address sent in ics20packet
-    let mut to = Some(receiver.to_string());
+    let mut to = Some(api.addr_validate(receiver)?);
     if let Some(ibc_msg) = ibc_msg.ok() {
         cosmos_msgs.push(ibc_msg);
         // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
@@ -506,7 +506,7 @@ pub fn get_follow_up_msgs(
         response.amount,
         &config.swap_router_contract,
         to_send.amount(),
-        cw20_address.as_str(),
+        initial_receive_asset_info,
         to,
         &mut cosmos_msgs,
         swap_operations,
@@ -516,27 +516,29 @@ pub fn get_follow_up_msgs(
 
 pub fn build_swap_operations(
     receiver_asset_info: AssetInfo,
-    cw20_address: Addr,
+    initial_receive_asset_info: AssetInfo,
     fee_denom: &str,
-    destination: &DestinationInfo,
+    destination_denom: &str,
 ) -> Vec<SwapOperation> {
     // always swap with orai first cuz its base denom & every token has a pair with it
-    let mut swap_operations = vec![SwapOperation::OraiSwap {
-        offer_asset_info: AssetInfo::Token {
-            contract_addr: cw20_address.clone(),
+    let fee_denom_asset_info = AssetInfo::NativeToken {
+        denom: fee_denom.to_string(),
+    };
+    let mut swap_operations = vec![
+        SwapOperation::OraiSwap {
+            offer_asset_info: initial_receive_asset_info.clone(),
+            ask_asset_info: fee_denom_asset_info.clone(),
         },
-        ask_asset_info: AssetInfo::NativeToken {
-            denom: fee_denom.to_string(),
-        },
-    }];
-    // if destination denom != orai, then we add another swap op
-    if !destination.destination_denom.eq(&fee_denom) {
-        swap_operations.push(SwapOperation::OraiSwap {
-            offer_asset_info: AssetInfo::NativeToken {
-                denom: fee_denom.to_string(),
-            },
+        SwapOperation::OraiSwap {
+            offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: receiver_asset_info,
-        });
+        },
+    ];
+    if destination_denom.eq(fee_denom) {
+        swap_operations.pop();
+    }
+    if initial_receive_asset_info.eq(&fee_denom_asset_info) {
+        swap_operations.pop();
     }
     swap_operations
 }
@@ -545,29 +547,48 @@ pub fn build_swap_msgs(
     minimum_receive: Uint128,
     swap_router_contract: &str,
     amount: Uint128,
-    swap_address: &str,
-    to: Option<String>,
+    initial_receive_asset_info: AssetInfo,
+    to: Option<Addr>,
     cosmos_msgs: &mut Vec<CosmosMsg>,
     operations: Vec<SwapOperation>,
 ) -> StdResult<()> {
     // the swap msgs must be executed before other types => insert in first index
-    cosmos_msgs.insert(
-        0,
-        WasmMsg::Execute {
-            contract_addr: swap_address.to_string(),
-            msg: to_binary(&Cw20ExecuteMsg::Send {
-                contract: swap_router_contract.to_string(),
-                amount,
-                msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
+    if operations.len() == 0 {
+        return Ok(());
+    }
+    match initial_receive_asset_info {
+        AssetInfo::Token { contract_addr } => cosmos_msgs.insert(
+            0,
+            WasmMsg::Execute {
+                contract_addr: contract_addr.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Send {
+                    contract: swap_router_contract.to_string(),
+                    amount,
+                    msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
+                        operations,
+                        minimum_receive: Some(minimum_receive.clone()),
+                        to: to.map(|to| to.into_string()),
+                    })?,
+                })?,
+                funds: vec![],
+            }
+            .into(),
+        ),
+        AssetInfo::NativeToken { denom } => cosmos_msgs.insert(
+            0,
+            WasmMsg::Execute {
+                contract_addr: swap_router_contract.to_string(),
+                msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
                     operations,
                     minimum_receive: Some(minimum_receive.clone()),
                     to,
                 })?,
-            })?,
-            funds: vec![],
-        }
-        .into(),
-    );
+                funds: vec![coin(amount.u128(), denom)],
+            }
+            .into(),
+        ),
+    }
+
     Ok(())
 }
 
