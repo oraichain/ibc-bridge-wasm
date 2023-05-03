@@ -82,7 +82,7 @@ fn ack_success() -> Binary {
 }
 
 // create a serialized error message
-fn ack_fail(err: String) -> Binary {
+pub fn ack_fail(err: String) -> Binary {
     let res = Ics20Ack::Error(err);
     to_binary(&res).unwrap()
 }
@@ -657,6 +657,7 @@ pub fn build_ibc_msg(
             )
             .map_err(|err| StdError::generic_err(err.to_string()))?;
             reply_args.channel = local_channel_id.to_string();
+            reply_args.ibc_denom = Some(pair_mapping.0);
             // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on
             SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
 
@@ -681,7 +682,6 @@ pub fn build_ibc_msg(
     Ok(ibc_msg.into())
 }
 
-// TODO: write test for this function
 pub fn handle_follow_up_failure(
     storage: &mut dyn Storage,
     reply_args: SingleStepReplyArgs,

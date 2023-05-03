@@ -1,13 +1,14 @@
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{coin, Addr, CosmosMsg, StdError};
+    use cosmwasm_std::{attr, coin, Addr, CosmosMsg, Response, StdError};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        build_ibc_msg, build_swap_msgs, check_gas_limit, ibc_packet_receive, parse_voucher_denom,
-        Ics20Ack, Ics20Packet, RECEIVE_ID,
+        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, handle_follow_up_failure,
+        ibc_packet_receive, parse_voucher_denom, send_amount, Ics20Ack, Ics20Packet, RECEIVE_ID,
+        REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -17,7 +18,10 @@ mod test {
     };
 
     use crate::error::ContractError;
-    use crate::state::{get_key_ics20_ibc_denom, increase_channel_balance};
+    use crate::state::{
+        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, SingleStepReplyArgs,
+        CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS,
+    };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::Amount;
 
@@ -705,7 +709,7 @@ mod test {
         .unwrap_err();
         assert_eq!(err, StdError::generic_err("cannot find pair mappings"));
 
-        // add a pair mapping so we can test the happy case
+        // add a pair mapping so we can test the happy case evm based happy case
         let update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: "trx-mainnet".to_string(),
@@ -736,7 +740,7 @@ mod test {
         let result = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
-            receiver_asset_info,
+            receiver_asset_info.clone(),
             local_receiver,
             receive_channel,
             amount,
@@ -752,7 +756,7 @@ mod test {
                 channel_id: receive_channel.to_string(),
                 data: to_binary(&Ics20Packet::new(
                     amount.clone(),
-                    pair_mapping_key,
+                    pair_mapping_key.clone(),
                     env.contract.address.as_str(),
                     &remote_address,
                     Some(destination.receiver),
@@ -761,6 +765,12 @@ mod test {
                 timeout: env.block.time.plus_seconds(timeout).into()
             })
         );
+        let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.as_mut().storage).unwrap();
+        assert_eq!(reply_args.amount, amount);
+        assert_eq!(reply_args.channel, receive_channel);
+        assert_eq!(reply_args.ibc_denom, Some(pair_mapping_key));
+        assert_eq!(reply_args.receiver, local_receiver.to_string());
+        assert_eq!(reply_args.refund_asset_info, receiver_asset_info)
     }
 
     #[test]
@@ -840,5 +850,77 @@ mod test {
                 funds: vec![]
             })]
         );
+    }
+
+    #[test]
+    fn test_handle_follow_up_failure() {
+        let local_channel_id = "channel-0";
+        let mut deps = setup(&[local_channel_id], &[]);
+        let native_denom = "cosmos";
+        let refund_asset_info = AssetInfo::NativeToken {
+            denom: native_denom.to_string(),
+        };
+        let amount = Uint128::from(100u128);
+        let receiver = "receiver";
+        let err = "ack_failed";
+        let mut single_step_reply_args = SingleStepReplyArgs {
+            channel: local_channel_id.to_string(),
+            refund_asset_info: refund_asset_info.clone(),
+            ibc_denom: None,
+            amount: amount.clone(),
+            receiver: receiver.to_string(),
+        };
+        let result = handle_follow_up_failure(
+            deps.as_mut().storage,
+            single_step_reply_args.clone(),
+            err.to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Response::new()
+                .add_submessage(SubMsg::reply_on_error(
+                    send_amount(
+                        Amount::from_parts(native_denom.to_string(), amount.clone()),
+                        single_step_reply_args.receiver.clone(),
+                        None
+                    ),
+                    REFUND_FAILURE_ID
+                ))
+                .set_data(ack_fail(err.to_string()))
+                .add_attributes(vec![
+                    attr("error_follow_up_msgs", err),
+                    attr(
+                        "attempt_refund_denom",
+                        single_step_reply_args.refund_asset_info.to_string(),
+                    ),
+                    attr("attempt_refund_amount", single_step_reply_args.amount),
+                ])
+        );
+
+        let ibc_denom = "ibc_denom";
+        single_step_reply_args.ibc_denom = Some(ibc_denom.to_string());
+        // if has ibc denom then it's evm based, need to undo reducing balance
+        CHANNEL_REVERSE_STATE
+            .save(
+                deps.as_mut().storage,
+                (local_channel_id, ibc_denom),
+                &ChannelState {
+                    outstanding: Uint128::from(0u128),
+                    total_sent: Uint128::from(100u128),
+                },
+            )
+            .unwrap();
+        handle_follow_up_failure(
+            deps.as_mut().storage,
+            single_step_reply_args.clone(),
+            err.to_string(),
+        )
+        .unwrap();
+        let channel_state = CHANNEL_REVERSE_STATE
+            .load(deps.as_mut().storage, (local_channel_id, ibc_denom))
+            .unwrap();
+        // should undo reduce channel state
+        assert_eq!(channel_state.outstanding, amount)
     }
 }
