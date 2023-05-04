@@ -69,6 +69,10 @@ fn test_is_evm_based() {
     let (is_evm_based, d1) = d1.is_receiver_evm_based();
     assert_eq!(true, is_evm_based);
     assert_eq!("foobar".to_string(), d1.destination_channel);
+    assert_eq!(
+        "foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222".to_string(),
+        d1.receiver
+    );
 }
 
 #[test]

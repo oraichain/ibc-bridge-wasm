@@ -3,9 +3,8 @@ use cosmwasm_std::{
     attr, coin, entry_point, from_binary, to_binary, Addr, Api, BankMsg, Binary, CosmosMsg, Deps,
     DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
     IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout, Order,
-    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Timestamp,
-    Uint128, WasmMsg,
+    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, Order, QuerierWrapper, Reply,
+    Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
@@ -15,7 +14,8 @@ use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, MappingMetadata,
-    ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
+    ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, REPLY_ARGS,
+    SINGLE_STEP_REPLY_ARGS,
 };
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
@@ -82,14 +82,15 @@ fn ack_success() -> Binary {
 }
 
 // create a serialized error message
-fn ack_fail(err: String) -> Binary {
+pub fn ack_fail(err: String) -> Binary {
     let res = Ics20Ack::Error(err);
     to_binary(&res).unwrap()
 }
 
 pub const RECEIVE_ID: u64 = 1337;
 pub const NATIVE_RECEIVE_ID: u64 = 1338;
-pub const FOLLOW_UP_MSGS_ID: u64 = 1339;
+pub const FOLLOW_UP_FAILURE_ID: u64 = 1339;
+pub const REFUND_FAILURE_ID: u64 = 1340;
 pub const ACK_FAILURE_ID: u64 = 64023;
 // const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
@@ -152,28 +153,22 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
             }
         },
-        FOLLOW_UP_MSGS_ID => match reply.result {
+        FOLLOW_UP_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
-                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage).ok();
-                // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
-                if let Some(reply_args) = reply_args {
-                    undo_reduce_channel_balance(
-                        deps.storage,
-                        &reply_args.channel,
-                        &reply_args.denom,
-                        reply_args.amount,
-                        false,
-                    )?;
-                }
-                Ok(Response::new()
-                    .set_data(ack_fail(err.clone()))
-                    .add_attribute("error_follow_up_msgs", err))
+                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
+                handle_follow_up_failure(deps.storage, reply_args, err)
             }
         },
         ACK_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new().set_data(ack_fail(err))),
+        },
+        REFUND_FAILURE_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            SubMsgResult::Err(err) => Ok(Response::new()
+                .set_data(ack_fail(err.clone()))
+                .add_attribute("error_trying_to_refund_single_step", err)),
         },
         // TRANSFER_BACK_FAILURE_ID => match reply.result {
         //     SubMsgResult::Ok(_) => Ok(Response::new()),
@@ -375,7 +370,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map_err(|_| ContractError::NotOnMappingList {})?;
 
     let to_send = Amount::from_parts(
-        parse_asset_info_denom(pair_mapping.asset_info),
+        parse_asset_info_denom(pair_mapping.asset_info.clone()),
         convert_remote_to_local(
             msg.amount,
             pair_mapping.remote_decimals,
@@ -398,22 +393,24 @@ fn handle_ibc_packet_receive_native_remote_chain(
     REPLY_ARGS.save(storage, &reply_args)?;
 
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
-    let submsgs: Vec<SubMsg> = get_follow_up_msgs(
+    let (submsgs, ibc_error_msg) = get_follow_up_msgs(
         storage,
         api,
         querier,
-        env.contract.address,
+        env,
         to_send,
+        pair_mapping.asset_info,
         &msg.sender,
         &msg.receiver,
         &msg.memo.clone().unwrap_or_default(),
         packet,
-    )?
-    .into_iter()
-    .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_MSGS_ID))
-    .collect();
+    )?;
+    let submsgs: Vec<SubMsg> = submsgs
+        .into_iter()
+        .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
+        .collect();
 
-    let res = IbcReceiveResponse::new()
+    let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_submessages(submsgs)
         .add_attribute("action", "receive_native")
@@ -422,6 +419,9 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .add_attribute("denom", denom)
         .add_attribute("amount", msg.amount.to_string())
         .add_attribute("success", "true");
+    if !ibc_error_msg.is_empty() {
+        res = res.add_attribute("ibc_error_msg", ibc_error_msg);
+    }
 
     Ok(res)
 }
@@ -430,29 +430,31 @@ pub fn get_follow_up_msgs(
     storage: &mut dyn Storage,
     api: &dyn Api,
     querier: &QuerierWrapper,
-    ibc_wasm_addr: Addr,
+    env: Env,
     to_send: Amount,
+    initial_receive_asset_info: AssetInfo,
     sender: &str,
     receiver: &str,
     memo: &str,
     packet: &IbcPacket,
-) -> Result<Vec<CosmosMsg>, ContractError> {
+) -> Result<(Vec<CosmosMsg>, String), ContractError> {
     let config = CONFIG.load(storage)?;
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
     if memo.is_empty() {
-        return Ok(vec![send_amount(to_send, receiver.to_string(), None)]);
+        return Ok((
+            vec![send_amount(to_send, receiver.to_string(), None)],
+            "".to_string(),
+        ));
     }
     let destination: DestinationInfo = DestinationInfo::from_str(memo);
     // if destination denom, then we simply transfers cw20 to the receiver address.
     if destination.destination_denom.is_empty() {
-        return Ok(vec![send_amount(
-            to_send,
-            destination.receiver.clone(),
-            None,
-        )]);
+        return Ok((
+            vec![send_amount(to_send, destination.receiver.clone(), None)],
+            "".to_string(),
+        ));
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
-    let cw20_address = api.addr_validate(&to_send.raw_denom())?;
     let receiver_asset_info = if querier
         .query_wasm_smart::<TokenInfoResponse>(
             destination.destination_denom.clone(),
@@ -470,9 +472,9 @@ pub fn get_follow_up_msgs(
     };
     let swap_operations = build_swap_operations(
         receiver_asset_info.clone(),
-        cw20_address.clone(),
+        initial_receive_asset_info.clone(),
         config.fee_denom.as_str(),
-        &destination,
+        &destination.destination_denom,
     );
 
     let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
@@ -485,57 +487,63 @@ pub fn get_follow_up_msgs(
 
     let ibc_msg = build_ibc_msg(
         storage,
-        &receiver_asset_info.to_string(),
+        env,
+        receiver_asset_info,
+        receiver,
         packet.dest.channel_id.as_str(),
         response.amount.clone(),
         &sender,
-        ibc_wasm_addr.as_str(),
         &destination,
         config.default_timeout,
     );
 
+    let mut ibc_error_msg = String::from("");
     // by default, the receiver is the original address sent in ics20packet
-    let mut to = Some(receiver.to_string());
-    if let Some(ibc_msg) = ibc_msg.ok() {
-        cosmos_msgs.push(ibc_msg);
+    let mut to = Some(api.addr_validate(receiver)?);
+    if let Some(ibc_msg) = ibc_msg.as_ref().ok() {
+        cosmos_msgs.push(ibc_msg.to_owned());
         // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
         to = None;
+    } else {
+        ibc_error_msg = ibc_msg.unwrap_err().to_string();
     }
     build_swap_msgs(
         response.amount,
         &config.swap_router_contract,
         to_send.amount(),
-        cw20_address.as_str(),
+        initial_receive_asset_info,
         to,
         &mut cosmos_msgs,
         swap_operations,
     )?;
-    return Ok(cosmos_msgs);
+    return Ok((cosmos_msgs, ibc_error_msg));
 }
 
 pub fn build_swap_operations(
     receiver_asset_info: AssetInfo,
-    cw20_address: Addr,
+    initial_receive_asset_info: AssetInfo,
     fee_denom: &str,
-    destination: &DestinationInfo,
+    destination_denom: &str,
 ) -> Vec<SwapOperation> {
     // always swap with orai first cuz its base denom & every token has a pair with it
-    let mut swap_operations = vec![SwapOperation::OraiSwap {
-        offer_asset_info: AssetInfo::Token {
-            contract_addr: cw20_address.clone(),
+    let fee_denom_asset_info = AssetInfo::NativeToken {
+        denom: fee_denom.to_string(),
+    };
+    let mut swap_operations = vec![
+        SwapOperation::OraiSwap {
+            offer_asset_info: initial_receive_asset_info.clone(),
+            ask_asset_info: fee_denom_asset_info.clone(),
         },
-        ask_asset_info: AssetInfo::NativeToken {
-            denom: fee_denom.to_string(),
-        },
-    }];
-    // if destination denom != orai, then we add another swap op
-    if !destination.destination_denom.eq(&fee_denom) {
-        swap_operations.push(SwapOperation::OraiSwap {
-            offer_asset_info: AssetInfo::NativeToken {
-                denom: fee_denom.to_string(),
-            },
+        SwapOperation::OraiSwap {
+            offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: receiver_asset_info,
-        });
+        },
+    ];
+    if destination_denom.eq(fee_denom) {
+        swap_operations.pop();
+    }
+    if initial_receive_asset_info.eq(&fee_denom_asset_info) {
+        swap_operations.pop();
     }
     swap_operations
 }
@@ -544,41 +552,61 @@ pub fn build_swap_msgs(
     minimum_receive: Uint128,
     swap_router_contract: &str,
     amount: Uint128,
-    swap_address: &str,
-    to: Option<String>,
+    initial_receive_asset_info: AssetInfo,
+    to: Option<Addr>,
     cosmos_msgs: &mut Vec<CosmosMsg>,
     operations: Vec<SwapOperation>,
 ) -> StdResult<()> {
     // the swap msgs must be executed before other types => insert in first index
-    cosmos_msgs.insert(
-        0,
-        WasmMsg::Execute {
-            contract_addr: swap_address.to_string(),
-            msg: to_binary(&Cw20ExecuteMsg::Send {
-                contract: swap_router_contract.to_string(),
-                amount,
-                msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
+    if operations.len() == 0 {
+        return Ok(());
+    }
+    match initial_receive_asset_info {
+        AssetInfo::Token { contract_addr } => cosmos_msgs.insert(
+            0,
+            WasmMsg::Execute {
+                contract_addr: contract_addr.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Send {
+                    contract: swap_router_contract.to_string(),
+                    amount,
+                    msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
+                        operations,
+                        minimum_receive: Some(minimum_receive.clone()),
+                        to: to.map(|to| to.into_string()),
+                    })?,
+                })?,
+                funds: vec![],
+            }
+            .into(),
+        ),
+        AssetInfo::NativeToken { denom } => cosmos_msgs.insert(
+            0,
+            WasmMsg::Execute {
+                contract_addr: swap_router_contract.to_string(),
+                msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
                     operations,
                     minimum_receive: Some(minimum_receive.clone()),
                     to,
                 })?,
-            })?,
-            funds: vec![],
-        }
-        .into(),
-    );
+                funds: vec![coin(amount.u128(), denom)],
+            }
+            .into(),
+        ),
+    }
+
     Ok(())
 }
 
 pub fn build_ibc_msg(
     storage: &mut dyn Storage,
-    receiver_asset_info: &str,
+    env: Env,
+    receiver_asset_info: AssetInfo,
+    local_receiver: &str,
     local_channel_id: &str,
     amount: Uint128,
     remote_address: &str,
-    ibc_wasm_addr: &str,
     destination: &DestinationInfo,
-    timeout: u64,
+    default_timeout: u64,
 ) -> StdResult<CosmosMsg> {
     // if there's no dest channel then we stop, no need to transfer ibc
     if destination.destination_channel.is_empty() {
@@ -586,6 +614,14 @@ pub fn build_ibc_msg(
             "Destination channel empty in build ibc msg",
         ));
     }
+    let timeout = env.block.time.plus_seconds(default_timeout);
+    let mut reply_args = SingleStepReplyArgs {
+        channel: destination.destination_channel.clone(),
+        refund_asset_info: receiver_asset_info.clone(),
+        ibc_denom: None,
+        receiver: local_receiver.to_string(),
+        amount,
+    };
     let (is_evm_based, destination) = destination.is_receiver_evm_based();
     if is_evm_based {
         // use sender from ICS20Packet as receiver when transferring back
@@ -616,7 +652,7 @@ pub fn build_ibc_msg(
             let packet = Ics20Packet::new(
                 amount.clone(),
                 pair_mapping.0.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
-                ibc_wasm_addr,
+                env.contract.address.as_str(),
                 &remote_address,
                 Some(destination.receiver),
             );
@@ -629,11 +665,8 @@ pub fn build_ibc_msg(
                 false,
             )
             .map_err(|err| StdError::generic_err(err.to_string()))?;
-            let reply_args = ReplyArgs {
-                channel: local_channel_id.to_string(),
-                denom: pair_mapping.0,
-                amount,
-            };
+            reply_args.channel = local_channel_id.to_string();
+            reply_args.ibc_denom = Some(pair_mapping.0);
             // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on
             SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
 
@@ -641,7 +674,7 @@ pub fn build_ibc_msg(
             let msg = IbcMsg::SendPacket {
                 channel_id: local_channel_id.to_string(),
                 data: to_binary(&packet)?,
-                timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(timeout)),
+                timeout: timeout.into(),
             };
             return Ok(msg.into());
         }
@@ -653,9 +686,43 @@ pub fn build_ibc_msg(
         channel_id: destination.destination_channel,
         to_address: destination.receiver,
         amount: coin(amount.u128(), destination.destination_denom),
-        timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(timeout)),
+        timeout: timeout.into(),
     };
     Ok(ibc_msg.into())
+}
+
+pub fn handle_follow_up_failure(
+    storage: &mut dyn Storage,
+    reply_args: SingleStepReplyArgs,
+    err: String,
+) -> Result<Response, ContractError> {
+    // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
+    if let Some(ibc_denom) = reply_args.ibc_denom {
+        undo_reduce_channel_balance(
+            storage,
+            &reply_args.channel,
+            &ibc_denom,
+            reply_args.amount,
+            false,
+        )?;
+    }
+    let refund_amount = Amount::from_parts(
+        parse_asset_info_denom(reply_args.refund_asset_info.clone()),
+        reply_args.amount,
+    );
+    // we send refund to the local receiver of the single-step tx because the funds are currently in this contract
+    let send = send_amount(refund_amount, reply_args.receiver, None);
+    Ok(Response::new()
+        .add_submessage(SubMsg::reply_on_error(send, REFUND_FAILURE_ID))
+        .set_data(ack_fail(err.clone()))
+        .add_attributes(vec![
+            attr("error_follow_up_msgs", err),
+            attr(
+                "attempt_refund_denom",
+                reply_args.refund_asset_info.to_string(),
+            ),
+            attr("attempt_refund_amount", reply_args.amount),
+        ]))
 }
 
 pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
