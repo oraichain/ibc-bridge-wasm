@@ -1,5 +1,3 @@
-.earth
-.mars
 node_modules
 data
 build
@@ -7,3 +5,4 @@ target
 libwasmvm_muslc.a
 tests/test-data.json
 artifacts
+.env

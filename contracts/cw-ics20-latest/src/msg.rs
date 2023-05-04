@@ -29,10 +29,10 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
-    pub default_timeout: u64,
+    // pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
-    pub fee_denom: String,
-    pub swap_router_contract: String,
+    // pub fee_denom: String,
+    // pub swap_router_contract: String,
 }
 
 #[cw_serde]

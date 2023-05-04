@@ -393,7 +393,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     REPLY_ARGS.save(storage, &reply_args)?;
 
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
-    let submsgs: Vec<SubMsg> = get_follow_up_msgs(
+    let (submsgs, ibc_error_msg) = get_follow_up_msgs(
         storage,
         api,
         querier,
@@ -404,12 +404,13 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &msg.receiver,
         &msg.memo.clone().unwrap_or_default(),
         packet,
-    )?
-    .into_iter()
-    .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
-    .collect();
+    )?;
+    let submsgs: Vec<SubMsg> = submsgs
+        .into_iter()
+        .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
+        .collect();
 
-    let res = IbcReceiveResponse::new()
+    let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_submessages(submsgs)
         .add_attribute("action", "receive_native")
@@ -418,6 +419,9 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .add_attribute("denom", denom)
         .add_attribute("amount", msg.amount.to_string())
         .add_attribute("success", "true");
+    if !ibc_error_msg.is_empty() {
+        res = res.add_attribute("ibc_error_msg", ibc_error_msg);
+    }
 
     Ok(res)
 }
@@ -433,20 +437,22 @@ pub fn get_follow_up_msgs(
     receiver: &str,
     memo: &str,
     packet: &IbcPacket,
-) -> Result<Vec<CosmosMsg>, ContractError> {
+) -> Result<(Vec<CosmosMsg>, String), ContractError> {
     let config = CONFIG.load(storage)?;
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
     if memo.is_empty() {
-        return Ok(vec![send_amount(to_send, receiver.to_string(), None)]);
+        return Ok((
+            vec![send_amount(to_send, receiver.to_string(), None)],
+            "".to_string(),
+        ));
     }
     let destination: DestinationInfo = DestinationInfo::from_str(memo);
     // if destination denom, then we simply transfers cw20 to the receiver address.
     if destination.destination_denom.is_empty() {
-        return Ok(vec![send_amount(
-            to_send,
-            destination.receiver.clone(),
-            None,
-        )]);
+        return Ok((
+            vec![send_amount(to_send, destination.receiver.clone(), None)],
+            "".to_string(),
+        ));
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
     let receiver_asset_info = if querier
@@ -491,12 +497,15 @@ pub fn get_follow_up_msgs(
         config.default_timeout,
     );
 
+    let mut ibc_error_msg = String::from("");
     // by default, the receiver is the original address sent in ics20packet
     let mut to = Some(api.addr_validate(receiver)?);
-    if let Some(ibc_msg) = ibc_msg.ok() {
-        cosmos_msgs.push(ibc_msg);
+    if let Some(ibc_msg) = ibc_msg.as_ref().ok() {
+        cosmos_msgs.push(ibc_msg.to_owned());
         // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
         to = None;
+    } else {
+        ibc_error_msg = ibc_msg.unwrap_err().to_string();
     }
     build_swap_msgs(
         response.amount,
@@ -507,7 +516,7 @@ pub fn get_follow_up_msgs(
         &mut cosmos_msgs,
         swap_operations,
     )?;
-    return Ok(cosmos_msgs);
+    return Ok((cosmos_msgs, ibc_error_msg));
 }
 
 pub fn build_swap_operations(

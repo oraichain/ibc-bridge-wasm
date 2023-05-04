@@ -315,9 +315,9 @@ mod test {
             mock_env(),
             MigrateMsg {
                 default_gas_limit: Some(def_limit),
-                default_timeout: 100u64,
-                fee_denom: "orai".to_string(),
-                swap_router_contract: "foobar".to_string(),
+                // default_timeout: 100u64,
+                // fee_denom: "orai".to_string(),
+                // swap_router_contract: "foobar".to_string(),
             },
         )
         .unwrap();
@@ -807,7 +807,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            result,
+            result.0,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: env.contract.address.to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
@@ -839,7 +839,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            result,
+            result.0,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: env.contract.address.to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
