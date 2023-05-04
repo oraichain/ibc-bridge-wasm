@@ -121,7 +121,11 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     true,
                 )?;
 
-                Ok(Response::new().set_data(ack_fail(err)))
+                Ok(Response::new().set_data(ack_fail(err)).add_attributes(vec![
+                    attr("undo_reduce_channel", reply_args.channel),
+                    attr("undo_reduce_channel_ibc_denom", reply_args.denom),
+                    attr("undo_reduce_channel_amount", reply_args.amount),
+                ]))
             }
         },
         NATIVE_RECEIVE_ID => match reply.result {
@@ -150,7 +154,12 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
 
                 Ok(Response::new()
                     .set_data(ack_fail(err.clone()))
-                    .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
+                    .add_attribute("error_transferring_ibc_tokens_to_cw20", err)
+                    .add_attributes(vec![
+                        attr("undo_increase_channel", reply_args.channel),
+                        attr("undo_increase_channel_ibc_denom", reply_args.denom),
+                        attr("undo_increase_channel_amount", reply_args.amount),
+                    ]))
             }
         },
         FOLLOW_UP_FAILURE_ID => match reply.result {
@@ -710,8 +719,9 @@ pub fn handle_follow_up_failure(
             false,
         )?;
         response = response.add_attributes(vec![
-            attr("ibc_denom_undo_channel_balance", ibc_data.ibc_denom),
-            attr("remote_amount_undo_channel_balance", ibc_data.remote_amount),
+            attr("undo_reduce_channel", reply_args.channel),
+            attr("undo_reduce_channel_ibc_denom", ibc_data.ibc_denom),
+            attr("undo_reduce_channel_balance", ibc_data.remote_amount),
         ]);
     }
     let refund_amount = Amount::from_parts(
