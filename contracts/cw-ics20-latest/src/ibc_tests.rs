@@ -19,11 +19,11 @@ mod test {
 
     use crate::error::ContractError;
     use crate::state::{
-        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, SingleStepReplyArgs,
-        CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS,
+        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData,
+        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
-    use cw20_ics20_msg::amount::Amount;
+    use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 
     use crate::contract::{execute, migrate, query_channel};
     use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg, UpdatePairMsg};
@@ -638,6 +638,10 @@ mod test {
             denom: "orai".to_string(),
         };
         let amount = Uint128::from(10u128);
+        let remote_decimals = 18;
+        let asset_info_decimals = 6;
+        let remote_amount =
+            convert_local_to_remote(amount, remote_decimals, asset_info_decimals).unwrap();
         let remote_address = "eth-mainnet0x1235";
         let mut env = mock_env();
         env.contract.address = Addr::unchecked("addr");
@@ -714,8 +718,8 @@ mod test {
             local_channel_id: "mars-channel".to_string(),
             denom: "trx-mainnet".to_string(),
             asset_info: receiver_asset_info.clone(),
-            remote_decimals: 18,
-            asset_info_decimals: 18,
+            remote_decimals,
+            asset_info_decimals,
         };
 
         // works with proper funds
@@ -731,7 +735,7 @@ mod test {
             deps.as_mut().storage,
             receive_channel,
             pair_mapping_key.as_str(),
-            amount.clone(),
+            remote_amount.clone(),
             false,
         )
         .unwrap();
@@ -755,7 +759,7 @@ mod test {
             CosmosMsg::Ibc(IbcMsg::SendPacket {
                 channel_id: receive_channel.to_string(),
                 data: to_binary(&Ics20Packet::new(
-                    amount.clone(),
+                    remote_amount.clone(),
                     pair_mapping_key.clone(),
                     env.contract.address.as_str(),
                     &remote_address,
@@ -766,9 +770,11 @@ mod test {
             })
         );
         let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.as_mut().storage).unwrap();
-        assert_eq!(reply_args.amount, amount);
+        let ibc_data = reply_args.ibc_data.unwrap();
+        assert_eq!(ibc_data.remote_amount, remote_amount);
+        assert_eq!(reply_args.local_amount, amount);
         assert_eq!(reply_args.channel, receive_channel);
-        assert_eq!(reply_args.ibc_denom, Some(pair_mapping_key));
+        assert_eq!(ibc_data.ibc_denom, pair_mapping_key);
         assert_eq!(reply_args.receiver, local_receiver.to_string());
         assert_eq!(reply_args.refund_asset_info, receiver_asset_info)
     }
@@ -866,8 +872,8 @@ mod test {
         let mut single_step_reply_args = SingleStepReplyArgs {
             channel: local_channel_id.to_string(),
             refund_asset_info: refund_asset_info.clone(),
-            ibc_denom: None,
-            amount: amount.clone(),
+            ibc_data: None,
+            local_amount: amount,
             receiver: receiver.to_string(),
         };
         let result = handle_follow_up_failure(
@@ -894,12 +900,16 @@ mod test {
                         "attempt_refund_denom",
                         single_step_reply_args.refund_asset_info.to_string(),
                     ),
-                    attr("attempt_refund_amount", single_step_reply_args.amount),
+                    attr("attempt_refund_amount", single_step_reply_args.local_amount),
                 ])
         );
 
         let ibc_denom = "ibc_denom";
-        single_step_reply_args.ibc_denom = Some(ibc_denom.to_string());
+        let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
+        single_step_reply_args.ibc_data = Some(IbcSingleStepData {
+            ibc_denom: ibc_denom.to_string(),
+            remote_amount: remote_amount.clone(),
+        });
         // if has ibc denom then it's evm based, need to undo reducing balance
         CHANNEL_REVERSE_STATE
             .save(
@@ -921,6 +931,6 @@ mod test {
             .load(deps.as_mut().storage, (local_channel_id, ibc_denom))
             .unwrap();
         // should undo reduce channel state
-        assert_eq!(channel_state.outstanding, amount)
+        assert_eq!(channel_state.outstanding, remote_amount)
     }
 }

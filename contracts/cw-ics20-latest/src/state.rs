@@ -100,11 +100,17 @@ pub struct ReplyArgs {
 }
 
 #[cw_serde]
+pub struct IbcSingleStepData {
+    pub ibc_denom: String,
+    pub remote_amount: Uint128,
+}
+
+#[cw_serde]
 pub struct SingleStepReplyArgs {
     pub channel: String,
     pub refund_asset_info: AssetInfo,
-    pub ibc_denom: Option<String>,
-    pub amount: Uint128,
+    pub ibc_data: Option<IbcSingleStepData>,
+    pub local_amount: Uint128,
     pub receiver: String,
 }
 
