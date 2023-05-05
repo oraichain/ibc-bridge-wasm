@@ -538,21 +538,18 @@ pub fn build_swap_operations(
     let fee_denom_asset_info = AssetInfo::NativeToken {
         denom: fee_denom.to_string(),
     };
-    let mut swap_operations = vec![
-        SwapOperation::OraiSwap {
+    let mut swap_operations = vec![];
+    if initial_receive_asset_info.ne(&fee_denom_asset_info) {
+        swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: initial_receive_asset_info.clone(),
             ask_asset_info: fee_denom_asset_info.clone(),
-        },
-        SwapOperation::OraiSwap {
+        })
+    }
+    if destination_denom.ne(fee_denom) {
+        swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: receiver_asset_info,
-        },
-    ];
-    if destination_denom.eq(fee_denom) {
-        swap_operations.pop();
-    }
-    if initial_receive_asset_info.eq(&fee_denom_asset_info) {
-        swap_operations.pop();
+        });
     }
     swap_operations
 }

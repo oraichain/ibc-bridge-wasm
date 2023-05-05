@@ -513,13 +513,13 @@ mod test {
     #[test]
     fn test_swap_operations() {
         let receiver_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("foobar"),
+            contract_addr: Addr::unchecked("contract"),
         };
         let mut initial_asset_info = AssetInfo::Token {
             contract_addr: Addr::unchecked("addr"),
         };
         let fee_denom = "orai".to_string();
-        let destination: DestinationInfo = DestinationInfo {
+        let mut destination: DestinationInfo = DestinationInfo {
             receiver: "cosmos".to_string(),
             destination_channel: "channel-1".to_string(),
             destination_denom: "foobar".to_string(),
@@ -541,16 +541,43 @@ mod test {
             &destination.destination_denom,
         );
         assert_eq!(operations.len(), 1);
+        assert_eq!(
+            operations[0],
+            SwapOperation::OraiSwap {
+                offer_asset_info: initial_asset_info.clone(),
+                ask_asset_info: AssetInfo::NativeToken {
+                    denom: fee_denom.clone()
+                }
+            }
+        );
         initial_asset_info = AssetInfo::NativeToken {
             denom: "foobar".to_string(),
         };
         let operations = build_swap_operations(
-            receiver_asset_info,
+            receiver_asset_info.clone(),
             initial_asset_info.clone(),
             &fee_denom,
             &destination.destination_denom,
         );
         assert_eq!(operations.len(), 0);
+
+        destination.destination_denom = "atom".to_string();
+        let operations = build_swap_operations(
+            receiver_asset_info.clone(),
+            initial_asset_info.clone(),
+            &fee_denom,
+            &destination.destination_denom,
+        );
+        assert_eq!(operations.len(), 1);
+        assert_eq!(
+            operations[0],
+            SwapOperation::OraiSwap {
+                offer_asset_info: AssetInfo::NativeToken {
+                    denom: fee_denom.clone()
+                },
+                ask_asset_info: receiver_asset_info
+            }
+        );
     }
 
     #[test]
