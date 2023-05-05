@@ -7,8 +7,8 @@ mod test {
 
     use crate::ibc::{
         ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, handle_follow_up_failure,
-        ibc_packet_receive, parse_voucher_denom, send_amount, Ics20Ack, Ics20Packet, RECEIVE_ID,
-        REFUND_FAILURE_ID,
+        ibc_packet_receive, is_follow_up_msgs_only_send_amount, parse_voucher_denom, send_amount,
+        Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -876,7 +876,7 @@ mod test {
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: env.contract.address.to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: "cosmosabcd".to_string(),
+                    recipient: receiver.to_string(),
                     amount: amount.clone()
                 })
                 .unwrap(),
@@ -959,5 +959,56 @@ mod test {
             .unwrap();
         // should undo reduce channel state
         assert_eq!(channel_state.outstanding, remote_amount)
+    }
+
+    #[test]
+    fn test_is_follow_up_msgs_only_send_amount() {
+        assert_eq!(
+            is_follow_up_msgs_only_send_amount("", "dest denom", "initial info", "fee denom"),
+            true
+        );
+        assert_eq!(
+            is_follow_up_msgs_only_send_amount("memo", "", "initial info", "fee denom"),
+            true
+        );
+        // dest denom no equal to fee denom, return false
+        assert_eq!(
+            is_follow_up_msgs_only_send_amount(
+                "memo",
+                "dest denom",
+                &AssetInfo::NativeToken {
+                    denom: "fee_denom".to_string()
+                }
+                .to_string(),
+                "fee_denom"
+            ),
+            false
+        );
+        // initial no equal to fee denom => return false
+        assert_eq!(
+            is_follow_up_msgs_only_send_amount(
+                "memo",
+                "fee_denom",
+                &AssetInfo::NativeToken {
+                    denom: "foobar".to_string()
+                }
+                .to_string(),
+                "fee_denom"
+            ),
+            false
+        );
+        // both dest denom and initial equal fee denom => true
+        assert_eq!(
+            is_follow_up_msgs_only_send_amount(
+                "memo",
+                "fee_denom",
+                &AssetInfo::NativeToken {
+                    denom: "fee_denom".to_string()
+                }
+                .to_string(),
+                "fee_denom"
+            ),
+            true
+        );
     }
 }

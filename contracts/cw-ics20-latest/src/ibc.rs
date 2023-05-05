@@ -449,17 +449,15 @@ pub fn get_follow_up_msgs(
 ) -> Result<(Vec<CosmosMsg>, String), ContractError> {
     let config = CONFIG.load(storage)?;
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
-    if memo.is_empty() {
+    let destination: DestinationInfo = DestinationInfo::from_str(memo);
+    if is_follow_up_msgs_only_send_amount(
+        &memo,
+        &destination.destination_denom,
+        &initial_receive_asset_info.to_string(),
+        &config.fee_denom,
+    ) {
         return Ok((
             vec![send_amount(to_send, receiver.to_string(), None)],
-            "".to_string(),
-        ));
-    }
-    let destination: DestinationInfo = DestinationInfo::from_str(memo);
-    // if destination denom, then we simply transfers cw20 to the receiver address.
-    if destination.destination_denom.is_empty() {
-        return Ok((
-            vec![send_amount(to_send, destination.receiver.clone(), None)],
             "".to_string(),
         ));
     }
@@ -526,6 +524,32 @@ pub fn get_follow_up_msgs(
         swap_operations,
     )?;
     return Ok((cosmos_msgs, ibc_error_msg));
+}
+
+pub fn is_follow_up_msgs_only_send_amount(
+    memo: &str,
+    destination_denom: &str,
+    initial_receive_asset_info: &str,
+    fee_denom: &str,
+) -> bool {
+    if memo.is_empty() {
+        return true;
+    }
+    // if destination denom, then we simply transfers cw20 to the receiver address.
+    if destination_denom.is_empty() {
+        return true;
+    }
+    // special case, if inital receiver asset info is native orai (fee denom in this case), and the destination is also orai => we just transfer instead of swapping
+    // the reason is that orai is the central asset info for swapping. There's no ORAI/ORAI pair
+    if initial_receive_asset_info.eq(&AssetInfo::NativeToken {
+        denom: fee_denom.to_string(),
+    }
+    .to_string())
+        && destination_denom.eq(fee_denom)
+    {
+        return true;
+    }
+    false
 }
 
 pub fn build_swap_operations(
