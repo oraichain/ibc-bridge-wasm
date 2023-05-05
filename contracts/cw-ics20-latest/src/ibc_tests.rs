@@ -575,9 +575,20 @@ mod test {
                 offer_asset_info: AssetInfo::NativeToken {
                     denom: fee_denom.clone()
                 },
-                ask_asset_info: receiver_asset_info
+                ask_asset_info: receiver_asset_info.clone()
             }
         );
+
+        // initial = receiver => build swap ops length = 0
+        let operations = build_swap_operations(
+            AssetInfo::NativeToken {
+                denom: "foobar".to_string(),
+            },
+            initial_asset_info.clone(),
+            "not_foo_bar",
+            &destination.destination_denom,
+        );
+        assert_eq!(operations.len(), 0);
     }
 
     #[test]
@@ -883,6 +894,40 @@ mod test {
                 funds: vec![]
             })]
         );
+
+        // 3rd case, cosmos msgs empty case, also send amount
+        let memo = "cosmosabcd:orai";
+        let result = get_follow_up_msgs(
+            deps_mut.storage,
+            deps_mut.api,
+            &deps_mut.querier,
+            env.clone(),
+            Amount::Cw20(Cw20Coin {
+                address: "foobar".to_string(),
+                amount,
+            }),
+            AssetInfo::NativeToken {
+                denom: "orai".to_string(),
+            },
+            "foobar",
+            "foobar",
+            memo,
+            &mock_receive_packet_remote_to_local("channel", 1u128, "foobar", "foobar"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.0,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: env.contract.address.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: receiver.to_string(),
+                    amount: amount.clone()
+                })
+                .unwrap(),
+                funds: vec![]
+            })]
+        );
     }
 
     #[test]
@@ -963,52 +1008,11 @@ mod test {
 
     #[test]
     fn test_is_follow_up_msgs_only_send_amount() {
+        assert_eq!(is_follow_up_msgs_only_send_amount("", "dest denom"), true);
+        assert_eq!(is_follow_up_msgs_only_send_amount("memo", ""), true);
         assert_eq!(
-            is_follow_up_msgs_only_send_amount("", "dest denom", "initial info", "fee denom"),
-            true
-        );
-        assert_eq!(
-            is_follow_up_msgs_only_send_amount("memo", "", "initial info", "fee denom"),
-            true
-        );
-        // dest denom no equal to fee denom, return false
-        assert_eq!(
-            is_follow_up_msgs_only_send_amount(
-                "memo",
-                "dest denom",
-                &AssetInfo::NativeToken {
-                    denom: "fee_denom".to_string()
-                }
-                .to_string(),
-                "fee_denom"
-            ),
+            is_follow_up_msgs_only_send_amount("memo", "dest denom"),
             false
-        );
-        // initial no equal to fee denom => return false
-        assert_eq!(
-            is_follow_up_msgs_only_send_amount(
-                "memo",
-                "fee_denom",
-                &AssetInfo::NativeToken {
-                    denom: "foobar".to_string()
-                }
-                .to_string(),
-                "fee_denom"
-            ),
-            false
-        );
-        // both dest denom and initial equal fee denom => true
-        assert_eq!(
-            is_follow_up_msgs_only_send_amount(
-                "memo",
-                "fee_denom",
-                &AssetInfo::NativeToken {
-                    denom: "fee_denom".to_string()
-                }
-                .to_string(),
-                "fee_denom"
-            ),
-            true
         );
     }
 }

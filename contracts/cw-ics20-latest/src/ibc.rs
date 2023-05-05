@@ -450,12 +450,7 @@ pub fn get_follow_up_msgs(
     let config = CONFIG.load(storage)?;
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
     let destination: DestinationInfo = DestinationInfo::from_str(memo);
-    if is_follow_up_msgs_only_send_amount(
-        &memo,
-        &destination.destination_denom,
-        &initial_receive_asset_info.to_string(),
-        &config.fee_denom,
-    ) {
+    if is_follow_up_msgs_only_send_amount(&memo, &destination.destination_denom) {
         return Ok((
             vec![send_amount(to_send, receiver.to_string(), None)],
             "".to_string(),
@@ -483,14 +478,17 @@ pub fn get_follow_up_msgs(
         config.fee_denom.as_str(),
         &destination.destination_denom,
     );
-
-    let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
-        config.swap_router_contract.clone(),
-        &oraiswap::router::QueryMsg::SimulateSwapOperations {
-            offer_amount: to_send.amount().clone(),
-            operations: swap_operations.clone(),
-        },
-    )?;
+    let mut minimum_receive = to_send.amount();
+    if swap_operations.len() > 0 {
+        let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
+            config.swap_router_contract.clone(),
+            &oraiswap::router::QueryMsg::SimulateSwapOperations {
+                offer_amount: to_send.amount().clone(),
+                operations: swap_operations.clone(),
+            },
+        )?;
+        minimum_receive = response.amount;
+    }
 
     let ibc_msg = build_ibc_msg(
         storage,
@@ -498,7 +496,7 @@ pub fn get_follow_up_msgs(
         receiver_asset_info,
         receiver,
         packet.dest.channel_id.as_str(),
-        response.amount.clone(),
+        minimum_receive.clone(),
         &sender,
         &destination,
         config.default_timeout,
@@ -515,7 +513,7 @@ pub fn get_follow_up_msgs(
         ibc_error_msg = ibc_msg.unwrap_err().to_string();
     }
     build_swap_msgs(
-        response.amount,
+        minimum_receive,
         &config.swap_router_contract,
         to_send.amount(),
         initial_receive_asset_info,
@@ -523,30 +521,22 @@ pub fn get_follow_up_msgs(
         &mut cosmos_msgs,
         swap_operations,
     )?;
+    // fallback case. If there's no cosmos messages then we return send amount
+    if cosmos_msgs.is_empty() {
+        return Ok((
+            vec![send_amount(to_send, receiver.to_string(), None)],
+            ibc_error_msg,
+        ));
+    }
     return Ok((cosmos_msgs, ibc_error_msg));
 }
 
-pub fn is_follow_up_msgs_only_send_amount(
-    memo: &str,
-    destination_denom: &str,
-    initial_receive_asset_info: &str,
-    fee_denom: &str,
-) -> bool {
+pub fn is_follow_up_msgs_only_send_amount(memo: &str, destination_denom: &str) -> bool {
     if memo.is_empty() {
         return true;
     }
     // if destination denom, then we simply transfers cw20 to the receiver address.
     if destination_denom.is_empty() {
-        return true;
-    }
-    // special case, if inital receiver asset info is native orai (fee denom in this case), and the destination is also orai => we just transfer instead of swapping
-    // the reason is that orai is the central asset info for swapping. There's no ORAI/ORAI pair
-    if initial_receive_asset_info.eq(&AssetInfo::NativeToken {
-        denom: fee_denom.to_string(),
-    }
-    .to_string())
-        && destination_denom.eq(fee_denom)
-    {
         return true;
     }
     false
@@ -563,6 +553,9 @@ pub fn build_swap_operations(
         denom: fee_denom.to_string(),
     };
     let mut swap_operations = vec![];
+    if receiver_asset_info.eq(&initial_receive_asset_info) {
+        return vec![];
+    }
     if initial_receive_asset_info.ne(&fee_denom_asset_info) {
         swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: initial_receive_asset_info.clone(),
