@@ -121,7 +121,11 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     true,
                 )?;
 
-                Ok(Response::new().set_data(ack_fail(err)))
+                Ok(Response::new().set_data(ack_fail(err)).add_attributes(vec![
+                    attr("undo_reduce_channel", reply_args.channel),
+                    attr("undo_reduce_channel_ibc_denom", reply_args.denom),
+                    attr("undo_reduce_channel_amount", reply_args.amount),
+                ]))
             }
         },
         NATIVE_RECEIVE_ID => match reply.result {
@@ -150,7 +154,12 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
 
                 Ok(Response::new()
                     .set_data(ack_fail(err.clone()))
-                    .add_attribute("error_transferring_ibc_tokens_to_cw20", err))
+                    .add_attribute("error_transferring_ibc_tokens_to_cw20", err)
+                    .add_attributes(vec![
+                        attr("undo_increase_channel", reply_args.channel),
+                        attr("undo_increase_channel_ibc_denom", reply_args.denom),
+                        attr("undo_increase_channel_amount", reply_args.amount),
+                    ]))
             }
         },
         FOLLOW_UP_FAILURE_ID => match reply.result {
@@ -440,17 +449,10 @@ pub fn get_follow_up_msgs(
 ) -> Result<(Vec<CosmosMsg>, String), ContractError> {
     let config = CONFIG.load(storage)?;
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
-    if memo.is_empty() {
+    let destination: DestinationInfo = DestinationInfo::from_str(memo);
+    if is_follow_up_msgs_only_send_amount(&memo, &destination.destination_denom) {
         return Ok((
             vec![send_amount(to_send, receiver.to_string(), None)],
-            "".to_string(),
-        ));
-    }
-    let destination: DestinationInfo = DestinationInfo::from_str(memo);
-    // if destination denom, then we simply transfers cw20 to the receiver address.
-    if destination.destination_denom.is_empty() {
-        return Ok((
-            vec![send_amount(to_send, destination.receiver.clone(), None)],
             "".to_string(),
         ));
     }
@@ -476,14 +478,17 @@ pub fn get_follow_up_msgs(
         config.fee_denom.as_str(),
         &destination.destination_denom,
     );
-
-    let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
-        config.swap_router_contract.clone(),
-        &oraiswap::router::QueryMsg::SimulateSwapOperations {
-            offer_amount: to_send.amount().clone(),
-            operations: swap_operations.clone(),
-        },
-    )?;
+    let mut minimum_receive = to_send.amount();
+    if swap_operations.len() > 0 {
+        let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
+            config.swap_router_contract.clone(),
+            &oraiswap::router::QueryMsg::SimulateSwapOperations {
+                offer_amount: to_send.amount().clone(),
+                operations: swap_operations.clone(),
+            },
+        )?;
+        minimum_receive = response.amount;
+    }
 
     let ibc_msg = build_ibc_msg(
         storage,
@@ -491,7 +496,7 @@ pub fn get_follow_up_msgs(
         receiver_asset_info,
         receiver,
         packet.dest.channel_id.as_str(),
-        response.amount.clone(),
+        minimum_receive.clone(),
         &sender,
         &destination,
         config.default_timeout,
@@ -508,7 +513,7 @@ pub fn get_follow_up_msgs(
         ibc_error_msg = ibc_msg.unwrap_err().to_string();
     }
     build_swap_msgs(
-        response.amount,
+        minimum_receive,
         &config.swap_router_contract,
         to_send.amount(),
         initial_receive_asset_info,
@@ -516,7 +521,25 @@ pub fn get_follow_up_msgs(
         &mut cosmos_msgs,
         swap_operations,
     )?;
+    // fallback case. If there's no cosmos messages then we return send amount
+    if cosmos_msgs.is_empty() {
+        return Ok((
+            vec![send_amount(to_send, receiver.to_string(), None)],
+            ibc_error_msg,
+        ));
+    }
     return Ok((cosmos_msgs, ibc_error_msg));
+}
+
+pub fn is_follow_up_msgs_only_send_amount(memo: &str, destination_denom: &str) -> bool {
+    if memo.is_empty() {
+        return true;
+    }
+    // if destination denom, then we simply transfers cw20 to the receiver address.
+    if destination_denom.is_empty() {
+        return true;
+    }
+    false
 }
 
 pub fn build_swap_operations(
@@ -529,21 +552,21 @@ pub fn build_swap_operations(
     let fee_denom_asset_info = AssetInfo::NativeToken {
         denom: fee_denom.to_string(),
     };
-    let mut swap_operations = vec![
-        SwapOperation::OraiSwap {
+    let mut swap_operations = vec![];
+    if receiver_asset_info.eq(&initial_receive_asset_info) {
+        return vec![];
+    }
+    if initial_receive_asset_info.ne(&fee_denom_asset_info) {
+        swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: initial_receive_asset_info.clone(),
             ask_asset_info: fee_denom_asset_info.clone(),
-        },
-        SwapOperation::OraiSwap {
+        })
+    }
+    if destination_denom.ne(fee_denom) {
+        swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: receiver_asset_info,
-        },
-    ];
-    if destination_denom.eq(fee_denom) {
-        swap_operations.pop();
-    }
-    if initial_receive_asset_info.eq(&fee_denom_asset_info) {
-        swap_operations.pop();
+        });
     }
     swap_operations
 }
@@ -710,8 +733,9 @@ pub fn handle_follow_up_failure(
             false,
         )?;
         response = response.add_attributes(vec![
-            attr("ibc_denom_undo_channel_balance", ibc_data.ibc_denom),
-            attr("remote_amount_undo_channel_balance", ibc_data.remote_amount),
+            attr("undo_reduce_channel", reply_args.channel),
+            attr("undo_reduce_channel_ibc_denom", ibc_data.ibc_denom),
+            attr("undo_reduce_channel_balance", ibc_data.remote_amount),
         ]);
     }
     let refund_amount = Amount::from_parts(

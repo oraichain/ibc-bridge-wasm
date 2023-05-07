@@ -7,8 +7,8 @@ mod test {
 
     use crate::ibc::{
         ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, handle_follow_up_failure,
-        ibc_packet_receive, parse_voucher_denom, send_amount, Ics20Ack, Ics20Packet, RECEIVE_ID,
-        REFUND_FAILURE_ID,
+        ibc_packet_receive, is_follow_up_msgs_only_send_amount, parse_voucher_denom, send_amount,
+        Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -513,13 +513,13 @@ mod test {
     #[test]
     fn test_swap_operations() {
         let receiver_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("foobar"),
+            contract_addr: Addr::unchecked("contract"),
         };
         let mut initial_asset_info = AssetInfo::Token {
             contract_addr: Addr::unchecked("addr"),
         };
         let fee_denom = "orai".to_string();
-        let destination: DestinationInfo = DestinationInfo {
+        let mut destination: DestinationInfo = DestinationInfo {
             receiver: "cosmos".to_string(),
             destination_channel: "channel-1".to_string(),
             destination_denom: "foobar".to_string(),
@@ -541,13 +541,51 @@ mod test {
             &destination.destination_denom,
         );
         assert_eq!(operations.len(), 1);
+        assert_eq!(
+            operations[0],
+            SwapOperation::OraiSwap {
+                offer_asset_info: initial_asset_info.clone(),
+                ask_asset_info: AssetInfo::NativeToken {
+                    denom: fee_denom.clone()
+                }
+            }
+        );
         initial_asset_info = AssetInfo::NativeToken {
             denom: "foobar".to_string(),
         };
         let operations = build_swap_operations(
-            receiver_asset_info,
+            receiver_asset_info.clone(),
             initial_asset_info.clone(),
             &fee_denom,
+            &destination.destination_denom,
+        );
+        assert_eq!(operations.len(), 0);
+
+        destination.destination_denom = "atom".to_string();
+        let operations = build_swap_operations(
+            receiver_asset_info.clone(),
+            initial_asset_info.clone(),
+            &fee_denom,
+            &destination.destination_denom,
+        );
+        assert_eq!(operations.len(), 1);
+        assert_eq!(
+            operations[0],
+            SwapOperation::OraiSwap {
+                offer_asset_info: AssetInfo::NativeToken {
+                    denom: fee_denom.clone()
+                },
+                ask_asset_info: receiver_asset_info.clone()
+            }
+        );
+
+        // initial = receiver => build swap ops length = 0
+        let operations = build_swap_operations(
+            AssetInfo::NativeToken {
+                denom: "foobar".to_string(),
+            },
+            initial_asset_info.clone(),
+            "not_foo_bar",
             &destination.destination_denom,
         );
         assert_eq!(operations.len(), 0);
@@ -849,7 +887,41 @@ mod test {
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: env.contract.address.to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: "cosmosabcd".to_string(),
+                    recipient: receiver.to_string(),
+                    amount: amount.clone()
+                })
+                .unwrap(),
+                funds: vec![]
+            })]
+        );
+
+        // 3rd case, cosmos msgs empty case, also send amount
+        let memo = "cosmosabcd:orai";
+        let result = get_follow_up_msgs(
+            deps_mut.storage,
+            deps_mut.api,
+            &deps_mut.querier,
+            env.clone(),
+            Amount::Cw20(Cw20Coin {
+                address: "foobar".to_string(),
+                amount,
+            }),
+            AssetInfo::NativeToken {
+                denom: "orai".to_string(),
+            },
+            "foobar",
+            "foobar",
+            memo,
+            &mock_receive_packet_remote_to_local("channel", 1u128, "foobar", "foobar"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.0,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: env.contract.address.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: receiver.to_string(),
                     amount: amount.clone()
                 })
                 .unwrap(),
@@ -932,5 +1004,15 @@ mod test {
             .unwrap();
         // should undo reduce channel state
         assert_eq!(channel_state.outstanding, remote_amount)
+    }
+
+    #[test]
+    fn test_is_follow_up_msgs_only_send_amount() {
+        assert_eq!(is_follow_up_msgs_only_send_amount("", "dest denom"), true);
+        assert_eq!(is_follow_up_msgs_only_send_amount("memo", ""), true);
+        assert_eq!(
+            is_follow_up_msgs_only_send_amount("memo", "dest denom"),
+            false
+        );
     }
 }
