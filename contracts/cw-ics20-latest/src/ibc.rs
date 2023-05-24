@@ -802,7 +802,7 @@ pub fn process_deduct_fee(
     if let Some(relayer_fee) = relayer_fee {
         let fee = deduct_fee(relayer_fee, amount);
         RELAYER_FEE_ACCUMULATOR.update(storage, denom, |prev_fee| -> StdResult<Uint128> {
-            Ok(prev_fee.unwrap_or_default().add(fee))
+            Ok(prev_fee.unwrap_or_default().checked_add(fee)?)
         })?;
         let new_deducted_amount = amount.checked_sub(fee)?;
         return Ok(new_deducted_amount);
