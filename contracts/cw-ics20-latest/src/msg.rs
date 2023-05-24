@@ -3,7 +3,7 @@ use cosmwasm_std::{Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
-use crate::state::{ChannelInfo, MappingMetadata};
+use crate::state::{ChannelInfo, MappingMetadata, RelayerFee};
 use cw20_ics20_msg::amount::Amount;
 
 #[cw_serde]
@@ -53,7 +53,9 @@ pub enum ExecuteMsg {
         default_gas_limit: Option<u64>,
         fee_denom: Option<String>,
         swap_router_contract: Option<String>,
+        relayer_fee: Option<RelayerFee>,
     },
+    TransferFee {},
 }
 
 #[cw_serde]

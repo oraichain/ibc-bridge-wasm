@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcMsg, IbcQuery,
-    MessageInfo, Order, PortIdResponse, Response, StdResult,
+    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
+    IbcMsg, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -10,7 +10,9 @@ use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
 
 use crate::error::ContractError;
-use crate::ibc::{parse_ibc_wasm_port_id, parse_voucher_denom, Ics20Packet};
+use crate::ibc::{
+    parse_ibc_wasm_port_id, parse_voucher_denom, process_deduct_fee, send_amount, Ics20Packet,
+};
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
     ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, ListMappingResponse,
@@ -18,8 +20,8 @@ use crate::msg::{
 };
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    AllowInfo, Config, MappingMetadata, ADMIN, ALLOW_LIST, CHANNEL_FORWARD_STATE, CHANNEL_INFO,
-    CHANNEL_REVERSE_STATE, CONFIG,
+    AllowInfo, Config, MappingMetadata, RelayerFee, ADMIN, ALLOW_LIST, CHANNEL_FORWARD_STATE,
+    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -66,7 +68,6 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        // TODO: add update cw20 pair
         ExecuteMsg::Receive(msg) => execute_receive(deps, env, info, msg),
         ExecuteMsg::Transfer(msg) => {
             let coin = one_coin(&info)?;
@@ -86,6 +87,7 @@ pub fn execute(
             fee_denom,
             swap_router_contract,
             admin,
+            relayer_fee,
         } => update_config(
             deps,
             info,
@@ -94,8 +96,33 @@ pub fn execute(
             fee_denom,
             swap_router_contract,
             admin,
+            relayer_fee,
         ),
+        ExecuteMsg::TransferFee {} => execute_transfer_fee(deps),
     }
+}
+
+pub fn execute_transfer_fee(deps: DepsMut) -> Result<Response, ContractError> {
+    let admin = ADMIN
+        .get(deps.as_ref())?
+        .ok_or(StdError::generic_err("Cannot find contract admin"))?
+        .into_string();
+    let to_send_cosmos_msgs: Vec<CosmosMsg> = RELAYER_FEE_ACCUMULATOR
+        .range(deps.storage, None, None, Order::Ascending)
+        .map(|data| {
+            data.map(|fee_info| {
+                send_amount(
+                    Amount::from_parts(fee_info.0, fee_info.1),
+                    admin.clone(),
+                    None,
+                )
+            })
+        })
+        .collect::<StdResult<Vec<CosmosMsg>>>()?;
+
+    Ok(Response::new()
+        .add_messages(to_send_cosmos_msgs)
+        .add_attributes(vec![("action", "transfer_fee")]))
 }
 
 pub fn update_config(
@@ -106,8 +133,12 @@ pub fn update_config(
     fee_denom: Option<String>,
     swap_router_contract: Option<String>,
     admin: Option<String>,
+    relayer_fee: Option<RelayerFee>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+    if let Some(relayer_fee) = relayer_fee {
+        RELAYER_FEE.save(deps.storage, &relayer_fee.chain, &relayer_fee.ratio)?;
+    }
     CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
         if let Some(default_timeout) = default_timeout {
             config.default_timeout = default_timeout;
@@ -243,6 +274,13 @@ pub fn execute_transfer_back_to_remote_chain(
         return Err(ContractError::NoFunds {});
     }
 
+    let new_deducted_amount = process_deduct_fee(
+        deps.storage,
+        &msg.remote_denom,
+        amount.amount(),
+        &amount.denom(),
+    )?;
+
     // should be in form port/channel/denom
     let mappings = get_mappings_from_asset_info(
         deps.as_ref(),
@@ -295,7 +333,7 @@ pub fn execute_transfer_back_to_remote_chain(
     let timeout = env.block.time.plus_seconds(timeout_delta);
     // need to convert decimal of cw20 to remote decimal before transferring
     let amount_remote = convert_local_to_remote(
-        amount.amount(),
+        new_deducted_amount,
         mapping.pair_mapping.remote_decimals,
         mapping.pair_mapping.asset_info_decimals,
     )?;
@@ -327,6 +365,7 @@ pub fn execute_transfer_back_to_remote_chain(
     };
 
     // send response
+    // TODO: add transfer fund to admin wallet msg here
     let res = Response::new()
         .add_message(msg)
         .add_attribute("action", "transfer")
@@ -1290,6 +1329,7 @@ mod test {
             default_gas_limit: None,
             fee_denom: Some("hehe".to_string()),
             swap_router_contract: Some("new_router".to_string()),
+            relayer_fee: None,
         };
         // unauthorized case
         let unauthorized_info = mock_info(&String::from("somebody"), &[]);
@@ -1310,5 +1350,17 @@ mod test {
         assert_eq!(config.default_timeout, 1);
         assert_eq!(config.fee_denom, "hehe".to_string());
         assert_eq!(config.swap_router_contract, "new_router".to_string());
+    }
+
+    #[test]
+    fn test_asset_info() {
+        let asset_info = AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        };
+        assert_eq!(asset_info.to_string(), "orai".to_string());
+        let asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("oraiaxbc".to_string()),
+        };
+        assert_eq!(asset_info.to_string(), "oraiaxbc".to_string())
     }
 }

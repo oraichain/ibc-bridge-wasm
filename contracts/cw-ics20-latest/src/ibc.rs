@@ -1,10 +1,13 @@
+use std::ops::{Add, Mul};
+
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, coin, entry_point, from_binary, to_binary, Addr, Api, BankMsg, Binary, CosmosMsg, Deps,
-    DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
-    IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, Order, QuerierWrapper, Reply,
-    Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Uint128, WasmMsg,
+    attr, coin, entry_point, from_binary, to_binary, Addr, Api, BankMsg, Binary, CosmosMsg,
+    Decimal, Deps, DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
+    IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
+    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, Order,
+    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Uint128,
+    WasmMsg,
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
@@ -14,8 +17,8 @@ use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData,
-    MappingMetadata, ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS,
+    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
+    RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
 };
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
@@ -401,13 +404,17 @@ fn handle_ibc_packet_receive_native_remote_chain(
     };
     REPLY_ARGS.save(storage, &reply_args)?;
 
+    let new_deducted_to_send = Amount::from_parts(
+        to_send.denom(),
+        process_deduct_fee(storage, &msg.denom, to_send.amount(), &to_send.denom())?,
+    );
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
     let (submsgs, ibc_error_msg) = get_follow_up_msgs(
         storage,
         api,
         querier,
         env,
-        to_send,
+        new_deducted_to_send,
         pair_mapping.asset_info,
         &msg.sender,
         &msg.receiver,
@@ -419,6 +426,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
         .collect();
 
+    // TODO: add transfer fund to admin msg here
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_submessages(submsgs)
@@ -580,7 +588,7 @@ pub fn build_swap_msgs(
     cosmos_msgs: &mut Vec<CosmosMsg>,
     operations: Vec<SwapOperation>,
 ) -> StdResult<()> {
-    // the swap msgs must be executed before other types => insert in first index
+    // the swap msg must be executed before other msgs because we need the ask token amount to create ibc msg => insert in first index
     if operations.len() == 0 {
         return Ok(());
     }
@@ -647,6 +655,13 @@ pub fn build_ibc_msg(
     };
     let (is_evm_based, destination) = destination.is_receiver_evm_based();
     if is_evm_based {
+        // TODO: also deduct fee here because of round trip
+        let new_deducted_amount = process_deduct_fee(
+            storage,
+            &destination.destination_denom,
+            amount,
+            &parse_asset_info_denom(receiver_asset_info.clone()),
+        )?;
         // use sender from ICS20Packet as receiver when transferring back
         let pair_mappings: StdResult<Vec<(String, MappingMetadata)>> = ics20_denoms()
             .idx
@@ -666,7 +681,7 @@ pub fn build_ibc_msg(
             .find(|(key, _)| key.contains(&destination.destination_channel));
         if let Some(pair_mapping) = pair_mappings {
             let remote_amount = convert_local_to_remote(
-                amount,
+                new_deducted_amount,
                 pair_mapping.1.remote_decimals,
                 pair_mapping.1.asset_info_decimals,
             )?;
@@ -773,6 +788,43 @@ pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, Contr
             }
         }
         _ => Ok(None),
+    }
+}
+
+pub fn process_deduct_fee(
+    storage: &mut dyn Storage,
+    remote_denom: &str,
+    amount: Uint128,
+    denom: &str,
+) -> StdResult<Uint128> {
+    let evm_prefix = convert_remote_denom_to_evm_prefix(remote_denom);
+    let relayer_fee = RELAYER_FEE.may_load(storage, &evm_prefix)?;
+    if let Some(relayer_fee) = relayer_fee {
+        let fee = deduct_fee(relayer_fee, amount);
+        RELAYER_FEE_ACCUMULATOR.update(storage, denom, |prev_fee| -> StdResult<Uint128> {
+            Ok(prev_fee.unwrap_or_default().add(fee))
+        })?;
+        let new_deducted_amount = amount.checked_sub(fee)?;
+        return Ok(new_deducted_amount);
+    }
+    Ok(amount)
+}
+
+pub fn deduct_fee(relayer_fee: Ratio, amount: Uint128) -> Uint128 {
+    // ignore case where denominator is zero since we cannot divide with 0
+    if relayer_fee.denominator == 0 {
+        return Uint128::from(0u64);
+    }
+    amount.mul(Decimal::from_ratio(
+        relayer_fee.nominator,
+        relayer_fee.denominator,
+    ))
+}
+
+pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
+    match remote_denom.split_once("0x") {
+        Some((evm_prefix, _)) => return evm_prefix.to_string(),
+        None => "".to_string(),
     }
 }
 
