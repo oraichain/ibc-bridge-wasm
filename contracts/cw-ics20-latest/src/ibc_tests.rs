@@ -466,7 +466,7 @@ mod test {
         let pair = UpdatePairMsg {
             local_channel_id: send_channel.to_string(),
             denom: denom.to_string(),
-            asset_info: asset_info,
+            asset_info,
             remote_decimals: 18u8,
             asset_info_decimals: 18u8,
         };
@@ -487,9 +487,19 @@ mod test {
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         println!("res: {:?}", res);
-        assert_eq!(res.messages.len(), 1);
+        assert_eq!(res.messages.len(), 2); // 2 messages because we also have deduct fee msg
+        match res.messages[0].msg.clone() {
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr,
+                msg,
+                funds: _,
+            }) => {
+                assert_eq!(contract_addr, mock_env().contract.address.into_string());
+                assert_eq!(msg, to_binary(&ExecuteMsg::TransferFee {}).unwrap());
+            }
+            _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+        }
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        println!("ack: {:?}", ack);
         assert!(matches!(ack, Ics20Ack::Result(_)));
 
         // query channel state|_|

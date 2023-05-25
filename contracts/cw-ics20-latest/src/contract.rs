@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
-    IbcMsg, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult,
+    IbcMsg, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -364,10 +364,16 @@ pub fn execute_transfer_back_to_remote_chain(
         timeout: timeout.into(),
     };
 
+    let transfer_fee_to_admin: CosmosMsg = WasmMsg::Execute {
+        contract_addr: env.contract.address.into_string(),
+        msg: to_binary(&ExecuteMsg::TransferFee {})?,
+        funds: vec![],
+    }
+    .into();
+
     // send response
-    // TODO: add transfer fund to admin wallet msg here
     let res = Response::new()
-        .add_message(msg)
+        .add_messages(vec![transfer_fee_to_admin, msg.into()])
         .add_attribute("action", "transfer")
         .add_attribute("type", "transfer_back_to_remote_chain")
         .add_attribute("sender", &packet.sender)
@@ -1250,12 +1256,44 @@ mod test {
         let res = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap();
 
         assert_eq!(res.messages[0].gas_limit, None);
-        assert_eq!(1, res.messages.len());
+        assert_eq!(2, res.messages.len()); // 2 because it also has deduct fee msg
+        match res.messages[1].msg.clone() {
+            CosmosMsg::Ibc(IbcMsg::SendPacket {
+                channel_id,
+                data,
+                timeout,
+            }) => {
+                let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
+                assert_eq!(timeout, expected_timeout.into());
+                assert_eq!(channel_id.as_str(), local_channel);
+                let msg: Ics20Packet = from_binary(&data).unwrap();
+                assert_eq!(msg.amount, Uint128::new(1234567));
+                assert_eq!(
+                    msg.denom.as_str(),
+                    get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+                );
+                assert_eq!(msg.sender.as_str(), original_sender);
+                assert_eq!(msg.receiver.as_str(), "foreign-address");
+                // assert_eq!(msg.memo, None);
+            }
+            _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+        }
+        match res.messages[0].msg.clone() {
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr,
+                msg,
+                funds: _,
+            }) => {
+                assert_eq!(contract_addr, mock_env().contract.address.into_string());
+                assert_eq!(msg, to_binary(&ExecuteMsg::TransferFee {}).unwrap());
+            }
+            _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+        }
         if let CosmosMsg::Ibc(IbcMsg::SendPacket {
             channel_id,
             data,
             timeout,
-        }) = &res.messages[0].msg
+        }) = &res.messages[1].msg
         {
             let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
             assert_eq!(timeout, &expected_timeout.into());

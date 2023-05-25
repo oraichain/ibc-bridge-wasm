@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul};
+use std::ops::Mul;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
@@ -14,6 +14,7 @@ use oraiswap::asset::AssetInfo;
 use oraiswap::router::{SimulateSwapOperationsResponse, SwapOperation};
 
 use crate::error::{ContractError, Never};
+use crate::msg::ExecuteMsg;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData,
@@ -413,7 +414,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         storage,
         api,
         querier,
-        env,
+        env.clone(),
         new_deducted_to_send,
         pair_mapping.asset_info,
         &msg.sender,
@@ -426,9 +427,15 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
         .collect();
 
-    // TODO: add transfer fund to admin msg here
+    let transfer_fee_to_admin: CosmosMsg = WasmMsg::Execute {
+        contract_addr: env.contract.address.into_string(),
+        msg: to_binary(&ExecuteMsg::TransferFee {})?,
+        funds: vec![],
+    }
+    .into();
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
+        .add_message(transfer_fee_to_admin)
         .add_submessages(submsgs)
         .add_attribute("action", "receive_native")
         .add_attribute("sender", msg.sender.clone())
@@ -655,7 +662,7 @@ pub fn build_ibc_msg(
     };
     let (is_evm_based, destination) = destination.is_receiver_evm_based();
     if is_evm_based {
-        // TODO: also deduct fee here because of round trip
+        // also deduct fee here because of round trip
         let new_deducted_amount = process_deduct_fee(
             storage,
             &destination.destination_denom,
