@@ -6,9 +6,10 @@ mod test {
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, handle_follow_up_failure,
-        ibc_packet_receive, is_follow_up_msgs_only_send_amount, parse_voucher_denom, send_amount,
-        Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
+        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
+        convert_remote_denom_to_evm_prefix, deduct_fee, handle_follow_up_failure,
+        ibc_packet_receive, is_follow_up_msgs_only_send_amount, parse_voucher_denom,
+        process_deduct_fee, send_amount, Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -19,15 +20,16 @@ mod test {
 
     use crate::error::ContractError;
     use crate::state::{
-        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData,
-        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS,
+        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData, Ratio,
+        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
+        SINGLE_STEP_REPLY_ARGS,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 
     use crate::contract::{execute, migrate, query_channel};
     use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg, UpdatePairMsg};
-    use cosmwasm_std::testing::{mock_env, mock_info};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{coins, to_vec};
     use cw20::Cw20ReceiveMsg;
 
@@ -1023,6 +1025,80 @@ mod test {
         assert_eq!(
             is_follow_up_msgs_only_send_amount("memo", "dest denom"),
             false
+        );
+    }
+
+    #[test]
+    fn test_deduct_fee() {
+        assert_eq!(
+            deduct_fee(
+                Ratio {
+                    nominator: 1,
+                    denominator: 0,
+                },
+                Uint128::from(1000u64)
+            ),
+            Uint128::from(0u64)
+        );
+        assert_eq!(
+            deduct_fee(
+                Ratio {
+                    nominator: 1,
+                    denominator: 1,
+                },
+                Uint128::from(1000u64)
+            ),
+            Uint128::from(1000u64)
+        );
+        assert_eq!(
+            deduct_fee(
+                Ratio {
+                    nominator: 1,
+                    denominator: 100,
+                },
+                Uint128::from(1000u64)
+            ),
+            Uint128::from(10u64)
+        );
+    }
+
+    #[test]
+    fn test_convert_remote_denom_to_evm_prefix() {
+        assert_eq!(convert_remote_denom_to_evm_prefix("abcd"), "".to_string());
+        assert_eq!(convert_remote_denom_to_evm_prefix("0x"), "".to_string());
+        assert_eq!(
+            convert_remote_denom_to_evm_prefix("evm0x"),
+            "evm".to_string()
+        );
+    }
+
+    #[test]
+    fn test_process_deduct_fee() {
+        let mut deps = mock_dependencies();
+        let amount = Uint128::from(1000u64);
+        let storage = deps.as_mut().storage;
+        // should return amount because we have not set relayer fee yet
+        assert_eq!(
+            process_deduct_fee(storage, "foo", amount, "foo").unwrap(),
+            amount.clone()
+        );
+        RELAYER_FEE
+            .save(
+                storage,
+                "foo",
+                &Ratio {
+                    nominator: 1,
+                    denominator: 100,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            process_deduct_fee(storage, "foo0x", amount, "foo").unwrap(),
+            Uint128::from(990u64)
+        );
+        assert_eq!(
+            RELAYER_FEE_ACCUMULATOR.load(storage, "foo").unwrap(),
+            Uint128::from(10u64)
         );
     }
 }

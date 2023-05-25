@@ -800,17 +800,19 @@ pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, Contr
 
 pub fn process_deduct_fee(
     storage: &mut dyn Storage,
-    remote_denom: &str,
+    remote_token_denom: &str,
     amount: Uint128,
-    denom: &str,
+    local_token_denom: &str,
 ) -> StdResult<Uint128> {
-    let evm_prefix = convert_remote_denom_to_evm_prefix(remote_denom);
+    let evm_prefix = convert_remote_denom_to_evm_prefix(remote_token_denom);
     let relayer_fee = RELAYER_FEE.may_load(storage, &evm_prefix)?;
     if let Some(relayer_fee) = relayer_fee {
         let fee = deduct_fee(relayer_fee, amount);
-        RELAYER_FEE_ACCUMULATOR.update(storage, denom, |prev_fee| -> StdResult<Uint128> {
-            Ok(prev_fee.unwrap_or_default().checked_add(fee)?)
-        })?;
+        RELAYER_FEE_ACCUMULATOR.update(
+            storage,
+            local_token_denom,
+            |prev_fee| -> StdResult<Uint128> { Ok(prev_fee.unwrap_or_default().checked_add(fee)?) },
+        )?;
         let new_deducted_amount = amount.checked_sub(fee)?;
         return Ok(new_deducted_amount);
     }
