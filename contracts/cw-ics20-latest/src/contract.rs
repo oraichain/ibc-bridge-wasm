@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
-    IbcMsg, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, WasmMsg,
+    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcMsg, IbcQuery,
+    MessageInfo, Order, PortIdResponse, Response, StdError, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -11,7 +11,8 @@ use oraiswap::asset::AssetInfo;
 
 use crate::error::ContractError;
 use crate::ibc::{
-    parse_ibc_wasm_port_id, parse_voucher_denom, process_deduct_fee, send_amount, Ics20Packet,
+    collect_transfer_fee_msgs, parse_ibc_wasm_port_id, parse_voucher_denom, process_deduct_fee,
+    Ics20Packet,
 };
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
@@ -21,7 +22,7 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     AllowInfo, Config, MappingMetadata, RelayerFee, ADMIN, ALLOW_LIST, CHANNEL_FORWARD_STATE,
-    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
+    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -98,31 +99,7 @@ pub fn execute(
             admin,
             relayer_fee,
         ),
-        ExecuteMsg::TransferFee {} => execute_transfer_fee(deps),
     }
-}
-
-pub fn execute_transfer_fee(deps: DepsMut) -> Result<Response, ContractError> {
-    let admin = ADMIN
-        .get(deps.as_ref())?
-        .ok_or(StdError::generic_err("Cannot find contract admin"))?
-        .into_string();
-    let to_send_cosmos_msgs: Vec<CosmosMsg> = RELAYER_FEE_ACCUMULATOR
-        .range(deps.storage, None, None, Order::Ascending)
-        .map(|data| {
-            data.map(|fee_info| {
-                send_amount(
-                    Amount::from_parts(fee_info.0, fee_info.1),
-                    admin.clone(),
-                    None,
-                )
-            })
-        })
-        .collect::<StdResult<Vec<CosmosMsg>>>()?;
-
-    Ok(Response::new()
-        .add_messages(to_send_cosmos_msgs)
-        .add_attributes(vec![("action", "transfer_fee")]))
 }
 
 pub fn update_config(
@@ -364,16 +341,18 @@ pub fn execute_transfer_back_to_remote_chain(
         timeout: timeout.into(),
     };
 
-    let transfer_fee_to_admin: CosmosMsg = WasmMsg::Execute {
-        contract_addr: env.contract.address.into_string(),
-        msg: to_binary(&ExecuteMsg::TransferFee {})?,
-        funds: vec![],
-    }
-    .into();
+    let mut cosmos_msgs = collect_transfer_fee_msgs(
+        ADMIN
+            .get(deps.as_ref())?
+            .ok_or(StdError::generic_err("Cannot find contract admin"))?
+            .into_string(),
+        deps.storage,
+    )?;
+    cosmos_msgs.push(msg.into());
 
     // send response
     let res = Response::new()
-        .add_messages(vec![transfer_fee_to_admin, msg.into()])
+        .add_messages(cosmos_msgs)
         .add_attribute("action", "transfer")
         .add_attribute("type", "transfer_back_to_remote_chain")
         .add_attribute("sender", &packet.sender)
@@ -695,15 +674,19 @@ fn map_order(order: Option<u8>) -> Order {
 
 #[cfg(test)]
 mod test {
+    use std::ops::Sub;
+
     use super::*;
-    use crate::ibc::ibc_packet_receive;
+    use crate::ibc::{ibc_packet_receive, parse_asset_info_denom};
+    use crate::state::{Ratio, RELAYER_FEE_ACCUMULATOR};
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info};
     use cosmwasm_std::{
-        coin, coins, CosmosMsg, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, StdError,
-        Timestamp, Uint128,
+        coin, coins, CosmosMsg, Decimal, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg,
+        StdError, Timestamp, Uint128, WasmMsg,
     };
+    use cw20::Cw20ExecuteMsg;
     use cw_controllers::AdminError;
 
     use cw_utils::PaymentError;
@@ -1183,20 +1166,37 @@ mod test {
         let remote_channel = "channel-5";
         let custom_addr = "custom-addr";
         let original_sender = "original_sender";
-        let denom = "uatom";
+        let denom = "uatom0x";
         let amount = 1234567u128;
-        let token_addr = Addr::unchecked("cw20:token-addr".to_string());
+        let token_addr = Addr::unchecked("token-addr".to_string());
         let asset_info = AssetInfo::Token {
             contract_addr: token_addr.clone(),
         };
         let cw20_raw_denom = token_addr.as_str();
         let local_channel = "channel-1234";
+        let ratio = Ratio {
+            nominator: 1,
+            denominator: 10,
+        };
+        let fee_amount =
+            Uint128::from(amount) * Decimal::from_ratio(ratio.nominator, ratio.denominator);
         let mut deps = setup(&[remote_channel, local_channel], &[]);
+        RELAYER_FEE
+            .save(deps.as_mut().storage, "uatom", &ratio)
+            .unwrap();
+        // reset fee so that other tests wont get affected
+        RELAYER_FEE_ACCUMULATOR
+            .save(
+                deps.as_mut().storage,
+                &parse_asset_info_denom(asset_info.clone()),
+                &Uint128::zero(),
+            )
+            .unwrap();
 
         let pair = UpdatePairMsg {
             local_channel_id: local_channel.to_string(),
             denom: denom.to_string(),
-            asset_info: asset_info,
+            asset_info: asset_info.clone(),
             remote_decimals: 18u8,
             asset_info_decimals: 18u8,
         };
@@ -1246,16 +1246,17 @@ mod test {
         // error cases
         // revert transfer state to correct state
         transfer.local_channel_id = local_channel.to_string();
-        let invalid_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+        let receive_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: original_sender.to_string(),
             amount: Uint128::from(amount),
             msg: to_binary(&transfer).unwrap(),
         });
 
         // now we execute transfer back to remote chain
-        let res = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap();
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), receive_msg).unwrap();
 
         assert_eq!(res.messages[0].gas_limit, None);
+        println!("res messages: {:?}", res.messages);
         assert_eq!(2, res.messages.len()); // 2 because it also has deduct fee msg
         match res.messages[1].msg.clone() {
             CosmosMsg::Ibc(IbcMsg::SendPacket {
@@ -1267,7 +1268,10 @@ mod test {
                 assert_eq!(timeout, expected_timeout.into());
                 assert_eq!(channel_id.as_str(), local_channel);
                 let msg: Ics20Packet = from_binary(&data).unwrap();
-                assert_eq!(msg.amount, Uint128::new(1234567));
+                assert_eq!(
+                    msg.amount,
+                    Uint128::new(1234567).sub(Uint128::from(fee_amount))
+                );
                 assert_eq!(
                     msg.denom.as_str(),
                     get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
@@ -1284,31 +1288,17 @@ mod test {
                 msg,
                 funds: _,
             }) => {
-                assert_eq!(contract_addr, mock_env().contract.address.into_string());
-                assert_eq!(msg, to_binary(&ExecuteMsg::TransferFee {}).unwrap());
+                assert_eq!(contract_addr, token_addr.to_string());
+                assert_eq!(
+                    msg,
+                    to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: "gov".to_string(),
+                        amount: fee_amount.clone()
+                    })
+                    .unwrap()
+                );
             }
             _ => panic!("Unexpected return message: {:?}", res.messages[0]),
-        }
-        if let CosmosMsg::Ibc(IbcMsg::SendPacket {
-            channel_id,
-            data,
-            timeout,
-        }) = &res.messages[1].msg
-        {
-            let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
-            assert_eq!(timeout, &expected_timeout.into());
-            assert_eq!(channel_id.as_str(), local_channel);
-            let msg: Ics20Packet = from_binary(data).unwrap();
-            assert_eq!(msg.amount, Uint128::new(1234567));
-            assert_eq!(
-                msg.denom.as_str(),
-                get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
-            );
-            assert_eq!(msg.sender.as_str(), original_sender);
-            assert_eq!(msg.receiver.as_str(), "foreign-address");
-            // assert_eq!(msg.memo, None);
-        } else {
-            panic!("Unexpected return message: {:?}", res.messages[0]);
         }
 
         // check new channel state after reducing balance
@@ -1316,7 +1306,7 @@ mod test {
         assert_eq!(
             chan.balances,
             vec![Amount::native(
-                0,
+                fee_amount.u128(),
                 &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
             )]
         );

@@ -14,12 +14,11 @@ use oraiswap::asset::AssetInfo;
 use oraiswap::router::{SimulateSwapOperationsResponse, SwapOperation};
 
 use crate::error::{ContractError, Never};
-use crate::msg::ExecuteMsg;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData,
-    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
-    RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
+    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ADMIN, ALLOW_LIST, CHANNEL_INFO,
+    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
 };
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
@@ -324,6 +323,10 @@ fn do_ibc_packet_receive(
 
     // if denom is native, we handle it the native way
     if denom.1 {
+        let admin = ADMIN
+            .get(deps.as_ref())?
+            .ok_or(StdError::generic_err("Cannot find contract admin"))?
+            .into_string();
         return handle_ibc_packet_receive_native_remote_chain(
             deps.storage,
             deps.api,
@@ -332,6 +335,7 @@ fn do_ibc_packet_receive(
             &denom.0,
             &packet,
             &msg,
+            admin,
         );
     }
 
@@ -373,6 +377,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     denom: &str,
     packet: &IbcPacket,
     msg: &Ics20Packet,
+    admin: String,
 ) -> Result<IbcReceiveResponse, ContractError> {
     // make sure we have enough balance for this
 
@@ -409,6 +414,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         to_send.denom(),
         process_deduct_fee(storage, &msg.denom, to_send.amount(), &to_send.denom())?,
     );
+
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
     let (submsgs, ibc_error_msg) = get_follow_up_msgs(
         storage,
@@ -427,15 +433,10 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
         .collect();
 
-    let transfer_fee_to_admin: CosmosMsg = WasmMsg::Execute {
-        contract_addr: env.contract.address.into_string(),
-        msg: to_binary(&ExecuteMsg::TransferFee {})?,
-        funds: vec![],
-    }
-    .into();
+    let transfer_fee_to_admin = collect_transfer_fee_msgs(admin, storage)?;
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
-        .add_message(transfer_fee_to_admin)
+        .add_messages(transfer_fee_to_admin)
         .add_submessages(submsgs)
         .add_attribute("action", "receive_native")
         .add_attribute("sender", msg.sender.clone())
@@ -835,6 +836,47 @@ pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
         Some((evm_prefix, _)) => return evm_prefix.to_string(),
         None => "".to_string(),
     }
+}
+
+pub fn collect_transfer_fee_msgs(
+    admin: String,
+    storage: &mut dyn Storage,
+) -> StdResult<Vec<CosmosMsg>> {
+    let cosmos_msgs = RELAYER_FEE_ACCUMULATOR
+        .range(storage, None, None, Order::Ascending)
+        .filter(|data| {
+            if let Some(filter_result) = data
+                .as_ref()
+                .map(|fee_info| {
+                    if fee_info.1.is_zero() {
+                        return false;
+                    }
+                    true
+                })
+                .ok()
+            {
+                return filter_result;
+            }
+            false
+        })
+        .map(|data| {
+            data.map(|fee_info| {
+                println!("fee info: {}", fee_info.1);
+                send_amount(
+                    Amount::from_parts(fee_info.0, fee_info.1),
+                    admin.clone(),
+                    None,
+                )
+            })
+        })
+        .collect::<StdResult<Vec<CosmosMsg>>>();
+    // we reset all the accumulator keys to zero so that it wont accumulate more in the next txs. This action will be reverted if the fee payment txs fail.
+    RELAYER_FEE_ACCUMULATOR
+        .keys(storage, None, None, Order::Ascending)
+        .collect::<Result<Vec<String>, StdError>>()?
+        .into_iter()
+        .for_each(|key| RELAYER_FEE_ACCUMULATOR.remove(storage, &key));
+    cosmos_msgs
 }
 
 #[entry_point]

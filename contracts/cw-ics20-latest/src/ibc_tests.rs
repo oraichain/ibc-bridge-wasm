@@ -451,24 +451,35 @@ mod test {
     }
 
     #[test]
-    fn send_native_from_remote_receive_happy_path() {
+    fn send_from_remote_to_local_receive_happy_path() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
-        let denom = "uatom";
+        let denom = "uatom0x";
         let asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("cw20:token-addr"),
+            contract_addr: Addr::unchecked(cw20_addr),
         };
         let gas_limit = 1234567;
+        let send_amount = Uint128::from(876543210u64);
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
         );
+        RELAYER_FEE
+            .save(
+                deps.as_mut().storage,
+                "uatom",
+                &Ratio {
+                    nominator: 1,
+                    denominator: 10,
+                },
+            )
+            .unwrap();
 
         let pair = UpdatePairMsg {
             local_channel_id: send_channel.to_string(),
             denom: denom.to_string(),
-            asset_info,
+            asset_info: asset_info.clone(),
             remote_decimals: 18u8,
             asset_info_decimals: 18u8,
         };
@@ -482,13 +493,18 @@ mod test {
         .unwrap();
 
         // prepare some mock packets
-        let recv_packet =
-            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
+        let recv_packet = mock_receive_packet_remote_to_local(
+            send_channel,
+            send_amount.u128(),
+            denom,
+            custom_addr,
+        );
 
         // we can receive this denom, channel balance should increase
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        println!("res: {:?}", res);
+        println!("res: {:?}", res.messages);
+        // TODO: fix test cases. Possibly because we are adding two add_submessages?
         assert_eq!(res.messages.len(), 2); // 2 messages because we also have deduct fee msg
         match res.messages[0].msg.clone() {
             CosmosMsg::Wasm(WasmMsg::Execute {
@@ -496,8 +512,15 @@ mod test {
                 msg,
                 funds: _,
             }) => {
-                assert_eq!(contract_addr, mock_env().contract.address.into_string());
-                assert_eq!(msg, to_binary(&ExecuteMsg::TransferFee {}).unwrap());
+                assert_eq!(contract_addr, cw20_addr);
+                assert_eq!(
+                    msg,
+                    to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: "gov".to_string(),
+                        amount: Uint128::from(87654321u64)
+                    })
+                    .unwrap()
+                );
             }
             _ => panic!("Unexpected return message: {:?}", res.messages[0]),
         }

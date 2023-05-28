@@ -55,7 +55,6 @@ pub enum ExecuteMsg {
         swap_router_contract: Option<String>,
         relayer_fee: Option<RelayerFee>,
     },
-    TransferFee {},
 }
 
 #[cw_serde]
