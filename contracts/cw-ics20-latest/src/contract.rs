@@ -504,6 +504,9 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&get_mappings_from_asset_info(deps, asset_info)?)
         }
         QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
+        QueryMsg::GetTransferFee { evm_prefix } => {
+            to_binary(&RELAYER_FEE.load(deps.storage, &evm_prefix)?)
+        }
     }
 }
 
