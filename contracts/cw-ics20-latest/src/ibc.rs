@@ -671,63 +671,55 @@ pub fn build_ibc_msg(
             &parse_asset_info_denom(receiver_asset_info.clone()),
         )?;
         // use sender from ICS20Packet as receiver when transferring back
-        let pair_mappings: StdResult<Vec<(String, MappingMetadata)>> = ics20_denoms()
+        let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
             .idx
             .asset_info
             .prefix(receiver_asset_info.to_string())
             .range(storage, None, None, Order::Ascending)
-            .collect();
+            .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
 
-        if pair_mappings.is_err() {
-            return Err(StdError::generic_err(
-                "error querying pair mapping in build ibc msg",
-            ));
-        }
-        let pair_mappings = pair_mappings
-            .unwrap()
+        let mapping = pair_mappings
             .into_iter()
-            .find(|(key, _)| key.contains(&destination.destination_channel));
-        if let Some(pair_mapping) = pair_mappings {
-            let remote_amount = convert_local_to_remote(
-                new_deducted_amount,
-                pair_mapping.1.remote_decimals,
-                pair_mapping.1.asset_info_decimals,
-            )?;
+            .find(|(key, _)| key.contains(&destination.destination_channel))
+            .ok_or(StdError::generic_err("cannot find pair mappings"))?;
+        let remote_amount = convert_local_to_remote(
+            new_deducted_amount,
+            mapping.1.remote_decimals,
+            mapping.1.asset_info_decimals,
+        )?;
 
-            // build ics20 packet
-            let packet = Ics20Packet::new(
-                remote_amount.clone(),
-                pair_mapping.0.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
-                env.contract.address.as_str(),
-                &remote_address,
-                Some(destination.receiver),
-            );
-            // because we are transferring back, we reduce the channel's balance
-            reduce_channel_balance(
-                storage,
-                &local_channel_id.clone(),
-                &pair_mapping.0.clone(),
-                remote_amount,
-                false,
-            )
-            .map_err(|err| StdError::generic_err(err.to_string()))?;
-            reply_args.channel = local_channel_id.to_string();
-            reply_args.ibc_data = Some(IbcSingleStepData {
-                ibc_denom: pair_mapping.0,
-                remote_amount,
-            });
-            // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on
-            SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
+        // build ics20 packet
+        let packet = Ics20Packet::new(
+            remote_amount.clone(),
+            mapping.0.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
+            env.contract.address.as_str(),
+            &remote_address,
+            Some(destination.receiver),
+        );
+        // because we are transferring back, we reduce the channel's balance
+        reduce_channel_balance(
+            storage,
+            &local_channel_id.clone(),
+            &mapping.0.clone(),
+            remote_amount,
+            false,
+        )
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
+        reply_args.channel = local_channel_id.to_string();
+        reply_args.ibc_data = Some(IbcSingleStepData {
+            ibc_denom: mapping.0,
+            remote_amount,
+        });
+        // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on
+        SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
 
-            // prepare ibc message
-            let msg = IbcMsg::SendPacket {
-                channel_id: local_channel_id.to_string(),
-                data: to_binary(&packet)?,
-                timeout: timeout.into(),
-            };
-            return Ok(msg.into());
-        }
-        return Err(StdError::generic_err("cannot find pair mappings"));
+        // prepare ibc message
+        let msg = IbcMsg::SendPacket {
+            channel_id: local_channel_id.to_string(),
+            data: to_binary(&packet)?,
+            timeout: timeout.into(),
+        };
+        return Ok(msg.into());
     }
     // we use ibc transfer so that attackers cannot manipulate the data to send to oraibridge without reducing the channel balance
     // by using ibc transfer, the contract must actually owns native ibc tokens, which is not possible if it's oraibridge tokens
