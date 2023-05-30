@@ -72,6 +72,7 @@ pub struct Config {
     pub default_gas_limit: Option<u64>,
     pub fee_denom: String,
     pub swap_router_contract: String,
+    pub fee_receiver: Addr,
 }
 
 #[cw_serde]

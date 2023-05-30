@@ -17,8 +17,8 @@ use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData,
-    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ADMIN, ALLOW_LIST, CHANNEL_INFO,
-    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
+    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
+    RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
 };
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
@@ -323,10 +323,6 @@ fn do_ibc_packet_receive(
 
     // if denom is native, we handle it the native way
     if denom.1 {
-        let admin = ADMIN
-            .get(deps.as_ref())?
-            .ok_or(StdError::generic_err("Cannot find contract admin"))?
-            .into_string();
         return handle_ibc_packet_receive_native_remote_chain(
             deps.storage,
             deps.api,
@@ -335,7 +331,6 @@ fn do_ibc_packet_receive(
             &denom.0,
             &packet,
             &msg,
-            admin,
         );
     }
 
@@ -377,7 +372,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
     denom: &str,
     packet: &IbcPacket,
     msg: &Ics20Packet,
-    admin: String,
 ) -> Result<IbcReceiveResponse, ContractError> {
     // make sure we have enough balance for this
 
@@ -438,7 +432,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
         .collect();
 
-    let transfer_fee_to_admin = collect_transfer_fee_msgs(admin, storage)?;
+    let transfer_fee_to_admin =
+        collect_transfer_fee_msgs(CONFIG.load(storage)?.fee_receiver.into_string(), storage)?;
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_messages(transfer_fee_to_admin)
@@ -835,7 +830,7 @@ pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
 }
 
 pub fn collect_transfer_fee_msgs(
-    admin: String,
+    receiver: String,
     storage: &mut dyn Storage,
 ) -> StdResult<Vec<CosmosMsg>> {
     let cosmos_msgs = RELAYER_FEE_ACCUMULATOR
@@ -857,10 +852,9 @@ pub fn collect_transfer_fee_msgs(
         })
         .map(|data| {
             data.map(|fee_info| {
-                println!("fee info: {}", fee_info.1);
                 send_amount(
                     Amount::from_parts(fee_info.0, fee_info.1),
-                    admin.clone(),
+                    receiver.clone(),
                     None,
                 )
             })

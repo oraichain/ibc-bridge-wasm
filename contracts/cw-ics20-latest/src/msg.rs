@@ -31,6 +31,7 @@ pub struct AllowMsg {
 pub struct MigrateMsg {
     // pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
+    pub fee_receiver: String,
     // pub fee_denom: String,
     // pub swap_router_contract: String,
 }
@@ -54,6 +55,7 @@ pub enum ExecuteMsg {
         fee_denom: Option<String>,
         swap_router_contract: Option<String>,
         relayer_fee: Option<RelayerFee>,
+        fee_receiver: Option<String>,
     },
 }
 
