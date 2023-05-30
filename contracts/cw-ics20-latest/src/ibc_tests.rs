@@ -6,9 +6,10 @@ mod test {
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, handle_follow_up_failure,
-        ibc_packet_receive, is_follow_up_msgs_only_send_amount, parse_voucher_denom, send_amount,
-        Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
+        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
+        convert_remote_denom_to_evm_prefix, deduct_fee, handle_follow_up_failure,
+        ibc_packet_receive, is_follow_up_msgs_only_send_amount, parse_voucher_denom,
+        process_deduct_fee, send_amount, Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -19,15 +20,16 @@ mod test {
 
     use crate::error::ContractError;
     use crate::state::{
-        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData,
-        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS,
+        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData, Ratio,
+        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
+        SINGLE_STEP_REPLY_ARGS,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 
     use crate::contract::{execute, migrate, query_channel};
     use crate::msg::{ExecuteMsg, MigrateMsg, TransferMsg, UpdatePairMsg};
-    use cosmwasm_std::testing::{mock_env, mock_info};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{coins, to_vec};
     use cw20::Cw20ReceiveMsg;
 
@@ -449,24 +451,35 @@ mod test {
     }
 
     #[test]
-    fn send_native_from_remote_receive_happy_path() {
+    fn send_from_remote_to_local_receive_happy_path() {
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
-        let denom = "uatom";
+        let denom = "uatom0x";
         let asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("cw20:token-addr"),
+            contract_addr: Addr::unchecked(cw20_addr),
         };
         let gas_limit = 1234567;
+        let send_amount = Uint128::from(876543210u64);
         let mut deps = setup(
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
         );
+        RELAYER_FEE
+            .save(
+                deps.as_mut().storage,
+                "uatom",
+                &Ratio {
+                    nominator: 1,
+                    denominator: 10,
+                },
+            )
+            .unwrap();
 
         let pair = UpdatePairMsg {
             local_channel_id: send_channel.to_string(),
             denom: denom.to_string(),
-            asset_info: asset_info,
+            asset_info: asset_info.clone(),
             remote_decimals: 18u8,
             asset_info_decimals: 18u8,
         };
@@ -480,16 +493,38 @@ mod test {
         .unwrap();
 
         // prepare some mock packets
-        let recv_packet =
-            mock_receive_packet_remote_to_local(send_channel, 876543210, denom, custom_addr);
+        let recv_packet = mock_receive_packet_remote_to_local(
+            send_channel,
+            send_amount.u128(),
+            denom,
+            custom_addr,
+        );
 
         // we can receive this denom, channel balance should increase
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        println!("res: {:?}", res);
-        assert_eq!(res.messages.len(), 1);
+        println!("res: {:?}", res.messages);
+        // TODO: fix test cases. Possibly because we are adding two add_submessages?
+        assert_eq!(res.messages.len(), 2); // 2 messages because we also have deduct fee msg
+        match res.messages[0].msg.clone() {
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr,
+                msg,
+                funds: _,
+            }) => {
+                assert_eq!(contract_addr, cw20_addr);
+                assert_eq!(
+                    msg,
+                    to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: "gov".to_string(),
+                        amount: Uint128::from(87654321u64)
+                    })
+                    .unwrap()
+                );
+            }
+            _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+        }
         let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-        println!("ack: {:?}", ack);
         assert!(matches!(ack, Ics20Ack::Result(_)));
 
         // query channel state|_|
@@ -1013,6 +1048,80 @@ mod test {
         assert_eq!(
             is_follow_up_msgs_only_send_amount("memo", "dest denom"),
             false
+        );
+    }
+
+    #[test]
+    fn test_deduct_fee() {
+        assert_eq!(
+            deduct_fee(
+                Ratio {
+                    nominator: 1,
+                    denominator: 0,
+                },
+                Uint128::from(1000u64)
+            ),
+            Uint128::from(0u64)
+        );
+        assert_eq!(
+            deduct_fee(
+                Ratio {
+                    nominator: 1,
+                    denominator: 1,
+                },
+                Uint128::from(1000u64)
+            ),
+            Uint128::from(1000u64)
+        );
+        assert_eq!(
+            deduct_fee(
+                Ratio {
+                    nominator: 1,
+                    denominator: 100,
+                },
+                Uint128::from(1000u64)
+            ),
+            Uint128::from(10u64)
+        );
+    }
+
+    #[test]
+    fn test_convert_remote_denom_to_evm_prefix() {
+        assert_eq!(convert_remote_denom_to_evm_prefix("abcd"), "".to_string());
+        assert_eq!(convert_remote_denom_to_evm_prefix("0x"), "".to_string());
+        assert_eq!(
+            convert_remote_denom_to_evm_prefix("evm0x"),
+            "evm".to_string()
+        );
+    }
+
+    #[test]
+    fn test_process_deduct_fee() {
+        let mut deps = mock_dependencies();
+        let amount = Uint128::from(1000u64);
+        let storage = deps.as_mut().storage;
+        // should return amount because we have not set relayer fee yet
+        assert_eq!(
+            process_deduct_fee(storage, "foo", amount, "foo").unwrap(),
+            amount.clone()
+        );
+        RELAYER_FEE
+            .save(
+                storage,
+                "foo",
+                &Ratio {
+                    nominator: 1,
+                    denominator: 100,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            process_deduct_fee(storage, "foo0x", amount, "foo").unwrap(),
+            Uint128::from(990u64)
+        );
+        assert_eq!(
+            RELAYER_FEE_ACCUMULATOR.load(storage, "foo").unwrap(),
+            Uint128::from(10u64)
         );
     }
 }
