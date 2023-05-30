@@ -1116,7 +1116,13 @@ mod test {
             )
             .unwrap();
         assert_eq!(
-            process_deduct_fee(storage, "foo0x", amount, "foo").unwrap(),
+            process_deduct_fee(
+                storage,
+                &convert_remote_denom_to_evm_prefix("foo0x"),
+                amount,
+                "foo"
+            )
+            .unwrap(),
             Uint128::from(990u64)
         );
         assert_eq!(

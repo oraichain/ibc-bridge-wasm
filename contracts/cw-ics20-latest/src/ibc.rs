@@ -412,7 +412,12 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     let new_deducted_to_send = Amount::from_parts(
         to_send.denom(),
-        process_deduct_fee(storage, &msg.denom, to_send.amount(), &to_send.denom())?,
+        process_deduct_fee(
+            storage,
+            &convert_remote_denom_to_evm_prefix(&msg.denom),
+            to_send.amount(),
+            &to_send.denom(),
+        )?,
     );
 
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
@@ -666,7 +671,7 @@ pub fn build_ibc_msg(
         // also deduct fee here because of round trip
         let new_deducted_amount = process_deduct_fee(
             storage,
-            &destination.destination_denom,
+            &destination.destination_channel,
             amount,
             &parse_asset_info_denom(receiver_asset_info.clone()),
         )?;
@@ -793,11 +798,10 @@ pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, Contr
 
 pub fn process_deduct_fee(
     storage: &mut dyn Storage,
-    remote_token_denom: &str,
+    evm_prefix: &str,
     amount: Uint128,
     local_token_denom: &str,
 ) -> StdResult<Uint128> {
-    let evm_prefix = convert_remote_denom_to_evm_prefix(remote_token_denom);
     let relayer_fee = RELAYER_FEE.may_load(storage, &evm_prefix)?;
     if let Some(relayer_fee) = relayer_fee {
         let fee = deduct_fee(relayer_fee, amount);

@@ -11,8 +11,8 @@ use oraiswap::asset::AssetInfo;
 
 use crate::error::ContractError;
 use crate::ibc::{
-    collect_transfer_fee_msgs, parse_ibc_wasm_port_id, parse_voucher_denom, process_deduct_fee,
-    Ics20Packet,
+    collect_transfer_fee_msgs, convert_remote_denom_to_evm_prefix, parse_ibc_wasm_port_id,
+    parse_voucher_denom, process_deduct_fee, Ics20Packet,
 };
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
@@ -253,7 +253,7 @@ pub fn execute_transfer_back_to_remote_chain(
 
     let new_deducted_amount = process_deduct_fee(
         deps.storage,
-        &msg.remote_denom,
+        &convert_remote_denom_to_evm_prefix(&msg.remote_denom),
         amount.amount(),
         &amount.denom(),
     )?;
