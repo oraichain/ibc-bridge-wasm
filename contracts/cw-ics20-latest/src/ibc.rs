@@ -500,7 +500,6 @@ pub fn get_follow_up_msgs(
         receiver_asset_info.clone(),
         initial_receive_asset_info.clone(),
         config.fee_denom.as_str(),
-        &destination.destination_denom,
     );
     let mut minimum_receive = to_send.amount();
     if swap_operations.len() > 0 {
@@ -570,7 +569,6 @@ pub fn build_swap_operations(
     receiver_asset_info: AssetInfo,
     initial_receive_asset_info: AssetInfo,
     fee_denom: &str,
-    destination_denom: &str,
 ) -> Vec<SwapOperation> {
     // always swap with orai first cuz its base denom & every token has a pair with it
     let fee_denom_asset_info = AssetInfo::NativeToken {
@@ -586,7 +584,7 @@ pub fn build_swap_operations(
             ask_asset_info: fee_denom_asset_info.clone(),
         })
     }
-    if destination_denom.ne(fee_denom) {
+    if receiver_asset_info.to_string().ne(fee_denom) {
         swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: receiver_asset_info,

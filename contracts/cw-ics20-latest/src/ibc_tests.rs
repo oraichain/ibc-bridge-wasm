@@ -555,26 +555,19 @@ mod test {
             contract_addr: Addr::unchecked("addr"),
         };
         let fee_denom = "orai".to_string();
-        let mut destination: DestinationInfo = DestinationInfo {
-            receiver: "cosmos".to_string(),
-            destination_channel: "channel-1".to_string(),
-            destination_denom: "foobar".to_string(),
-        };
 
         let operations = build_swap_operations(
             receiver_asset_info.clone(),
             initial_asset_info.clone(),
             fee_denom.as_str(),
-            &destination.destination_denom,
         );
         assert_eq!(operations.len(), 2);
 
-        let fee_denom = "foobar".to_string();
+        let fee_denom = "contract".to_string();
         let operations = build_swap_operations(
             receiver_asset_info.clone(),
             initial_asset_info.clone(),
             &fee_denom,
-            &destination.destination_denom,
         );
         assert_eq!(operations.len(), 1);
         assert_eq!(
@@ -587,31 +580,29 @@ mod test {
             }
         );
         initial_asset_info = AssetInfo::NativeToken {
-            denom: "foobar".to_string(),
+            denom: "contract".to_string(),
         };
         let operations = build_swap_operations(
             receiver_asset_info.clone(),
             initial_asset_info.clone(),
             &fee_denom,
-            &destination.destination_denom,
         );
         assert_eq!(operations.len(), 0);
 
-        destination.destination_denom = "atom".to_string();
+        initial_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("addr"),
+        };
         let operations = build_swap_operations(
             receiver_asset_info.clone(),
             initial_asset_info.clone(),
             &fee_denom,
-            &destination.destination_denom,
         );
         assert_eq!(operations.len(), 1);
         assert_eq!(
             operations[0],
             SwapOperation::OraiSwap {
-                offer_asset_info: AssetInfo::NativeToken {
-                    denom: fee_denom.clone()
-                },
-                ask_asset_info: receiver_asset_info.clone()
+                offer_asset_info: initial_asset_info.clone(),
+                ask_asset_info: AssetInfo::NativeToken { denom: fee_denom }
             }
         );
 
@@ -620,9 +611,10 @@ mod test {
             AssetInfo::NativeToken {
                 denom: "foobar".to_string(),
             },
-            initial_asset_info.clone(),
+            AssetInfo::NativeToken {
+                denom: "foobar".to_string(),
+            },
             "not_foo_bar",
-            &destination.destination_denom,
         );
         assert_eq!(operations.len(), 0);
     }
