@@ -29,9 +29,9 @@ pub const CHANNEL_REVERSE_STATE: Map<(&str, &str), ChannelState> =
 /// Every cw20 contract we allow to be sent is stored here, possibly with a gas_limit
 pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 
-pub const RELAYER_FEE: Map<&str, Ratio> = Map::new("relayer_fee");
+pub const TOKEN_FEE: Map<&str, Ratio> = Map::new("token_fee");
 
-pub const RELAYER_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("fee_accumulator");
+pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
 
 // MappingMetadataIndexex structs keeps a list of indexers
 pub struct MappingMetadataIndexex<'a> {
@@ -91,8 +91,8 @@ pub struct AllowInfo {
 }
 
 #[cw_serde]
-pub struct RelayerFee {
-    pub chain: String,
+pub struct TokenFee {
+    pub token_denom: String,
     pub ratio: Ratio,
 }
 

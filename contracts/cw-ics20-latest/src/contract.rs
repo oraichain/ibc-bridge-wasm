@@ -11,8 +11,8 @@ use oraiswap::asset::AssetInfo;
 
 use crate::error::ContractError;
 use crate::ibc::{
-    collect_transfer_fee_msgs, convert_remote_denom_to_evm_prefix, parse_ibc_wasm_port_id,
-    parse_voucher_denom, process_deduct_fee, Ics20Packet,
+    collect_transfer_fee_msgs, parse_ibc_wasm_port_id, parse_voucher_denom, process_deduct_fee,
+    Ics20Packet,
 };
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
@@ -21,8 +21,8 @@ use crate::msg::{
 };
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    AllowInfo, Config, MappingMetadata, RelayerFee, ADMIN, ALLOW_LIST, CHANNEL_FORWARD_STATE,
-    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
+    AllowInfo, Config, MappingMetadata, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_FORWARD_STATE,
+    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -88,7 +88,7 @@ pub fn execute(
             fee_denom,
             swap_router_contract,
             admin,
-            relayer_fee,
+            token_fee,
             fee_receiver,
         } => update_config(
             deps,
@@ -98,7 +98,7 @@ pub fn execute(
             fee_denom,
             swap_router_contract,
             admin,
-            relayer_fee,
+            token_fee,
             fee_receiver,
         ),
     }
@@ -112,12 +112,12 @@ pub fn update_config(
     fee_denom: Option<String>,
     swap_router_contract: Option<String>,
     admin: Option<String>,
-    relayer_fee: Option<RelayerFee>,
+    token_fee: Option<TokenFee>,
     fee_receiver: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
-    if let Some(relayer_fee) = relayer_fee {
-        RELAYER_FEE.save(deps.storage, &relayer_fee.chain, &relayer_fee.ratio)?;
+    if let Some(token_fee) = token_fee {
+        TOKEN_FEE.save(deps.storage, &token_fee.token_denom, &token_fee.ratio)?;
     }
     CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
         if let Some(default_timeout) = default_timeout {
@@ -259,7 +259,7 @@ pub fn execute_transfer_back_to_remote_chain(
 
     let new_deducted_amount = process_deduct_fee(
         deps.storage,
-        &convert_remote_denom_to_evm_prefix(&msg.remote_denom),
+        &msg.remote_denom,
         amount.amount(),
         &amount.denom(),
     )?;
@@ -505,8 +505,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&get_mappings_from_asset_info(deps, asset_info)?)
         }
         QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
-        QueryMsg::GetTransferFee { evm_prefix } => {
-            to_binary(&RELAYER_FEE.load(deps.storage, &evm_prefix)?)
+        QueryMsg::GetTransferTokenFee { remote_token_denom } => {
+            to_binary(&TOKEN_FEE.load(deps.storage, &remote_token_denom)?)
         }
     }
 }
@@ -681,8 +681,8 @@ mod test {
     use std::ops::Sub;
 
     use super::*;
-    use crate::ibc::{ibc_packet_receive, parse_asset_info_denom};
-    use crate::state::{Ratio, RELAYER_FEE_ACCUMULATOR};
+    use crate::ibc::ibc_packet_receive;
+    use crate::state::Ratio;
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info};
@@ -1186,16 +1186,8 @@ mod test {
         let fee_amount =
             Uint128::from(amount) * Decimal::from_ratio(ratio.nominator, ratio.denominator);
         let mut deps = setup(&[remote_channel, local_channel], &[]);
-        RELAYER_FEE
-            .save(deps.as_mut().storage, "uatom", &ratio)
-            .unwrap();
-        // reset fee so that other tests wont get affected
-        RELAYER_FEE_ACCUMULATOR
-            .save(
-                deps.as_mut().storage,
-                &parse_asset_info_denom(asset_info.clone()),
-                &Uint128::zero(),
-            )
+        TOKEN_FEE
+            .save(deps.as_mut().storage, denom, &ratio)
             .unwrap();
 
         let pair = UpdatePairMsg {
@@ -1362,7 +1354,7 @@ mod test {
             default_gas_limit: None,
             fee_denom: Some("hehe".to_string()),
             swap_router_contract: Some("new_router".to_string()),
-            relayer_fee: None,
+            token_fee: None,
             fee_receiver: None,
         };
         // unauthorized case

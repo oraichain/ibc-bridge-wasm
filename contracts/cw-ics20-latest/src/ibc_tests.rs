@@ -6,10 +6,10 @@ mod test {
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
-        convert_remote_denom_to_evm_prefix, deduct_fee, handle_follow_up_failure,
-        ibc_packet_receive, is_follow_up_msgs_only_send_amount, parse_voucher_denom,
-        process_deduct_fee, send_amount, Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
+        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, deduct_fee,
+        handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
+        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, process_deduct_fee,
+        send_amount, Ics20Ack, Ics20Packet, RECEIVE_ID, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -21,8 +21,8 @@ mod test {
     use crate::error::ContractError;
     use crate::state::{
         get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData, Ratio,
-        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
-        SINGLE_STEP_REPLY_ARGS,
+        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+        TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -343,7 +343,7 @@ mod test {
     ) -> IbcPacket {
         let data = Ics20Packet {
             // this is returning a foreign native token, thus denom is <denom>, eg: uatom
-            denom: format!("{}", denom),
+            denom: denom.to_string(),
             amount: amount.into(),
             sender: "remote-sender".to_string(),
             receiver: receiver.to_string(),
@@ -466,10 +466,10 @@ mod test {
             &["channel-1", "channel-7", send_channel],
             &[(cw20_addr, gas_limit)],
         );
-        RELAYER_FEE
+        TOKEN_FEE
             .save(
                 deps.as_mut().storage,
-                "uatom",
+                denom,
                 &Ratio {
                     nominator: 1,
                     denominator: 10,
@@ -1086,14 +1086,28 @@ mod test {
         );
     }
 
+    // #[test]
+    // fn test_convert_remote_denom_to_evm_prefix() {
+    //     assert_eq!(convert_remote_denom_to_evm_prefix("abcd"), "".to_string());
+    //     assert_eq!(convert_remote_denom_to_evm_prefix("0x"), "".to_string());
+    //     assert_eq!(
+    //         convert_remote_denom_to_evm_prefix("evm0x"),
+    //         "evm".to_string()
+    //     );
+    // }
+
     #[test]
-    fn test_convert_remote_denom_to_evm_prefix() {
-        assert_eq!(convert_remote_denom_to_evm_prefix("abcd"), "".to_string());
-        assert_eq!(convert_remote_denom_to_evm_prefix("0x"), "".to_string());
+    fn test_parse_voucher_denom_without_sanity_checks() {
         assert_eq!(
-            convert_remote_denom_to_evm_prefix("evm0x"),
-            "evm".to_string()
+            parse_voucher_denom_without_sanity_checks("foo").is_err(),
+            true
         );
+        assert_eq!(
+            parse_voucher_denom_without_sanity_checks("foo/bar").is_err(),
+            true
+        );
+        let result = parse_voucher_denom_without_sanity_checks("foo/bar/helloworld").unwrap();
+        assert_eq!(result, "helloworld");
     }
 
     #[test]
@@ -1101,15 +1115,16 @@ mod test {
         let mut deps = mock_dependencies();
         let amount = Uint128::from(1000u64);
         let storage = deps.as_mut().storage;
+        let token_fee_denom = "foo0x";
         // should return amount because we have not set relayer fee yet
         assert_eq!(
             process_deduct_fee(storage, "foo", amount, "foo").unwrap(),
             amount.clone()
         );
-        RELAYER_FEE
+        TOKEN_FEE
             .save(
                 storage,
-                "foo",
+                token_fee_denom,
                 &Ratio {
                     nominator: 1,
                     denominator: 100,
@@ -1117,17 +1132,11 @@ mod test {
             )
             .unwrap();
         assert_eq!(
-            process_deduct_fee(
-                storage,
-                &convert_remote_denom_to_evm_prefix("foo0x"),
-                amount,
-                "foo"
-            )
-            .unwrap(),
+            process_deduct_fee(storage, token_fee_denom, amount, "foo").unwrap(),
             Uint128::from(990u64)
         );
         assert_eq!(
-            RELAYER_FEE_ACCUMULATOR.load(storage, "foo").unwrap(),
+            TOKEN_FEE_ACCUMULATOR.load(storage, "foo").unwrap(),
             Uint128::from(10u64)
         );
     }
