@@ -17,8 +17,8 @@ use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData,
-    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ADMIN, ALLOW_LIST, CHANNEL_INFO,
-    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
+    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
+    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
@@ -308,6 +308,19 @@ pub fn parse_voucher_denom<'a>(
     Ok((split_denom[2], false))
 }
 
+// Returns local denom if the denom is an encoded voucher from the expected endpoint
+// Otherwise, error
+pub fn parse_voucher_denom_without_sanity_checks<'a>(voucher_denom: &'a str) -> StdResult<&'a str> {
+    let split_denom: Vec<&str> = voucher_denom.splitn(3, '/').collect();
+
+    if split_denom.len() != 3 {
+        return Err(StdError::generic_err(
+            ContractError::NoForeignTokens {}.to_string(),
+        ));
+    }
+    Ok(split_denom[2])
+}
+
 // this does the work of ibc_packet_receive, we wrap it to turn errors into acknowledgements
 fn do_ibc_packet_receive(
     deps: DepsMut,
@@ -323,10 +336,6 @@ fn do_ibc_packet_receive(
 
     // if denom is native, we handle it the native way
     if denom.1 {
-        let admin = ADMIN
-            .get(deps.as_ref())?
-            .ok_or(StdError::generic_err("Cannot find contract admin"))?
-            .into_string();
         return handle_ibc_packet_receive_native_remote_chain(
             deps.storage,
             deps.api,
@@ -335,7 +344,6 @@ fn do_ibc_packet_receive(
             &denom.0,
             &packet,
             &msg,
-            admin,
         );
     }
 
@@ -377,7 +385,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
     denom: &str,
     packet: &IbcPacket,
     msg: &Ics20Packet,
-    admin: String,
 ) -> Result<IbcReceiveResponse, ContractError> {
     // make sure we have enough balance for this
 
@@ -433,7 +440,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_FAILURE_ID))
         .collect();
 
-    let transfer_fee_to_admin = collect_transfer_fee_msgs(admin, storage)?;
+    let transfer_fee_to_admin =
+        collect_transfer_fee_msgs(CONFIG.load(storage)?.fee_receiver.into_string(), storage)?;
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_messages(transfer_fee_to_admin)
@@ -492,7 +500,6 @@ pub fn get_follow_up_msgs(
         receiver_asset_info.clone(),
         initial_receive_asset_info.clone(),
         config.fee_denom.as_str(),
-        &destination.destination_denom,
     );
     let mut minimum_receive = to_send.amount();
     if swap_operations.len() > 0 {
@@ -562,7 +569,6 @@ pub fn build_swap_operations(
     receiver_asset_info: AssetInfo,
     initial_receive_asset_info: AssetInfo,
     fee_denom: &str,
-    destination_denom: &str,
 ) -> Vec<SwapOperation> {
     // always swap with orai first cuz its base denom & every token has a pair with it
     let fee_denom_asset_info = AssetInfo::NativeToken {
@@ -578,7 +584,7 @@ pub fn build_swap_operations(
             ask_asset_info: fee_denom_asset_info.clone(),
         })
     }
-    if destination_denom.ne(fee_denom) {
+    if receiver_asset_info.to_string().ne(fee_denom) {
         swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: receiver_asset_info,
@@ -663,13 +669,6 @@ pub fn build_ibc_msg(
     };
     let (is_evm_based, destination) = destination.is_receiver_evm_based();
     if is_evm_based {
-        // also deduct fee here because of round trip
-        let new_deducted_amount = process_deduct_fee(
-            storage,
-            &destination.destination_denom,
-            amount,
-            &parse_asset_info_denom(receiver_asset_info.clone()),
-        )?;
         // use sender from ICS20Packet as receiver when transferring back
         let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
             .idx
@@ -682,6 +681,13 @@ pub fn build_ibc_msg(
             .into_iter()
             .find(|(key, _)| key.contains(&destination.destination_channel))
             .ok_or(StdError::generic_err("cannot find pair mappings"))?;
+        // also deduct fee here because of round trip
+        let new_deducted_amount = process_deduct_fee(
+            storage,
+            parse_voucher_denom_without_sanity_checks(&mapping.0)?,
+            amount,
+            &parse_asset_info_denom(receiver_asset_info.clone()),
+        )?;
         let remote_amount = convert_local_to_remote(
             new_deducted_amount,
             mapping.1.remote_decimals,
@@ -797,11 +803,10 @@ pub fn process_deduct_fee(
     amount: Uint128,
     local_token_denom: &str,
 ) -> StdResult<Uint128> {
-    let evm_prefix = convert_remote_denom_to_evm_prefix(remote_token_denom);
-    let relayer_fee = RELAYER_FEE.may_load(storage, &evm_prefix)?;
-    if let Some(relayer_fee) = relayer_fee {
-        let fee = deduct_fee(relayer_fee, amount);
-        RELAYER_FEE_ACCUMULATOR.update(
+    let token_fee = TOKEN_FEE.may_load(storage, &remote_token_denom)?;
+    if let Some(token_fee) = token_fee {
+        let fee = deduct_fee(token_fee, amount);
+        TOKEN_FEE_ACCUMULATOR.update(
             storage,
             local_token_denom,
             |prev_fee| -> StdResult<Uint128> { Ok(prev_fee.unwrap_or_default().checked_add(fee)?) },
@@ -812,29 +817,29 @@ pub fn process_deduct_fee(
     Ok(amount)
 }
 
-pub fn deduct_fee(relayer_fee: Ratio, amount: Uint128) -> Uint128 {
+pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
     // ignore case where denominator is zero since we cannot divide with 0
-    if relayer_fee.denominator == 0 {
+    if token_fee.denominator == 0 {
         return Uint128::from(0u64);
     }
     amount.mul(Decimal::from_ratio(
-        relayer_fee.nominator,
-        relayer_fee.denominator,
+        token_fee.nominator,
+        token_fee.denominator,
     ))
 }
 
-pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
-    match remote_denom.split_once("0x") {
-        Some((evm_prefix, _)) => return evm_prefix.to_string(),
-        None => "".to_string(),
-    }
-}
+// pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
+//     match remote_denom.split_once("0x") {
+//         Some((evm_prefix, _)) => return evm_prefix.to_string(),
+//         None => "".to_string(),
+//     }
+// }
 
 pub fn collect_transfer_fee_msgs(
-    admin: String,
+    receiver: String,
     storage: &mut dyn Storage,
 ) -> StdResult<Vec<CosmosMsg>> {
-    let cosmos_msgs = RELAYER_FEE_ACCUMULATOR
+    let cosmos_msgs = TOKEN_FEE_ACCUMULATOR
         .range(storage, None, None, Order::Ascending)
         .filter(|data| {
             if let Some(filter_result) = data
@@ -853,21 +858,20 @@ pub fn collect_transfer_fee_msgs(
         })
         .map(|data| {
             data.map(|fee_info| {
-                println!("fee info: {}", fee_info.1);
                 send_amount(
                     Amount::from_parts(fee_info.0, fee_info.1),
-                    admin.clone(),
+                    receiver.clone(),
                     None,
                 )
             })
         })
         .collect::<StdResult<Vec<CosmosMsg>>>();
     // we reset all the accumulator keys to zero so that it wont accumulate more in the next txs. This action will be reverted if the fee payment txs fail.
-    RELAYER_FEE_ACCUMULATOR
+    TOKEN_FEE_ACCUMULATOR
         .keys(storage, None, None, Order::Ascending)
         .collect::<Result<Vec<String>, StdError>>()?
         .into_iter()
-        .for_each(|key| RELAYER_FEE_ACCUMULATOR.remove(storage, &key));
+        .for_each(|key| TOKEN_FEE_ACCUMULATOR.remove(storage, &key));
     cosmos_msgs
 }
 

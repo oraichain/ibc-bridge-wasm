@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcMsg, IbcQuery,
-    MessageInfo, Order, PortIdResponse, Response, StdError, StdResult,
+    MessageInfo, Order, PortIdResponse, Response, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -21,8 +21,8 @@ use crate::msg::{
 };
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    AllowInfo, Config, MappingMetadata, RelayerFee, ADMIN, ALLOW_LIST, CHANNEL_FORWARD_STATE,
-    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
+    AllowInfo, Config, MappingMetadata, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_FORWARD_STATE,
+    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -39,16 +39,16 @@ pub fn instantiate(
     msg: InitMsg,
 ) -> Result<Response, ContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    let admin = deps.api.addr_validate(&msg.gov_contract)?;
+    ADMIN.set(deps.branch(), Some(admin.clone()))?;
     let cfg = Config {
         default_timeout: msg.default_timeout,
         default_gas_limit: msg.default_gas_limit,
         fee_denom: "orai".to_string(),
         swap_router_contract: msg.swap_router_contract,
+        fee_receiver: admin,
     };
     CONFIG.save(deps.storage, &cfg)?;
-
-    let admin = deps.api.addr_validate(&msg.gov_contract)?;
-    ADMIN.set(deps.branch(), Some(admin))?;
 
     // add all allows
     for allowed in msg.allowlist {
@@ -88,7 +88,8 @@ pub fn execute(
             fee_denom,
             swap_router_contract,
             admin,
-            relayer_fee,
+            token_fee,
+            fee_receiver,
         } => update_config(
             deps,
             info,
@@ -97,7 +98,8 @@ pub fn execute(
             fee_denom,
             swap_router_contract,
             admin,
-            relayer_fee,
+            token_fee,
+            fee_receiver,
         ),
     }
 }
@@ -110,11 +112,14 @@ pub fn update_config(
     fee_denom: Option<String>,
     swap_router_contract: Option<String>,
     admin: Option<String>,
-    relayer_fee: Option<RelayerFee>,
+    token_fee: Option<Vec<TokenFee>>,
+    fee_receiver: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
-    if let Some(relayer_fee) = relayer_fee {
-        RELAYER_FEE.save(deps.storage, &relayer_fee.chain, &relayer_fee.ratio)?;
+    if let Some(token_fee) = token_fee {
+        for fee in token_fee {
+            TOKEN_FEE.save(deps.storage, &fee.token_denom, &fee.ratio)?;
+        }
     }
     CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
         if let Some(default_timeout) = default_timeout {
@@ -125,6 +130,9 @@ pub fn update_config(
         }
         if let Some(swap_router_contract) = swap_router_contract {
             config.swap_router_contract = swap_router_contract;
+        }
+        if let Some(fee_receiver) = fee_receiver {
+            config.fee_receiver = deps.api.addr_validate(&fee_receiver)?;
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -270,28 +278,27 @@ pub fn execute_transfer_back_to_remote_chain(
     )?;
 
     // parse denom & compare with user input. Should not use string.includes() because hacker can fake a port that has the same remote denom to return true
-    let mapping_search_result = mappings.into_iter().find(|pair| -> bool {
-        let (denom, is_native) = parse_voucher_denom(
-            pair.key.as_str(),
-            &IbcEndpoint {
-                port_id: parse_ibc_wasm_port_id(env.contract.address.clone().into_string()),
-                channel_id: msg.local_channel_id.clone(), // also verify local channel id
-            },
-        )
-        .unwrap_or_else(|_| ("", true)); // if there's an error, change is_native to true so it automatically returns false
-        if is_native {
+    let mapping = mappings
+        .into_iter()
+        .find(|pair| -> bool {
+            let (denom, is_native) = parse_voucher_denom(
+                pair.key.as_str(),
+                &IbcEndpoint {
+                    port_id: parse_ibc_wasm_port_id(env.contract.address.clone().into_string()),
+                    channel_id: msg.local_channel_id.clone(), // also verify local channel id
+                },
+            )
+            .unwrap_or_else(|_| ("", true)); // if there's an error, change is_native to true so it automatically returns false
+            if is_native {
+                return false;
+            }
+            if denom.eq(&msg.remote_denom) {
+                return true;
+            }
             return false;
-        }
-        if denom.eq(&msg.remote_denom) {
-            return true;
-        }
-        return false;
-    });
-    if mapping_search_result.is_none() {
-        return Err(ContractError::MappingPairNotFound {});
-    }
+        })
+        .ok_or(ContractError::MappingPairNotFound {})?;
 
-    let mapping = mapping_search_result.unwrap();
     let ibc_denom = mapping.key;
     // ensure the requested channel is registered
     if !CHANNEL_INFO.has(deps.storage, &msg.local_channel_id) {
@@ -341,13 +348,8 @@ pub fn execute_transfer_back_to_remote_chain(
         timeout: timeout.into(),
     };
 
-    let mut cosmos_msgs = collect_transfer_fee_msgs(
-        ADMIN
-            .get(deps.as_ref())?
-            .ok_or(StdError::generic_err("Cannot find contract admin"))?
-            .into_string(),
-        deps.storage,
-    )?;
+    let mut cosmos_msgs =
+        collect_transfer_fee_msgs(config.fee_receiver.into_string(), deps.storage)?;
     cosmos_msgs.push(msg.into());
 
     // send response
@@ -475,6 +477,7 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             default_gas_limit: msg.default_gas_limit,
             fee_denom: config.fee_denom,
             swap_router_contract: config.swap_router_contract,
+            fee_receiver: deps.api.addr_validate(&msg.fee_receiver)?,
         },
     )?;
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -504,8 +507,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&get_mappings_from_asset_info(deps, asset_info)?)
         }
         QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
-        QueryMsg::GetTransferFee { evm_prefix } => {
-            to_binary(&RELAYER_FEE.load(deps.storage, &evm_prefix)?)
+        QueryMsg::GetTransferTokenFee { remote_token_denom } => {
+            to_binary(&TOKEN_FEE.load(deps.storage, &remote_token_denom)?)
         }
     }
 }
@@ -680,8 +683,8 @@ mod test {
     use std::ops::Sub;
 
     use super::*;
-    use crate::ibc::{ibc_packet_receive, parse_asset_info_denom};
-    use crate::state::{Ratio, RELAYER_FEE_ACCUMULATOR};
+    use crate::ibc::ibc_packet_receive;
+    use crate::state::Ratio;
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info};
@@ -1121,6 +1124,7 @@ mod test {
             mock_env(),
             MigrateMsg {
                 default_gas_limit: Some(123456),
+                fee_receiver: "receiver".to_string(),
                 // default_timeout: 100u64,
                 // fee_denom: "orai".to_string(),
                 // swap_router_contract: "foobar".to_string(),
@@ -1184,16 +1188,8 @@ mod test {
         let fee_amount =
             Uint128::from(amount) * Decimal::from_ratio(ratio.nominator, ratio.denominator);
         let mut deps = setup(&[remote_channel, local_channel], &[]);
-        RELAYER_FEE
-            .save(deps.as_mut().storage, "uatom", &ratio)
-            .unwrap();
-        // reset fee so that other tests wont get affected
-        RELAYER_FEE_ACCUMULATOR
-            .save(
-                deps.as_mut().storage,
-                &parse_asset_info_denom(asset_info.clone()),
-                &Uint128::zero(),
-            )
+        TOKEN_FEE
+            .save(deps.as_mut().storage, denom, &ratio)
             .unwrap();
 
         let pair = UpdatePairMsg {
@@ -1360,7 +1356,23 @@ mod test {
             default_gas_limit: None,
             fee_denom: Some("hehe".to_string()),
             swap_router_contract: Some("new_router".to_string()),
-            relayer_fee: None,
+            token_fee: Some(vec![
+                TokenFee {
+                    token_denom: "orai".to_string(),
+                    ratio: Ratio {
+                        nominator: 1,
+                        denominator: 10,
+                    },
+                },
+                TokenFee {
+                    token_denom: "atom".to_string(),
+                    ratio: Ratio {
+                        nominator: 1,
+                        denominator: 5,
+                    },
+                },
+            ]),
+            fee_receiver: None,
         };
         // unauthorized case
         let unauthorized_info = mock_info(&String::from("somebody"), &[]);
@@ -1381,6 +1393,26 @@ mod test {
         assert_eq!(config.default_timeout, 1);
         assert_eq!(config.fee_denom, "hehe".to_string());
         assert_eq!(config.swap_router_contract, "new_router".to_string());
+        assert_eq!(
+            TOKEN_FEE
+                .range(deps.as_ref().storage, None, None, Order::Ascending)
+                .count(),
+            2usize
+        );
+        assert_eq!(
+            TOKEN_FEE
+                .load(deps.as_ref().storage, "orai")
+                .unwrap()
+                .denominator,
+            10
+        );
+        assert_eq!(
+            TOKEN_FEE
+                .load(deps.as_ref().storage, "atom")
+                .unwrap()
+                .denominator,
+            5
+        )
     }
 
     #[test]
