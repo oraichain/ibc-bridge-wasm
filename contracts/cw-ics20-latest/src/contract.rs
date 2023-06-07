@@ -112,12 +112,14 @@ pub fn update_config(
     fee_denom: Option<String>,
     swap_router_contract: Option<String>,
     admin: Option<String>,
-    token_fee: Option<TokenFee>,
+    token_fee: Option<Vec<TokenFee>>,
     fee_receiver: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
     if let Some(token_fee) = token_fee {
-        TOKEN_FEE.save(deps.storage, &token_fee.token_denom, &token_fee.ratio)?;
+        for fee in token_fee {
+            TOKEN_FEE.save(deps.storage, &fee.token_denom, &fee.ratio)?;
+        }
     }
     CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
         if let Some(default_timeout) = default_timeout {
@@ -1354,7 +1356,22 @@ mod test {
             default_gas_limit: None,
             fee_denom: Some("hehe".to_string()),
             swap_router_contract: Some("new_router".to_string()),
-            token_fee: None,
+            token_fee: Some(vec![
+                TokenFee {
+                    token_denom: "orai".to_string(),
+                    ratio: Ratio {
+                        nominator: 1,
+                        denominator: 10,
+                    },
+                },
+                TokenFee {
+                    token_denom: "atom".to_string(),
+                    ratio: Ratio {
+                        nominator: 1,
+                        denominator: 5,
+                    },
+                },
+            ]),
             fee_receiver: None,
         };
         // unauthorized case
@@ -1376,6 +1393,26 @@ mod test {
         assert_eq!(config.default_timeout, 1);
         assert_eq!(config.fee_denom, "hehe".to_string());
         assert_eq!(config.swap_router_contract, "new_router".to_string());
+        assert_eq!(
+            TOKEN_FEE
+                .range(deps.as_ref().storage, None, None, Order::Ascending)
+                .count(),
+            2usize
+        );
+        assert_eq!(
+            TOKEN_FEE
+                .load(deps.as_ref().storage, "orai")
+                .unwrap()
+                .denominator,
+            10
+        );
+        assert_eq!(
+            TOKEN_FEE
+                .load(deps.as_ref().storage, "atom")
+                .unwrap()
+                .denominator,
+            5
+        )
     }
 
     #[test]

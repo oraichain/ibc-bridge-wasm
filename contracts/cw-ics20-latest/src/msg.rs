@@ -54,7 +54,7 @@ pub enum ExecuteMsg {
         default_gas_limit: Option<u64>,
         fee_denom: Option<String>,
         swap_router_contract: Option<String>,
-        token_fee: Option<TokenFee>,
+        token_fee: Option<Vec<TokenFee>>,
         fee_receiver: Option<String>,
     },
 }
