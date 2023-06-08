@@ -318,9 +318,9 @@ mod test {
             MigrateMsg {
                 default_gas_limit: Some(def_limit),
                 fee_receiver: "receiver".to_string(),
-                // default_timeout: 100u64,
-                // fee_denom: "orai".to_string(),
-                // swap_router_contract: "foobar".to_string(),
+                default_timeout: 100u64,
+                fee_denom: "orai".to_string(),
+                swap_router_contract: "foobar".to_string(),
             },
         )
         .unwrap();

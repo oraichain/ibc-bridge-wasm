@@ -469,14 +469,13 @@ pub fn execute_delete_mapping_pair(
 #[entry_point]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
     // we don't need to save anything if migrating from the same version
-    let config: Config = CONFIG.load(deps.storage)?;
     CONFIG.save(
         deps.storage,
         &Config {
-            default_timeout: config.default_timeout,
+            default_timeout: msg.default_timeout,
             default_gas_limit: msg.default_gas_limit,
-            fee_denom: config.fee_denom,
-            swap_router_contract: config.swap_router_contract,
+            fee_denom: msg.fee_denom,
+            swap_router_contract: msg.swap_router_contract,
             fee_receiver: deps.api.addr_validate(&msg.fee_receiver)?,
         },
     )?;
@@ -1125,9 +1124,9 @@ mod test {
             MigrateMsg {
                 default_gas_limit: Some(123456),
                 fee_receiver: "receiver".to_string(),
-                // default_timeout: 100u64,
-                // fee_denom: "orai".to_string(),
-                // swap_router_contract: "foobar".to_string(),
+                default_timeout: 100u64,
+                fee_denom: "orai".to_string(),
+                swap_router_contract: "foobar".to_string(),
             },
         )
         .unwrap();

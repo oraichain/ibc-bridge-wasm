@@ -8,7 +8,7 @@ use crate::ContractError;
 
 pub const ADMIN: Admin = Admin::new("admin");
 
-pub const CONFIG: Item<Config> = Item::new("ics20_config_v11");
+pub const CONFIG: Item<Config> = Item::new("ics20_config_v1.0.2");
 
 // Used to pass info from the ibc_packet_receive to the reply handler
 pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args");
