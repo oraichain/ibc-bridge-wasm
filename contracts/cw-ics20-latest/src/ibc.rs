@@ -426,7 +426,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &msg.sender,
         &msg.receiver,
         &msg.memo.clone().unwrap_or_default(),
-        packet,
+        packet.dest.channel_id.as_str(),
     )?;
     let submsgs: Vec<SubMsg> = submsgs
         .into_iter()
@@ -462,7 +462,7 @@ pub fn get_follow_up_msgs(
     sender: &str,
     receiver: &str,
     memo: &str,
-    packet: &IbcPacket,
+    initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain
 ) -> Result<(Vec<CosmosMsg>, String), ContractError> {
     let config = CONFIG.load(storage)?;
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
@@ -511,7 +511,7 @@ pub fn get_follow_up_msgs(
         env,
         receiver_asset_info,
         receiver,
-        packet.dest.channel_id.as_str(),
+        initial_dest_channel_id,
         minimum_receive.clone(),
         &sender,
         &destination,

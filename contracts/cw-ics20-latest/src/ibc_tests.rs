@@ -847,6 +847,7 @@ mod test {
     #[test]
     fn test_follow_up_msgs() {
         let send_channel = "channel-9";
+        let local_channel = "channel";
         let allowed = "foobar";
         let allowed_gas = 777666;
         let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
@@ -873,7 +874,7 @@ mod test {
             "foobar",
             receiver.clone(),
             "",
-            &mock_receive_packet_remote_to_local("channel", 1u128, "foobar", "foobar"),
+            local_channel,
         )
         .unwrap();
 
@@ -905,7 +906,7 @@ mod test {
             "foobar",
             "foobar",
             memo,
-            &mock_receive_packet_remote_to_local("channel", 1u128, "foobar", "foobar"),
+            local_channel,
         )
         .unwrap();
 
@@ -939,7 +940,7 @@ mod test {
             "foobar",
             "foobar",
             memo,
-            &mock_receive_packet_remote_to_local("channel", 1u128, "foobar", "foobar"),
+            local_channel,
         )
         .unwrap();
 
