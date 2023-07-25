@@ -90,47 +90,46 @@ pub fn ack_fail(err: String) -> Binary {
     to_binary(&res).unwrap()
 }
 
-pub const RECEIVE_ID: u64 = 1337;
+// pub const RECEIVE_ID: u64 = 1337;
 pub const NATIVE_RECEIVE_ID: u64 = 1338;
 pub const FOLLOW_UP_FAILURE_ID: u64 = 1339;
 pub const REFUND_FAILURE_ID: u64 = 1340;
 pub const ACK_FAILURE_ID: u64 = 64023;
-// const TRANSFER_BACK_FAILURE_ID: u64 = 1339;
 
 #[entry_point]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
     match reply.id {
-        RECEIVE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => {
-                // Important design note:  with ibcv2 and wasmd 0.22 we can implement this all much easier.
-                // No reply needed... the receive function and submessage should return error on failure and all
-                // state gets reverted with a proper app-level message auto-generated
+        // RECEIVE_ID => match reply.result {
+        //     SubMsgResult::Ok(_) => Ok(Response::new()),
+        //     SubMsgResult::Err(err) => {
+        //         // Important design note:  with ibcv2 and wasmd 0.22 we can implement this all much easier.
+        //         // No reply needed... the receive function and submessage should return error on failure and all
+        //         // state gets reverted with a proper app-level message auto-generated
 
-                // Since we need compatibility with Juno (Jan 2022), we need to ensure that optimisitic
-                // state updates in ibc_packet_receive get reverted in the (unlikely) chance of an
-                // error while sending the token
+        //         // Since we need compatibility with Juno (Jan 2022), we need to ensure that optimisitic
+        //         // state updates in ibc_packet_receive get reverted in the (unlikely) chance of an
+        //         // error while sending the token
 
-                // However, this requires passing some state between the ibc_packet_receive function and
-                // the reply handler. We do this with a singleton, with is "okay" for IBC as there is no
-                // reentrancy on these functions (cannot be called by another contract). This pattern
-                // should not be used for ExecuteMsg handlers
-                let reply_args = REPLY_ARGS.load(deps.storage)?;
-                undo_reduce_channel_balance(
-                    deps.storage,
-                    &reply_args.channel,
-                    &reply_args.denom,
-                    reply_args.amount,
-                    true,
-                )?;
+        //         // However, this requires passing some state between the ibc_packet_receive function and
+        //         // the reply handler. We do this with a singleton, with is "okay" for IBC as there is no
+        //         // reentrancy on these functions (cannot be called by another contract). This pattern
+        //         // should not be used for ExecuteMsg handlers
+        //         let reply_args = REPLY_ARGS.load(deps.storage)?;
+        //         undo_reduce_channel_balance(
+        //             deps.storage,
+        //             &reply_args.channel,
+        //             &reply_args.denom,
+        //             reply_args.amount,
+        //             true,
+        //         )?;
 
-                Ok(Response::new().set_data(ack_fail(err)).add_attributes(vec![
-                    attr("undo_reduce_channel", reply_args.channel),
-                    attr("undo_reduce_channel_ibc_denom", reply_args.denom),
-                    attr("undo_reduce_channel_amount", reply_args.amount),
-                ]))
-            }
-        },
+        //         Ok(Response::new().set_data(ack_fail(err)).add_attributes(vec![
+        //             attr("undo_reduce_channel", reply_args.channel),
+        //             attr("undo_reduce_channel_ibc_denom", reply_args.denom),
+        //             attr("undo_reduce_channel_amount", reply_args.amount),
+        //         ]))
+        //     }
+        // },
         NATIVE_RECEIVE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
@@ -182,12 +181,6 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                 .set_data(ack_fail(err.clone()))
                 .add_attribute("error_trying_to_refund_single_step", err)),
         },
-        // TRANSFER_BACK_FAILURE_ID => match reply.result {
-        //     SubMsgResult::Ok(_) => Ok(Response::new()),
-        //     SubMsgResult::Err(err) => Ok(Response::new()
-        //         .set_data(ack_fail(err.clone()))
-        //         .add_attribute("error_refund_cw20_tokens", err)),
-        // },
         _ => Err(ContractError::UnknownReplyId { id: reply.id }),
     }
 }
@@ -328,7 +321,7 @@ fn do_ibc_packet_receive(
     packet: &IbcPacket,
 ) -> Result<IbcReceiveResponse, ContractError> {
     let msg: Ics20Packet = from_binary(&packet.data)?;
-    let channel = packet.dest.channel_id.clone();
+    // let channel = packet.dest.channel_id.clone();
 
     // If the token originated on the remote chain, it looks like "ucosm".
     // If it originated on our chain, it looks like "port/channel/ucosm".
@@ -347,34 +340,34 @@ fn do_ibc_packet_receive(
         );
     }
 
-    // make sure we have enough balance for this
-    reduce_channel_balance(deps.storage, &channel, denom.0, msg.amount, true)?;
+    // // make sure we have enough balance for this
+    // reduce_channel_balance(deps.storage, &channel, denom.0, msg.amount, true)?;
 
-    // we need to save the data to update the balances in reply
-    let reply_args = ReplyArgs {
-        channel,
-        denom: denom.0.to_string(),
-        amount: msg.amount,
-    };
-    REPLY_ARGS.save(deps.storage, &reply_args)?;
+    // // we need to save the data to update the balances in reply
+    // let reply_args = ReplyArgs {
+    //     channel,
+    //     denom: denom.0.to_string(),
+    //     amount: msg.amount,
+    // };
+    // REPLY_ARGS.save(deps.storage, &reply_args)?;
 
-    let to_send = Amount::from_parts(denom.0.to_string(), msg.amount);
-    let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-    let send = send_amount(to_send, msg.receiver.clone(), None);
-    let mut submsg = SubMsg::reply_on_error(send, RECEIVE_ID);
-    submsg.gas_limit = gas_limit;
+    // let to_send = Amount::from_parts(denom.0.to_string(), msg.amount);
+    // let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
+    // let send = send_amount(to_send, msg.receiver.clone(), None);
+    // let mut submsg = SubMsg::reply_on_error(send, RECEIVE_ID);
+    // submsg.gas_limit = gas_limit;
 
-    let res = IbcReceiveResponse::new()
-        .set_ack(ack_success())
-        .add_submessage(submsg)
-        .add_attribute("action", "receive")
-        .add_attribute("sender", msg.sender)
-        .add_attribute("receiver", msg.receiver)
-        .add_attribute("denom", denom.0)
-        .add_attribute("amount", msg.amount)
-        .add_attribute("success", "true");
+    // let res = IbcReceiveResponse::new()
+    //     .set_ack(ack_success())
+    //     .add_submessage(submsg)
+    //     .add_attribute("action", "receive")
+    //     .add_attribute("sender", msg.sender)
+    //     .add_attribute("receiver", msg.receiver)
+    //     .add_attribute("denom", denom.0)
+    //     .add_attribute("amount", msg.amount)
+    //     .add_attribute("success", "true");
 
-    Ok(res)
+    Err(ContractError::Std(StdError::generic_err("Not suppported")))
 }
 
 fn handle_ibc_packet_receive_native_remote_chain(

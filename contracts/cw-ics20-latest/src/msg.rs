@@ -41,7 +41,7 @@ pub enum ExecuteMsg {
     /// This accepts a properly-encoded ReceiveMsg from a cw20 contract
     Receive(Cw20ReceiveMsg),
     /// This allows us to transfer *exactly one* native token
-    Transfer(TransferMsg),
+    // Transfer(TransferMsg),
     TransferToRemote(TransferBackMsg),
     UpdateMappingPair(UpdatePairMsg),
     DeleteMappingPair(DeletePairMsg),
@@ -78,19 +78,19 @@ pub struct DeletePairMsg {
 }
 
 /// This is the message we accept via Receive
-#[cw_serde]
-pub struct TransferMsg {
-    /// The local channel to send the packets on
-    pub channel: String,
-    /// The remote address to send to.
-    /// Don't use HumanAddress as this will likely have a different Bech32 prefix than we use
-    /// and cannot be validated locally
-    pub remote_address: String,
-    /// How long the packet lives in seconds. If not specified, use default_timeout
-    pub timeout: Option<u64>,
-    /// metadata of the transfer to suit the new fungible token transfer
-    pub memo: Option<String>,
-}
+// #[cw_serde]
+// pub struct TransferMsg {
+//     /// The local channel to send the packets on
+//     pub channel: String,
+//     /// The remote address to send to.
+//     /// Don't use HumanAddress as this will likely have a different Bech32 prefix than we use
+//     /// and cannot be validated locally
+//     pub remote_address: String,
+//     /// How long the packet lives in seconds. If not specified, use default_timeout
+//     pub timeout: Option<u64>,
+//     /// metadata of the transfer to suit the new fungible token transfer
+//     pub memo: Option<String>,
+// }
 
 /// This is the message we accept via Receive
 #[cw_serde]

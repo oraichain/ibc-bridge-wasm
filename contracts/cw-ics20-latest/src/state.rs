@@ -18,9 +18,9 @@ pub const SINGLE_STEP_REPLY_ARGS: Item<SingleStepReplyArgs> = Item::new("single_
 /// static info on one channel that doesn't change
 pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
 
-/// Forward channel state is used when LOCAL chain initiates ibc transfer to remote chain
-pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
-    Map::new("channel_forward_state");
+// /// Forward channel state is used when LOCAL chain initiates ibc transfer to remote chain
+// pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
+//     Map::new("channel_forward_state");
 
 /// Reverse channel state is used when REMOTE chain initiates ibc transfer to local chain
 pub const CHANNEL_REVERSE_STATE: Map<(&str, &str), ChannelState> =
@@ -137,12 +137,12 @@ pub fn increase_channel_balance(
     channel: &str,
     denom: &str,
     amount: Uint128,
-    forward: bool,
+    _forward: bool,
 ) -> Result<(), ContractError> {
     let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
+    // if forward {
+    //     state = CHANNEL_FORWARD_STATE;
+    // }
 
     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
@@ -158,12 +158,12 @@ pub fn reduce_channel_balance(
     channel: &str,
     denom: &str,
     amount: Uint128,
-    forward: bool,
+    _forward: bool,
 ) -> Result<(), ContractError> {
     let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
+    // if forward {
+    //     state = CHANNEL_FORWARD_STATE;
+    // }
     state.update(
         storage,
         (channel, denom),
@@ -193,12 +193,12 @@ pub fn undo_reduce_channel_balance(
     channel: &str,
     denom: &str,
     amount: Uint128,
-    forward: bool,
+    _forward: bool,
 ) -> Result<(), ContractError> {
     let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
+    // if forward {
+    //     state = CHANNEL_FORWARD_STATE;
+    // }
     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding += amount;
@@ -214,12 +214,12 @@ pub fn undo_increase_channel_balance(
     channel: &str,
     denom: &str,
     amount: Uint128,
-    forward: bool,
+    _forward: bool,
 ) -> Result<(), ContractError> {
     let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
+    // if forward {
+    //     state = CHANNEL_FORWARD_STATE;
+    // }
     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding -= amount;
