@@ -2,7 +2,7 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
-use oraiswap::asset::AssetInfo;
+use oraiswap::{asset::AssetInfo, router::RouterController};
 
 use crate::ContractError;
 
@@ -71,7 +71,7 @@ pub struct Config {
     pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
     pub fee_denom: String,
-    pub swap_router_contract: String,
+    pub swap_router_contract: RouterController,
     pub fee_receiver: Addr,
 }
 
@@ -139,7 +139,7 @@ pub fn increase_channel_balance(
     amount: Uint128,
     _forward: bool,
 ) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
+    let state = CHANNEL_REVERSE_STATE;
     // if forward {
     //     state = CHANNEL_FORWARD_STATE;
     // }
@@ -160,7 +160,7 @@ pub fn reduce_channel_balance(
     amount: Uint128,
     _forward: bool,
 ) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
+    let state = CHANNEL_REVERSE_STATE;
     // if forward {
     //     state = CHANNEL_FORWARD_STATE;
     // }
@@ -195,7 +195,7 @@ pub fn undo_reduce_channel_balance(
     amount: Uint128,
     _forward: bool,
 ) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
+    let state = CHANNEL_REVERSE_STATE;
     // if forward {
     //     state = CHANNEL_FORWARD_STATE;
     // }
@@ -216,7 +216,7 @@ pub fn undo_increase_channel_balance(
     amount: Uint128,
     _forward: bool,
 ) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
+    let state = CHANNEL_REVERSE_STATE;
     // if forward {
     //     state = CHANNEL_FORWARD_STATE;
     // }

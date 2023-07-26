@@ -8,6 +8,7 @@ use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
 use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
+use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{
@@ -45,7 +46,7 @@ pub fn instantiate(
         default_timeout: msg.default_timeout,
         default_gas_limit: msg.default_gas_limit,
         fee_denom: "orai".to_string(),
-        swap_router_contract: msg.swap_router_contract,
+        swap_router_contract: RouterController(msg.swap_router_contract),
         fee_receiver: admin,
     };
     CONFIG.save(deps.storage, &cfg)?;
@@ -129,7 +130,7 @@ pub fn update_config(
             config.fee_denom = fee_denom;
         }
         if let Some(swap_router_contract) = swap_router_contract {
-            config.swap_router_contract = swap_router_contract;
+            config.swap_router_contract = RouterController(swap_router_contract);
         }
         if let Some(fee_receiver) = fee_receiver {
             config.fee_receiver = deps.api.addr_validate(&fee_receiver)?;
@@ -475,7 +476,7 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             default_timeout: msg.default_timeout,
             default_gas_limit: msg.default_gas_limit,
             fee_denom: msg.fee_denom,
-            swap_router_contract: msg.swap_router_contract,
+            swap_router_contract: RouterController(msg.swap_router_contract),
             fee_receiver: deps.api.addr_validate(&msg.fee_receiver)?,
         },
     )?;
@@ -560,7 +561,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         default_timeout: cfg.default_timeout,
         default_gas_limit: cfg.default_gas_limit,
         fee_denom: cfg.fee_denom,
-        swap_router_contract: cfg.swap_router_contract,
+        swap_router_contract: cfg.swap_router_contract.addr(),
         gov_contract: admin.into(),
     };
     Ok(res)

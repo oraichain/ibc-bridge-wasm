@@ -11,7 +11,7 @@ use cosmwasm_std::{
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
-use oraiswap::router::{SimulateSwapOperationsResponse, SwapOperation};
+use oraiswap::router::{RouterController, SwapOperation};
 
 use crate::error::{ContractError, Never};
 use crate::state::{
@@ -496,12 +496,10 @@ pub fn get_follow_up_msgs(
     );
     let mut minimum_receive = to_send.amount();
     if swap_operations.len() > 0 {
-        let response: SimulateSwapOperationsResponse = querier.query_wasm_smart(
-            config.swap_router_contract.clone(),
-            &oraiswap::router::QueryMsg::SimulateSwapOperations {
-                offer_amount: to_send.amount().clone(),
-                operations: swap_operations.clone(),
-            },
+        let response = config.swap_router_contract.simulate_swap(
+            querier,
+            to_send.amount().clone(),
+            swap_operations.clone(),
         )?;
         minimum_receive = response.amount;
     }
@@ -588,7 +586,7 @@ pub fn build_swap_operations(
 
 pub fn build_swap_msgs(
     minimum_receive: Uint128,
-    swap_router_contract: &str,
+    swap_router_contract: &RouterController,
     amount: Uint128,
     initial_receive_asset_info: AssetInfo,
     to: Option<Addr>,
@@ -599,38 +597,16 @@ pub fn build_swap_msgs(
     if operations.len() == 0 {
         return Ok(());
     }
-    match initial_receive_asset_info {
-        AssetInfo::Token { contract_addr } => cosmos_msgs.insert(
-            0,
-            WasmMsg::Execute {
-                contract_addr: contract_addr.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Send {
-                    contract: swap_router_contract.to_string(),
-                    amount,
-                    msg: to_binary(&oraiswap::router::Cw20HookMsg::ExecuteSwapOperations {
-                        operations,
-                        minimum_receive: Some(minimum_receive.clone()),
-                        to: to.map(|to| to.into_string()),
-                    })?,
-                })?,
-                funds: vec![],
-            }
-            .into(),
-        ),
-        AssetInfo::NativeToken { denom } => cosmos_msgs.insert(
-            0,
-            WasmMsg::Execute {
-                contract_addr: swap_router_contract.to_string(),
-                msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
-                    operations,
-                    minimum_receive: Some(minimum_receive.clone()),
-                    to,
-                })?,
-                funds: vec![coin(amount.u128(), denom)],
-            }
-            .into(),
-        ),
-    }
+    cosmos_msgs.insert(
+        0,
+        swap_router_contract.execute_operations(
+            initial_receive_asset_info,
+            amount,
+            operations,
+            Some(minimum_receive),
+            to,
+        )?,
+    );
 
     Ok(())
 }

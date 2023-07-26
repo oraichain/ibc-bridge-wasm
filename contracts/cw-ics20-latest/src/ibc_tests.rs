@@ -632,7 +632,7 @@ mod test {
         let mut operations: Vec<SwapOperation> = vec![];
         build_swap_msgs(
             minimum_receive.clone(),
-            swap_router_contract.clone(),
+            &oraiswap::router::RouterController(swap_router_contract.to_string()),
             amount.clone(),
             initial_receive_asset_info.clone(),
             to.clone(),
@@ -647,7 +647,7 @@ mod test {
         });
         build_swap_msgs(
             minimum_receive.clone(),
-            swap_router_contract.clone(),
+            &oraiswap::router::RouterController(swap_router_contract.to_string()),
             amount.clone(),
             initial_receive_asset_info.clone(),
             to.clone(),
@@ -665,7 +665,7 @@ mod test {
         };
         build_swap_msgs(
             minimum_receive.clone(),
-            swap_router_contract.clone(),
+            &oraiswap::router::RouterController(swap_router_contract.to_string()),
             amount.clone(),
             initial_receive_asset_info.clone(),
             to.clone(),

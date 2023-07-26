@@ -601,9 +601,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "oraiswap"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d647cd0b70b11b8b78364ca2f885753b0c870785788bcf9d3d05f522fe54344e"
+checksum = "2dd3f2603bc41e2c9218e1103ce762e50ad8ee7a3648aabe03f7d48437f841c6"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
