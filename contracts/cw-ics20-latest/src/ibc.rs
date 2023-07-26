@@ -327,7 +327,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     packet: &IbcPacket,
     msg: &Ics20Packet,
 ) -> Result<IbcReceiveResponse, ContractError> {
-    // make sure we have enough balance for this
+    let config = CONFIG.load(storage)?;
 
     // key in form transfer/channel-0/foo
     let ibc_denom = get_key_ics20_ibc_denom(&packet.dest.port_id, &packet.dest.channel_id, denom);
@@ -361,7 +361,16 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     let new_deducted_to_send = Amount::from_parts(
         to_send.denom(),
-        process_deduct_fee(storage, &msg.denom, to_send.amount(), &to_send.denom())?,
+        process_deduct_fee(
+            storage,
+            querier,
+            &msg.sender,
+            &msg.denom,
+            to_send.amount(),
+            pair_mapping.asset_info_decimals,
+            &to_send.denom(),
+            &config.swap_router_contract,
+        )?,
     );
 
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
@@ -423,21 +432,7 @@ pub fn get_follow_up_msgs(
         ));
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
-    let receiver_asset_info = if querier
-        .query_wasm_smart::<TokenInfoResponse>(
-            destination.destination_denom.clone(),
-            &Cw20QueryMsg::TokenInfo {},
-        )
-        .is_ok()
-    {
-        AssetInfo::Token {
-            contract_addr: api.addr_validate(&destination.destination_denom)?,
-        }
-    } else {
-        AssetInfo::NativeToken {
-            denom: destination.destination_denom.clone(),
-        }
-    };
+    let receiver_asset_info = denom_to_asset_info(querier, &destination.destination_denom);
     let swap_operations = build_swap_operations(
         receiver_asset_info.clone(),
         initial_receive_asset_info.clone(),
@@ -599,7 +594,8 @@ pub fn build_ibc_msg(
             .find(|(key, _)| key.contains(&destination.destination_channel))
             .ok_or(StdError::generic_err("cannot find pair mappings"))?;
         // also deduct fee here because of round trip
-        let new_deducted_amount = process_deduct_fee(
+        // TODO: add relayer fee here?
+        let (new_deducted_amount, _) = deduct_token_fee(
             storage,
             parse_voucher_denom_without_sanity_checks(&mapping.0)?, // denom mapping in the form port/channel/denom
             amount,
@@ -718,15 +714,36 @@ pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, Contr
 
 pub fn process_deduct_fee(
     storage: &mut dyn Storage,
+    querier: &QuerierWrapper,
+    remote_sender: &str,
     remote_token_denom: &str,
-    amount: Uint128,
-    local_token_denom: &str,
+    amount: Uint128, // local amount
+    decimals: u8,
+    local_token_denom: &str, // local denom
+    swap_router_contract: &RouterController,
 ) -> StdResult<Uint128> {
-    let mut new_deducted_fee =
-        deduct_token_fee(storage, remote_token_denom, amount, local_token_denom)?;
-
-    // new_deducted_fee = deduct_relayer_fee(storage, remote_token_denom, amount, local_token_denom)?;
-    Ok(new_deducted_fee)
+    let (_, token_fee) = deduct_token_fee(storage, remote_token_denom, amount, local_token_denom)?;
+    let (_, relayer_fee) = deduct_relayer_fee(
+        storage,
+        querier,
+        remote_sender,
+        remote_token_denom,
+        amount,
+        decimals,
+        local_token_denom,
+        &swap_router_contract,
+    )?;
+    let new_amount = amount
+        .checked_sub(token_fee)
+        .unwrap_or_default()
+        .checked_sub(relayer_fee)
+        .unwrap_or_default();
+    if new_amount.is_zero() {
+        return Err(StdError::generic_err(
+            "Not enough transfer amount to cover the token and relayer fees",
+        ));
+    }
+    Ok(new_amount)
 }
 
 pub fn deduct_token_fee(
@@ -734,7 +751,7 @@ pub fn deduct_token_fee(
     remote_token_denom: &str,
     amount: Uint128,
     local_token_denom: &str,
-) -> StdResult<Uint128> {
+) -> StdResult<(Uint128, Uint128)> {
     let token_fee = TOKEN_FEE.may_load(storage, &remote_token_denom)?;
     if let Some(token_fee) = token_fee {
         let fee = deduct_fee(token_fee, amount);
@@ -744,29 +761,76 @@ pub fn deduct_token_fee(
             |prev_fee| -> StdResult<Uint128> { Ok(prev_fee.unwrap_or_default().checked_add(fee)?) },
         )?;
         let new_deducted_amount = amount.checked_sub(fee)?;
-        return Ok(new_deducted_amount);
+        return Ok((new_deducted_amount, fee));
     }
-    Ok(amount)
+    Ok((amount, Uint128::from(0u64)))
 }
 
 pub fn deduct_relayer_fee(
     storage: &mut dyn Storage,
+    querier: &QuerierWrapper,
+    remote_sender: &str,
     remote_token_denom: &str,
-    amount: Uint128,
-    local_token_denom: &str,
-) -> StdResult<Uint128> {
-    // let token_fee = RELAYER_FEE.may_load(storage, &remote_token_denom)?;
-    // if let Some(token_fee) = token_fee {
-    //     let fee = deduct_fee(token_fee, amount);
-    //     RELAYER_FEE.update(
-    //         storage,
-    //         local_token_denom,
-    //         |prev_fee| -> StdResult<Uint128> { Ok(prev_fee.unwrap_or_default().checked_add(fee)?) },
-    //     )?;
-    //     let new_deducted_amount = amount.checked_sub(fee)?;
-    //     return Ok(new_deducted_amount);
-    // }
-    Ok(amount)
+    amount: Uint128, // local amount
+    decimals: u8,
+    local_token_denom: &str, // local denom
+    swap_router_contract: &RouterController,
+) -> StdResult<(Uint128, Uint128)> {
+    let decode_result = bech32::decode(remote_sender);
+    if decode_result.is_err() {
+        return Err(StdError::generic_err(format!(
+            "Cannot decode remote sender: {}",
+            remote_sender
+        )));
+    }
+    // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
+    let mut prefix = decode_result.unwrap().0;
+    // evm case, need to filter remote token denom since prefix is always oraib
+    if prefix.eq("oraib") {
+        prefix = match remote_token_denom.split_once("0x") {
+            Some((evm_prefix, _)) => evm_prefix.to_string(),
+            None => "".to_string(),
+        }
+    }
+    let relayer_fee = RELAYER_FEE.may_load(storage, &prefix)?;
+    // no need to deduct fee if no fee is found in the mapping
+    if relayer_fee.is_none() {
+        return Ok((amount, Uint128::from(0u64)));
+    }
+    let relayer_fee = relayer_fee.unwrap();
+    let offer_asset_info = denom_to_asset_info(querier, local_token_denom);
+    let token_price = swap_router_contract.simulate_swap(
+        querier,
+        Uint128::from(1u64).checked_mul(Uint128::from(10 * decimals as u32))?,
+        vec![SwapOperation::OraiSwap {
+            offer_asset_info,
+            // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
+            ask_asset_info: AssetInfo::NativeToken {
+                denom: "orai".to_string(),
+            },
+        }],
+    );
+    if token_price.is_err() {
+        // no fee is deducted
+        return Ok((amount, Uint128::from(0u64)));
+    }
+    let token_price = token_price.unwrap().amount;
+    let required_fee_needed = relayer_fee.checked_div(token_price).unwrap_or_default();
+    // accumulate fee so that we can collect it later after everything
+    // we share the same accumulator because it's the same data structure, and we are accumulating so it's fine
+    TOKEN_FEE_ACCUMULATOR.update(
+        storage,
+        local_token_denom,
+        |prev_fee| -> StdResult<Uint128> {
+            Ok(prev_fee
+                .unwrap_or_default()
+                .checked_add(required_fee_needed)?)
+        },
+    )?;
+    Ok((
+        amount.checked_sub(required_fee_needed).unwrap_or_default(),
+        required_fee_needed,
+    ))
 }
 
 pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
@@ -990,4 +1054,18 @@ pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
 
 pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
     format!("wasm.{}", contract_addr)
+}
+
+pub fn denom_to_asset_info(querier: &QuerierWrapper, denom: &str) -> AssetInfo {
+    if querier
+        .query_wasm_smart::<TokenInfoResponse>(denom.clone(), &Cw20QueryMsg::TokenInfo {})
+        .is_ok()
+    {
+        return AssetInfo::Token {
+            contract_addr: Addr::unchecked(denom),
+        };
+    }
+    AssetInfo::NativeToken {
+        denom: denom.to_string(),
+    }
 }

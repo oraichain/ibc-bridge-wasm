@@ -3,7 +3,7 @@ use cosmwasm_std::{Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
-use crate::state::{ChannelInfo, MappingMetadata, Ratio, TokenFee};
+use crate::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
 use cw20_ics20_msg::amount::Amount;
 
 #[cw_serde]
@@ -55,6 +55,7 @@ pub enum ExecuteMsg {
         fee_denom: Option<String>,
         swap_router_contract: Option<String>,
         token_fee: Option<Vec<TokenFee>>,
+        relayer_fee: Option<Vec<RelayerFee>>,
         fee_receiver: Option<String>,
     },
 }

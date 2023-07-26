@@ -20,9 +20,8 @@ mod test {
 
     use crate::error::ContractError;
     use crate::state::{
-        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData, Ratio,
-        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
-        TOKEN_FEE_ACCUMULATOR,
+        get_key_ics20_ibc_denom, increase_channel_balance, Ratio, SingleStepReplyArgs,
+        SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -339,12 +338,17 @@ mod test {
         amount: u128,
         denom: &str,
         receiver: &str,
+        sender: Option<&str>,
     ) -> IbcPacket {
         let data = Ics20Packet {
             // this is returning a foreign native token, thus denom is <denom>, eg: uatom
             denom: denom.to_string(),
             amount: amount.into(),
-            sender: "remote-sender".to_string(),
+            sender: if sender.is_none() {
+                "remote-sender".to_string()
+            } else {
+                sender.unwrap().to_string()
+            },
             receiver: receiver.to_string(),
             memo: None,
         };
@@ -437,8 +441,13 @@ mod test {
         );
 
         // prepare some mock packets
-        let recv_packet =
-            mock_receive_packet_remote_to_local(send_channel, 876543210, cw20_denom, custom_addr);
+        let recv_packet = mock_receive_packet_remote_to_local(
+            send_channel,
+            876543210,
+            cw20_denom,
+            custom_addr,
+            None,
+        );
 
         // we can receive this denom, channel balance should increase
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
@@ -498,12 +507,13 @@ mod test {
             send_amount.u128(),
             denom,
             custom_addr,
+            Some("orai1cdhkt9ps47hwn9sqren70uw9cyrfka9fpauuks"),
         );
 
         // we can receive this denom, channel balance should increase
         let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
-        println!("res: {:?}", res.messages);
+        println!("res: {:?}", res);
         // TODO: fix test cases. Possibly because we are adding two add_submessages?
         assert_eq!(res.messages.len(), 2); // 2 messages because we also have deduct fee msg
         match res.messages[0].msg.clone() {
@@ -1076,7 +1086,7 @@ mod test {
         let token_fee_denom = "foo0x";
         // should return amount because we have not set relayer fee yet
         assert_eq!(
-            deduct_token_fee(storage, "foo", amount, "foo").unwrap(),
+            deduct_token_fee(storage, "foo", amount, "foo").unwrap().0,
             amount.clone()
         );
         TOKEN_FEE
@@ -1090,7 +1100,9 @@ mod test {
             )
             .unwrap();
         assert_eq!(
-            deduct_token_fee(storage, token_fee_denom, amount, "foo").unwrap(),
+            deduct_token_fee(storage, token_fee_denom, amount, "foo")
+                .unwrap()
+                .0,
             Uint128::from(990u64)
         );
         assert_eq!(

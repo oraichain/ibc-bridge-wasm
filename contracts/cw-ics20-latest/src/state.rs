@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Decimal, IbcEndpoint, StdResult, Storage, Uint128};
+use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use oraiswap::{asset::AssetInfo, router::RouterController};
@@ -34,11 +34,13 @@ pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
 pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 
 pub const TOKEN_FEE: Map<&str, Ratio> = Map::new("token_fee");
-pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
 
 // relayer fee. This fee depends on the network type, not token type
-pub const RELAYER_FEE: Map<&str, Decimal> = Map::new("relayer_fee");
-pub const RELAYER_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("relayer_fee_accumulator");
+// decimals of relayer fee should always be 10^6 because we use ORAI as relayer fee
+pub const RELAYER_FEE: Map<&str, Uint128> = Map::new("relayer_fee");
+
+// shared accumulator fee for token & relayer
+pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
 
 // MappingMetadataIndexex structs keeps a list of indexers
 pub struct MappingMetadataIndexex<'a> {
@@ -101,6 +103,12 @@ pub struct AllowInfo {
 pub struct TokenFee {
     pub token_denom: String,
     pub ratio: Ratio,
+}
+
+#[cw_serde]
+pub struct RelayerFee {
+    pub prefix: String,
+    pub fee: Uint128,
 }
 
 #[cw_serde]

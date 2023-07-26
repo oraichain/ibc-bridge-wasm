@@ -21,8 +21,9 @@ use crate::msg::{
     MigrateMsg, PairQuery, PortResponse, QueryMsg, TransferBackMsg, UpdatePairMsg,
 };
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, AllowInfo, Config, MappingMetadata, TokenFee, ADMIN,
-    ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, TOKEN_FEE,
+    get_key_ics20_ibc_denom, ics20_denoms, AllowInfo, Config, MappingMetadata, RelayerFee,
+    TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
+    TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -90,6 +91,7 @@ pub fn execute(
             admin,
             token_fee,
             fee_receiver,
+            relayer_fee,
         } => update_config(
             deps,
             info,
@@ -100,6 +102,7 @@ pub fn execute(
             admin,
             token_fee,
             fee_receiver,
+            relayer_fee,
         ),
     }
 }
@@ -114,11 +117,17 @@ pub fn update_config(
     admin: Option<String>,
     token_fee: Option<Vec<TokenFee>>,
     fee_receiver: Option<String>,
+    relayer_fee: Option<Vec<RelayerFee>>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
     if let Some(token_fee) = token_fee {
         for fee in token_fee {
             TOKEN_FEE.save(deps.storage, &fee.token_denom, &fee.ratio)?;
+        }
+    }
+    if let Some(relayer_fee) = relayer_fee {
+        for fee in relayer_fee {
+            RELAYER_FEE.save(deps.storage, &fee.prefix, &fee.fee)?;
         }
     }
     CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
@@ -258,13 +267,7 @@ pub fn execute_transfer_back_to_remote_chain(
     if amount.is_empty() {
         return Err(ContractError::NoFunds {});
     }
-
-    let new_deducted_amount = process_deduct_fee(
-        deps.storage,
-        &msg.remote_denom,
-        amount.amount(),
-        &amount.denom(),
-    )?;
+    let config = CONFIG.load(deps.storage)?;
 
     // should be in form port/channel/denom
     let mappings = get_mappings_from_asset_info(
@@ -299,6 +302,18 @@ pub fn execute_transfer_back_to_remote_chain(
         })
         .ok_or(ContractError::MappingPairNotFound {})?;
 
+    // if found mapping, then deduct fee based on mapping
+    let new_deducted_amount = process_deduct_fee(
+        deps.storage,
+        &deps.querier,
+        &msg.remote_address,
+        &msg.remote_denom,
+        amount.amount(),
+        mapping.pair_mapping.asset_info_decimals,
+        &amount.denom(),
+        &config.swap_router_contract,
+    )?;
+
     let ibc_denom = mapping.key;
     // ensure the requested channel is registered
     if !CHANNEL_INFO.has(deps.storage, &msg.local_channel_id) {
@@ -306,7 +321,6 @@ pub fn execute_transfer_back_to_remote_chain(
             id: msg.local_channel_id,
         });
     }
-    let config = CONFIG.load(deps.storage)?;
 
     // delta from user is in seconds
     let timeout_delta = match msg.timeout {
@@ -1169,6 +1183,7 @@ mod test {
     fn proper_checks_on_execute_native_transfer_back_to_remote() {
         // arrange
         let remote_channel = "channel-5";
+        let remote_address = "cosmos1603j3e4juddh7cuhfquxspl0p0nsun046us7n0";
         let custom_addr = "custom-addr";
         let original_sender = "original_sender";
         let denom = "uatom0x";
@@ -1209,7 +1224,7 @@ mod test {
         // execute
         let mut transfer = TransferBackMsg {
             local_channel_id: local_channel.to_string(),
-            remote_address: "foreign-address".to_string(),
+            remote_address: remote_address.to_string(),
             remote_denom: denom.to_string(),
             timeout: Some(DEFAULT_TIMEOUT),
             memo: None,
@@ -1275,7 +1290,7 @@ mod test {
                     get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
                 );
                 assert_eq!(msg.sender.as_str(), original_sender);
-                assert_eq!(msg.receiver.as_str(), "foreign-address");
+                assert_eq!(msg.receiver.as_str(), remote_address);
                 // assert_eq!(msg.memo, None);
             }
             _ => panic!("Unexpected return message: {:?}", res.messages[0]),
@@ -1291,7 +1306,7 @@ mod test {
                     msg,
                     to_binary(&Cw20ExecuteMsg::Transfer {
                         recipient: "gov".to_string(),
-                        amount: fee_amount.clone()
+                        amount: fee_amount.clone().checked_mul(Uint128::from(2u64)).unwrap() // mul with 2 because deduct when receive token then transfer back
                     })
                     .unwrap()
                 );
@@ -1381,6 +1396,10 @@ mod test {
                     },
                 },
             ]),
+            relayer_fee: Some(vec![RelayerFee {
+                prefix: "foo".to_string(),
+                fee: Uint128::from(1000000u64),
+            }]),
             fee_receiver: None,
         };
         // unauthorized case
@@ -1421,7 +1440,11 @@ mod test {
                 .unwrap()
                 .denominator,
             5
-        )
+        );
+        assert_eq!(
+            RELAYER_FEE.load(deps.as_ref().storage, "foo").unwrap(),
+            Uint128::from(1000000u64),
+        );
     }
 
     #[test]
