@@ -6,10 +6,11 @@ mod test {
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, deduct_fee, deduct_token_fee,
-        handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
-        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, send_amount, Ics20Ack,
-        Ics20Packet, REFUND_FAILURE_ID,
+        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, deduct_fee, deduct_relayer_fee,
+        deduct_token_fee, handle_follow_up_failure, ibc_packet_receive,
+        is_follow_up_msgs_only_send_amount, parse_voucher_denom,
+        parse_voucher_denom_without_sanity_checks, send_amount, Ics20Ack, Ics20Packet,
+        REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -21,7 +22,7 @@ mod test {
     use crate::error::ContractError;
     use crate::state::{
         get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData, Ratio,
-        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
         TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
@@ -1141,6 +1142,94 @@ mod test {
         );
         assert_eq!(
             TOKEN_FEE_ACCUMULATOR.load(storage, "foo").unwrap(),
+            Uint128::from(10u64)
+        );
+    }
+
+    #[test]
+    fn test_deduct_relayer_fee() {
+        let mut deps = mock_dependencies();
+        let amount = Uint128::from(1000u64);
+        let storage = deps.as_mut().storage;
+        let token_fee_denom = "cosmos";
+        let remote_address = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n";
+        let token_price = Uint128::from(10u64);
+        // token price empty case. Should return zero fee
+        let result = deduct_relayer_fee(
+            storage,
+            remote_address,
+            token_fee_denom,
+            amount,
+            "local_token_denom",
+            Uint128::from(0u64),
+        )
+        .unwrap();
+        assert_eq!(result.1, Uint128::from(0u64));
+
+        // remote address is wrong (dont follow bech32 form)
+        assert_eq!(
+            deduct_relayer_fee(
+                storage,
+                "foobar",
+                token_fee_denom,
+                amount,
+                "local_token_denom",
+                token_price,
+            )
+            .unwrap_err(),
+            StdError::generic_err("Cannot decode remote sender: foobar")
+        );
+
+        // no relayer fee case
+        assert_eq!(
+            deduct_relayer_fee(
+                storage,
+                remote_address,
+                token_fee_denom,
+                amount,
+                "local_token_denom",
+                token_price,
+            )
+            .unwrap()
+            .1,
+            Uint128::from(0u64)
+        );
+
+        // oraib prefix case.
+        RELAYER_FEE
+            .save(storage, token_fee_denom, &Uint128::from(100u64))
+            .unwrap();
+
+        RELAYER_FEE
+            .save(storage, "foo", &Uint128::from(1000u64))
+            .unwrap();
+
+        assert_eq!(
+            deduct_relayer_fee(
+                storage,
+                "oraib1603j3e4juddh7cuhfquxspl0p0nsun047wz3rl",
+                "foo0x",
+                amount,
+                "local_token_denom",
+                token_price,
+            )
+            .unwrap()
+            .1,
+            Uint128::from(100u64)
+        );
+
+        // normal case with remote address
+        assert_eq!(
+            deduct_relayer_fee(
+                storage,
+                remote_address,
+                token_fee_denom,
+                amount,
+                "local_token_denom",
+                token_price,
+            )
+            .unwrap()
+            .1,
             Uint128::from(10u64)
         );
     }

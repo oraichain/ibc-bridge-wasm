@@ -711,15 +711,29 @@ pub fn process_deduct_fee(
     swap_router_contract: &RouterController,
 ) -> StdResult<Uint128> {
     let (_, token_fee) = deduct_token_fee(storage, remote_token_denom, amount, local_token_denom)?;
+    // simulate for relayer fee
+    let offer_asset_info = denom_to_asset_info(querier, local_token_denom);
+    let token_price = swap_router_contract
+        .simulate_swap(
+            querier,
+            Uint128::from(1u64).checked_mul(Uint128::from(10 * decimals as u32))?,
+            vec![SwapOperation::OraiSwap {
+                offer_asset_info,
+                // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
+                ask_asset_info: AssetInfo::NativeToken {
+                    denom: "orai".to_string(),
+                },
+            }],
+        )
+        .map(|data| data.amount)
+        .unwrap_or_default();
     let (_, relayer_fee) = deduct_relayer_fee(
         storage,
-        querier,
         remote_sender,
         remote_token_denom,
         amount,
-        decimals,
         local_token_denom,
-        &swap_router_contract,
+        token_price,
     )?;
     let new_amount = amount
         .checked_sub(token_fee)
@@ -756,19 +770,21 @@ pub fn deduct_token_fee(
 
 pub fn deduct_relayer_fee(
     storage: &mut dyn Storage,
-    querier: &QuerierWrapper,
-    remote_sender: &str,
+    remote_address: &str,
     remote_token_denom: &str,
-    amount: Uint128, // local amount
-    decimals: u8,
+    amount: Uint128,         // local amount
     local_token_denom: &str, // local denom
-    swap_router_contract: &RouterController,
+    token_price: Uint128,
 ) -> StdResult<(Uint128, Uint128)> {
-    let decode_result = bech32::decode(remote_sender);
+    if token_price.is_zero() {
+        return Ok((amount, Uint128::from(0u64)));
+    }
+
+    let decode_result = bech32::decode(remote_address);
     if decode_result.is_err() {
         return Err(StdError::generic_err(format!(
             "Cannot decode remote sender: {}",
-            remote_sender
+            remote_address
         )));
     }
     // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
@@ -786,23 +802,6 @@ pub fn deduct_relayer_fee(
         return Ok((amount, Uint128::from(0u64)));
     }
     let relayer_fee = relayer_fee.unwrap();
-    let offer_asset_info = denom_to_asset_info(querier, local_token_denom);
-    let token_price = swap_router_contract.simulate_swap(
-        querier,
-        Uint128::from(1u64).checked_mul(Uint128::from(10 * decimals as u32))?,
-        vec![SwapOperation::OraiSwap {
-            offer_asset_info,
-            // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
-            ask_asset_info: AssetInfo::NativeToken {
-                denom: "orai".to_string(),
-            },
-        }],
-    );
-    if token_price.is_err() {
-        // no fee is deducted
-        return Ok((amount, Uint128::from(0u64)));
-    }
-    let token_price = token_price.unwrap().amount;
     let required_fee_needed = relayer_fee.checked_div(token_price).unwrap_or_default();
     // accumulate fee so that we can collect it later after everything
     // we share the same accumulator because it's the same data structure, and we are accumulating so it's fine

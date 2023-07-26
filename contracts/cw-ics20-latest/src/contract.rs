@@ -1315,7 +1315,7 @@ mod test {
                     msg,
                     to_binary(&Cw20ExecuteMsg::Transfer {
                         recipient: "gov".to_string(),
-                        amount: fee_amount.clone().checked_mul(Uint128::from(2u64)).unwrap() // mul with 2 because deduct when receive token then transfer back
+                        amount: fee_amount.clone()
                     })
                     .unwrap()
                 );
