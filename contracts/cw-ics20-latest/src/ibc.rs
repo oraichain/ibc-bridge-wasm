@@ -482,7 +482,7 @@ pub fn get_follow_up_msgs(
         .is_ok()
     {
         AssetInfo::Token {
-            contract_addr: Addr::unchecked(destination.destination_denom.clone()),
+            contract_addr: api.addr_validate(&destination.destination_denom)?,
         }
     } else {
         AssetInfo::NativeToken {
