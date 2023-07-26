@@ -20,8 +20,9 @@ mod test {
 
     use crate::error::ContractError;
     use crate::state::{
-        get_key_ics20_ibc_denom, increase_channel_balance, Ratio, SingleStepReplyArgs,
-        SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData, Ratio,
+        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+        TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -971,6 +972,7 @@ mod test {
     #[test]
     fn test_handle_follow_up_failure() {
         let local_channel_id = "channel-0";
+        let mut deps = setup(&[local_channel_id], &[]);
         let native_denom = "cosmos";
         let refund_asset_info = AssetInfo::NativeToken {
             denom: native_denom.to_string(),
@@ -978,15 +980,19 @@ mod test {
         let amount = Uint128::from(100u128);
         let receiver = "receiver";
         let err = "ack_failed";
-        let single_step_reply_args = SingleStepReplyArgs {
+        let mut single_step_reply_args = SingleStepReplyArgs {
             channel: local_channel_id.to_string(),
             refund_asset_info: refund_asset_info.clone(),
             ibc_data: None,
             local_amount: amount,
             receiver: receiver.to_string(),
         };
-        let result =
-            handle_follow_up_failure(single_step_reply_args.clone(), err.to_string()).unwrap();
+        let result = handle_follow_up_failure(
+            deps.as_mut().storage,
+            single_step_reply_args.clone(),
+            err.to_string(),
+        )
+        .unwrap();
         assert_eq!(
             result,
             Response::new()
@@ -1008,6 +1014,34 @@ mod test {
                     attr("attempt_refund_amount", single_step_reply_args.local_amount),
                 ])
         );
+        let ibc_denom = "ibc_denom";
+        let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
+        single_step_reply_args.ibc_data = Some(IbcSingleStepData {
+            ibc_denom: ibc_denom.to_string(),
+            remote_amount: remote_amount.clone(),
+        });
+        // if has ibc denom then it's evm based, need to undo reducing balance
+        CHANNEL_REVERSE_STATE
+            .save(
+                deps.as_mut().storage,
+                (local_channel_id, ibc_denom),
+                &ChannelState {
+                    outstanding: Uint128::from(0u128),
+                    total_sent: Uint128::from(100u128),
+                },
+            )
+            .unwrap();
+        handle_follow_up_failure(
+            deps.as_mut().storage,
+            single_step_reply_args.clone(),
+            err.to_string(),
+        )
+        .unwrap();
+        let channel_state = CHANNEL_REVERSE_STATE
+            .load(deps.as_mut().storage, (local_channel_id, ibc_denom))
+            .unwrap();
+        // should undo reduce channel state
+        assert_eq!(channel_state.outstanding, remote_amount)
     }
 
     #[test]

@@ -21,9 +21,9 @@ use crate::msg::{
     MigrateMsg, PairQuery, PortResponse, QueryMsg, TransferBackMsg, UpdatePairMsg,
 };
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, AllowInfo, Config, MappingMetadata, RelayerFee,
-    TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
-    TOKEN_FEE,
+    get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
+    MappingMetadata, RelayerFee, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE,
+    CONFIG, RELAYER_FEE, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -348,13 +348,13 @@ pub fn execute_transfer_back_to_remote_chain(
 
     // now this is processed in ack
     // // because we are transferring back, we reduce the channel's balance
-    // reduce_channel_balance(
-    //     deps.storage,
-    //     &msg.local_channel_id,
-    //     &ibc_denom,
-    //     amount_remote,
-    //     false,
-    // )?;
+    reduce_channel_balance(
+        deps.storage,
+        &msg.local_channel_id,
+        &ibc_denom,
+        amount_remote,
+        false,
+    )?;
 
     // prepare ibc message
     let msg = IbcMsg::SendPacket {
@@ -697,7 +697,7 @@ mod test {
 
     use super::*;
     use crate::ibc::ibc_packet_receive;
-    use crate::state::{reduce_channel_balance, Ratio};
+    use crate::state::{Ratio, TOKEN_FEE_ACCUMULATOR};
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info};
@@ -1230,23 +1230,32 @@ mod test {
             memo: None,
         };
 
-        // let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-        //     sender: original_sender.to_string(),
-        //     amount: Uint128::from(amount),
-        //     msg: to_binary(&transfer).unwrap(),
-        // });
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: original_sender.to_string(),
+            amount: Uint128::from(amount),
+            msg: to_binary(&transfer).unwrap(),
+        });
 
-        // // insufficient funds case because we need to receive from remote chain first
+        // insufficient funds case because we need to receive from remote chain first
         let info = mock_info(cw20_raw_denom, &[]);
-        // let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone());
-        // println!("res: {:?}", res);
-        // assert_eq!(
-        //     res.unwrap_err(),
-        //     ContractError::NoSuchChannelState {
-        //         id: local_channel.to_string(),
-        //         denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
-        //     }
-        // );
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone());
+        println!("res: {:?}", res);
+        assert_eq!(
+            res.unwrap_err(),
+            ContractError::NoSuchChannelState {
+                id: local_channel.to_string(),
+                denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
+            }
+        );
+
+        // we need to reset fee accumulator because when execute returns error, the test state is still applied
+        TOKEN_FEE_ACCUMULATOR
+            .save(
+                deps.as_mut().storage,
+                "cw20:token-addr",
+                &Uint128::from(0u64),
+            )
+            .unwrap();
 
         // prepare some mock packets
         let recv_packet =
@@ -1313,16 +1322,6 @@ mod test {
             }
             _ => panic!("Unexpected return message: {:?}", res.messages[0]),
         }
-
-        // since we reduce channel balance afterwards => need to manually reduce balance in test
-        reduce_channel_balance(
-            deps.as_mut().storage,
-            local_channel.into(),
-            &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom),
-            Uint128::from(amount).checked_sub(fee_amount).unwrap(),
-            false,
-        )
-        .unwrap();
 
         // check new channel state after reducing balance
         let chan = query_channel(deps.as_ref(), local_channel.into(), None).unwrap();

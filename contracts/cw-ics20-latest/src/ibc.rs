@@ -16,9 +16,9 @@ use oraiswap::router::{RouterController, SwapOperation};
 use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    ChannelInfo, IbcSingleStepData, MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs,
-    ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
-    TOKEN_FEE_ACCUMULATOR,
+    undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData, MappingMetadata, Ratio, ReplyArgs,
+    SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, REPLY_ARGS,
+    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
@@ -99,24 +99,11 @@ pub const ACK_FAILURE_ID: u64 = 64023;
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
     match reply.id {
         FOLLOW_UP_ID => match reply.result {
-            SubMsgResult::Ok(_) => {
-                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
-                if let Some(ibc_data) = reply_args.ibc_data {
-                    // only reduce balance when everything is done and successful. Not reduce optimistically
-                    reduce_channel_balance(
-                        deps.storage,
-                        &reply_args.channel,
-                        &ibc_data.ibc_denom,
-                        ibc_data.remote_amount,
-                        false,
-                    )?;
-                }
-                Ok(Response::new())
-            }
+            SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
                 let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
                 // only refund, not undo reduce balance
-                handle_follow_up_failure(reply_args, err)
+                handle_follow_up_failure(deps.storage, reply_args, err)
             }
         },
         ACK_FAILURE_ID => match reply.result {
@@ -388,7 +375,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     )?;
     let submsgs: Vec<SubMsg> = submsgs
         .into_iter()
-        .map(|msg| SubMsg::reply_always(msg, FOLLOW_UP_ID))
+        .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_ID))
         .collect();
 
     let transfer_fee_to_admin =
@@ -615,15 +602,15 @@ pub fn build_ibc_msg(
             &remote_address,
             Some(destination.receiver),
         );
-        // // because we are transferring back, we reduce the channel's balance
-        // reduce_channel_balance(
-        //     storage,
-        //     &local_channel_id.clone(),
-        //     &mapping.0.clone(),
-        //     remote_amount,
-        //     false,
-        // )
-        // .map_err(|err| StdError::generic_err(err.to_string()))?;
+        // because we are transferring back, we reduce the channel's balance
+        reduce_channel_balance(
+            storage,
+            &local_channel_id.clone(),
+            &mapping.0.clone(),
+            remote_amount,
+            false,
+        )
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
         reply_args.channel = local_channel_id.to_string();
         reply_args.ibc_data = Some(IbcSingleStepData {
             ibc_denom: mapping.0,
@@ -655,25 +642,26 @@ pub fn build_ibc_msg(
 }
 
 pub fn handle_follow_up_failure(
+    storage: &mut dyn Storage,
     reply_args: SingleStepReplyArgs,
     err: String,
 ) -> Result<Response, ContractError> {
     // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
     let mut response: Response = Response::new();
-    // if let Some(ibc_data) = reply_args.ibc_data {
-    //     undo_reduce_channel_balance(
-    //         storage,
-    //         &reply_args.channel,
-    //         &ibc_data.ibc_denom,
-    //         ibc_data.remote_amount,
-    //         false,
-    //     )?;
-    //     response = response.add_attributes(vec![
-    //         attr("undo_reduce_channel", reply_args.channel),
-    //         attr("undo_reduce_channel_ibc_denom", ibc_data.ibc_denom),
-    //         attr("undo_reduce_channel_balance", ibc_data.remote_amount),
-    //     ]);
-    // }
+    if let Some(ibc_data) = reply_args.ibc_data {
+        undo_reduce_channel_balance(
+            storage,
+            &reply_args.channel,
+            &ibc_data.ibc_denom,
+            ibc_data.remote_amount,
+            false,
+        )?;
+        response = response.add_attributes(vec![
+            attr("undo_reduce_channel", reply_args.channel),
+            attr("undo_reduce_channel_ibc_denom", ibc_data.ibc_denom),
+            attr("undo_reduce_channel_balance", ibc_data.remote_amount),
+        ]);
+    }
     let refund_amount = Amount::from_parts(
         parse_asset_info_denom(reply_args.refund_asset_info.clone()),
         reply_args.local_amount,
@@ -909,17 +897,8 @@ pub fn ibc_packet_timeout(
 }
 
 // update the balance stored on this (channel, denom) index
-fn on_packet_success(deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicResponse, ContractError> {
+fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicResponse, ContractError> {
     let msg: Ics20Packet = from_binary(&packet.data)?;
-
-    // if packet success it means that we transfer back to remote chain successfully. We now should reduce the balance
-    reduce_channel_balance(
-        deps.storage,
-        packet.src.channel_id.as_str(),
-        &msg.denom,
-        msg.amount,
-        false,
-    )?;
 
     // similar event messages like ibctransfer module
     let attributes = vec![
@@ -947,44 +926,44 @@ fn on_packet_failure(
     let msg: Ics20Packet = from_binary(&packet.data)?;
 
     // in case that the denom is not in the mapping list, meaning that it is not transferred back, but transfer originally from this local chain
-    // if ics20_denoms().may_load(deps.storage, &msg.denom)?.is_none() {
-    //     // undo the balance update on failure (as we pre-emptively added it on send)
-    //     reduce_channel_balance(
-    //         deps.storage,
-    //         &packet.src.channel_id,
-    //         &msg.denom,
-    //         msg.amount,
-    //         true,
-    //     )?;
+    if ics20_denoms().may_load(deps.storage, &msg.denom)?.is_none() {
+        // // undo the balance update on failure (as we pre-emptively added it on send)
+        // reduce_channel_balance(
+        //     deps.storage,
+        //     &packet.src.channel_id,
+        //     &msg.denom,
+        //     msg.amount,
+        //     true,
+        // )?;
 
-    //     let to_send = Amount::from_parts(msg.denom.clone(), msg.amount);
-    //     let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-    //     let send = send_amount(to_send, msg.sender.clone(), None);
-    //     let mut submsg = SubMsg::reply_on_error(send, ACK_FAILURE_ID);
-    //     submsg.gas_limit = gas_limit;
+        // let to_send = Amount::from_parts(msg.denom.clone(), msg.amount);
+        // let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
+        // let send = send_amount(to_send, msg.sender.clone(), None);
+        // let mut submsg = SubMsg::reply_on_error(send, ACK_FAILURE_ID);
+        // submsg.gas_limit = gas_limit;
 
-    //     // similar event messages like ibctransfer module
-    //     let res = IbcBasicResponse::new()
-    //         .add_submessage(submsg)
-    //         .add_attribute("action", "acknowledge")
-    //         .add_attribute("sender", msg.sender)
-    //         .add_attribute("receiver", msg.receiver)
-    //         .add_attribute("denom", msg.denom)
-    //         .add_attribute("amount", msg.amount.to_string())
-    //         .add_attribute("success", "false")
-    //         .add_attribute("error", err);
+        // // similar event messages like ibctransfer module
+        // let res = IbcBasicResponse::new()
+        //     .add_submessage(submsg)
+        //     .add_attribute("action", "acknowledge")
+        //     .add_attribute("sender", msg.sender)
+        //     .add_attribute("receiver", msg.receiver)
+        //     .add_attribute("denom", msg.denom)
+        //     .add_attribute("amount", msg.amount.to_string())
+        //     .add_attribute("success", "false")
+        //     .add_attribute("error", err);
 
-    //     return Ok(res);
-    // }
+        return Ok(IbcBasicResponse::new());
+    }
 
-    // // since we reduce the channel's balance optimistically when transferring back, we undo reduce it again when receiving failed ack
-    // undo_reduce_channel_balance(
-    //     deps.storage,
-    //     &packet.src.channel_id,
-    //     &msg.denom,
-    //     msg.amount,
-    //     false,
-    // )?;
+    // since we reduce the channel's balance optimistically when transferring back, we undo reduce it again when receiving failed ack
+    undo_reduce_channel_balance(
+        deps.storage,
+        &packet.src.channel_id,
+        &msg.denom,
+        msg.amount,
+        false,
+    )?;
 
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
     let pair_mapping = ics20_denoms().load(deps.storage, &msg.denom)?;
