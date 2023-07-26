@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcMsg, IbcQuery,
-    MessageInfo, Order, PortIdResponse, Response, StdResult,
+    MessageInfo, Order, PortIdResponse, Response, StdResult, Storage,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -21,9 +21,8 @@ use crate::msg::{
     MigrateMsg, PairQuery, PortResponse, QueryMsg, TransferBackMsg, UpdatePairMsg,
 };
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
-    MappingMetadata, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG,
-    TOKEN_FEE,
+    get_key_ics20_ibc_denom, ics20_denoms, AllowInfo, Config, MappingMetadata, TokenFee, ADMIN,
+    ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -269,7 +268,7 @@ pub fn execute_transfer_back_to_remote_chain(
 
     // should be in form port/channel/denom
     let mappings = get_mappings_from_asset_info(
-        deps.as_ref(),
+        deps.as_ref().storage,
         match amount.clone() {
             Amount::Native(coin) => AssetInfo::NativeToken { denom: coin.denom },
             Amount::Cw20(cw20_coin) => AssetInfo::Token {
@@ -333,14 +332,15 @@ pub fn execute_transfer_back_to_remote_chain(
     );
     packet.validate()?;
 
-    // because we are transferring back, we reduce the channel's balance
-    reduce_channel_balance(
-        deps.storage,
-        &msg.local_channel_id,
-        &ibc_denom,
-        amount_remote,
-        false,
-    )?;
+    // now this is processed in ack
+    // // because we are transferring back, we reduce the channel's balance
+    // reduce_channel_balance(
+    //     deps.storage,
+    //     &msg.local_channel_id,
+    //     &ibc_denom,
+    //     amount_remote,
+    //     false,
+    // )?;
 
     // prepare ibc message
     let msg = IbcMsg::SendPacket {
@@ -504,7 +504,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         } => to_binary(&list_cw20_mapping(deps, start_after, limit, order)?),
         QueryMsg::PairMapping { key } => to_binary(&get_mapping_from_key(deps, key)?),
         QueryMsg::PairMappingsFromAssetInfo { asset_info } => {
-            to_binary(&get_mappings_from_asset_info(deps, asset_info)?)
+            to_binary(&get_mappings_from_asset_info(deps.storage, asset_info)?)
         }
         QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
         QueryMsg::GetTransferTokenFee { remote_token_denom } => {
@@ -642,12 +642,15 @@ fn get_mapping_from_key(deps: Deps, ibc_denom: String) -> StdResult<PairQuery> {
     })
 }
 
-fn get_mappings_from_asset_info(deps: Deps, asset_info: AssetInfo) -> StdResult<Vec<PairQuery>> {
+fn get_mappings_from_asset_info(
+    storage: &dyn Storage,
+    asset_info: AssetInfo,
+) -> StdResult<Vec<PairQuery>> {
     let pair_mapping_result: StdResult<Vec<(String, MappingMetadata)>> = ics20_denoms()
         .idx
         .asset_info
         .prefix(asset_info.to_string())
-        .range(deps.storage, None, None, Order::Ascending)
+        .range(storage, None, None, Order::Ascending)
         .collect();
     if pair_mapping_result.is_err() {
         return Err(pair_mapping_result.unwrap_err());
@@ -680,7 +683,7 @@ mod test {
 
     use super::*;
     use crate::ibc::ibc_packet_receive;
-    use crate::state::Ratio;
+    use crate::state::{reduce_channel_balance, Ratio};
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info};
@@ -1212,22 +1215,23 @@ mod test {
             memo: None,
         };
 
-        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: original_sender.to_string(),
-            amount: Uint128::from(amount),
-            msg: to_binary(&transfer).unwrap(),
-        });
+        // let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+        //     sender: original_sender.to_string(),
+        //     amount: Uint128::from(amount),
+        //     msg: to_binary(&transfer).unwrap(),
+        // });
 
-        // insufficient funds case because we need to receive from remote chain first
+        // // insufficient funds case because we need to receive from remote chain first
         let info = mock_info(cw20_raw_denom, &[]);
-        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone()).unwrap_err();
-        assert_eq!(
-            res,
-            ContractError::NoSuchChannelState {
-                id: local_channel.to_string(),
-                denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
-            }
-        );
+        // let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone());
+        // println!("res: {:?}", res);
+        // assert_eq!(
+        //     res.unwrap_err(),
+        //     ContractError::NoSuchChannelState {
+        //         id: local_channel.to_string(),
+        //         denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
+        //     }
+        // );
 
         // prepare some mock packets
         let recv_packet =
@@ -1294,6 +1298,16 @@ mod test {
             }
             _ => panic!("Unexpected return message: {:?}", res.messages[0]),
         }
+
+        // since we reduce channel balance afterwards => need to manually reduce balance in test
+        reduce_channel_balance(
+            deps.as_mut().storage,
+            local_channel.into(),
+            &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom),
+            Uint128::from(amount).checked_sub(fee_amount).unwrap(),
+            false,
+        )
+        .unwrap();
 
         // check new channel state after reducing balance
         let chan = query_channel(deps.as_ref(), local_channel.into(), None).unwrap();

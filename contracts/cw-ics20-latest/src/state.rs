@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
+use cosmwasm_std::{Addr, Decimal, IbcEndpoint, StdResult, Storage, Uint128};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use oraiswap::{asset::AssetInfo, router::RouterController};
@@ -26,12 +26,19 @@ pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
 pub const CHANNEL_REVERSE_STATE: Map<(&str, &str), ChannelState> =
     Map::new("channel_reverse_state");
 
+/// Reverse channel state is used when LOCAL chain initiates ibc transfer to remote chain
+pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
+    Map::new("channel_forward_state");
+
 /// Every cw20 contract we allow to be sent is stored here, possibly with a gas_limit
 pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 
 pub const TOKEN_FEE: Map<&str, Ratio> = Map::new("token_fee");
-
 pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
+
+// relayer fee. This fee depends on the network type, not token type
+pub const RELAYER_FEE: Map<&str, Decimal> = Map::new("relayer_fee");
+pub const RELAYER_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("relayer_fee_accumulator");
 
 // MappingMetadataIndexex structs keeps a list of indexers
 pub struct MappingMetadataIndexex<'a> {
@@ -137,12 +144,12 @@ pub fn increase_channel_balance(
     channel: &str,
     denom: &str,
     amount: Uint128,
-    _forward: bool,
+    forward: bool,
 ) -> Result<(), ContractError> {
-    let state = CHANNEL_REVERSE_STATE;
-    // if forward {
-    //     state = CHANNEL_FORWARD_STATE;
-    // }
+    let mut state = CHANNEL_REVERSE_STATE;
+    if forward {
+        state = CHANNEL_FORWARD_STATE;
+    }
 
     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
@@ -158,12 +165,12 @@ pub fn reduce_channel_balance(
     channel: &str,
     denom: &str,
     amount: Uint128,
-    _forward: bool,
+    forward: bool,
 ) -> Result<(), ContractError> {
-    let state = CHANNEL_REVERSE_STATE;
-    // if forward {
-    //     state = CHANNEL_FORWARD_STATE;
-    // }
+    let mut state = CHANNEL_REVERSE_STATE;
+    if forward {
+        state = CHANNEL_FORWARD_STATE;
+    }
     state.update(
         storage,
         (channel, denom),
@@ -186,47 +193,47 @@ pub fn reduce_channel_balance(
     Ok(())
 }
 
-// this is like increase, but it only "un-subtracts" (= adds) outstanding, not total_sent
-// calling `reduce_channel_balance` and then `undo_reduce_channel_balance` should leave state unchanged.
-pub fn undo_reduce_channel_balance(
-    storage: &mut dyn Storage,
-    channel: &str,
-    denom: &str,
-    amount: Uint128,
-    _forward: bool,
-) -> Result<(), ContractError> {
-    let state = CHANNEL_REVERSE_STATE;
-    // if forward {
-    //     state = CHANNEL_FORWARD_STATE;
-    // }
-    state.update(storage, (channel, denom), |orig| -> StdResult<_> {
-        let mut state = orig.unwrap_or_default();
-        state.outstanding += amount;
-        Ok(state)
-    })?;
-    Ok(())
-}
+// // this is like increase, but it only "un-subtracts" (= adds) outstanding, not total_sent
+// // calling `reduce_channel_balance` and then `undo_reduce_channel_balance` should leave state unchanged.
+// pub fn undo_reduce_channel_balance(
+//     storage: &mut dyn Storage,
+//     channel: &str,
+//     denom: &str,
+//     amount: Uint128,
+//     forward: bool,
+// ) -> Result<(), ContractError> {
+//     let mut state = CHANNEL_REVERSE_STATE;
+//     if forward {
+//         state = CHANNEL_FORWARD_STATE;
+//     }
+//     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
+//         let mut state = orig.unwrap_or_default();
+//         state.outstanding += amount;
+//         Ok(state)
+//     })?;
+//     Ok(())
+// }
 
-// this is like decrease, but it only "un-add" (= adds) outstanding, not total_sent
-// calling `increase_channel_balance` and then `undo_increase_channel_balance` should leave state unchanged.
-pub fn undo_increase_channel_balance(
-    storage: &mut dyn Storage,
-    channel: &str,
-    denom: &str,
-    amount: Uint128,
-    _forward: bool,
-) -> Result<(), ContractError> {
-    let state = CHANNEL_REVERSE_STATE;
-    // if forward {
-    //     state = CHANNEL_FORWARD_STATE;
-    // }
-    state.update(storage, (channel, denom), |orig| -> StdResult<_> {
-        let mut state = orig.unwrap_or_default();
-        state.outstanding -= amount;
-        Ok(state)
-    })?;
-    Ok(())
-}
+// // this is like decrease, but it only "un-add" (= adds) outstanding, not total_sent
+// // calling `increase_channel_balance` and then `undo_increase_channel_balance` should leave state unchanged.
+// pub fn undo_increase_channel_balance(
+//     storage: &mut dyn Storage,
+//     channel: &str,
+//     denom: &str,
+//     amount: Uint128,
+//     forward: bool,
+// ) -> Result<(), ContractError> {
+//     let mut state = CHANNEL_REVERSE_STATE;
+//     if forward {
+//         state = CHANNEL_FORWARD_STATE;
+//     }
+//     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
+//         let mut state = orig.unwrap_or_default();
+//         state.outstanding -= amount;
+//         Ok(state)
+//     })?;
+//     Ok(())
+// }
 
 pub fn get_key_ics20_ibc_denom(port_id: &str, channel_id: &str, denom: &str) -> String {
     format!("{}/{}/{}", port_id, channel_id, denom)

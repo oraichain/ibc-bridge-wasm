@@ -6,10 +6,10 @@ mod test {
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, deduct_fee,
+        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, deduct_fee, deduct_token_fee,
         handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
-        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, process_deduct_fee,
-        send_amount, Ics20Ack, Ics20Packet, REFUND_FAILURE_ID,
+        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, send_amount, Ics20Ack,
+        Ics20Packet, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -961,7 +961,6 @@ mod test {
     #[test]
     fn test_handle_follow_up_failure() {
         let local_channel_id = "channel-0";
-        let mut deps = setup(&[local_channel_id], &[]);
         let native_denom = "cosmos";
         let refund_asset_info = AssetInfo::NativeToken {
             denom: native_denom.to_string(),
@@ -969,19 +968,15 @@ mod test {
         let amount = Uint128::from(100u128);
         let receiver = "receiver";
         let err = "ack_failed";
-        let mut single_step_reply_args = SingleStepReplyArgs {
+        let single_step_reply_args = SingleStepReplyArgs {
             channel: local_channel_id.to_string(),
             refund_asset_info: refund_asset_info.clone(),
             ibc_data: None,
             local_amount: amount,
             receiver: receiver.to_string(),
         };
-        let result = handle_follow_up_failure(
-            deps.as_mut().storage,
-            single_step_reply_args.clone(),
-            err.to_string(),
-        )
-        .unwrap();
+        let result =
+            handle_follow_up_failure(single_step_reply_args.clone(), err.to_string()).unwrap();
         assert_eq!(
             result,
             Response::new()
@@ -1003,35 +998,6 @@ mod test {
                     attr("attempt_refund_amount", single_step_reply_args.local_amount),
                 ])
         );
-
-        let ibc_denom = "ibc_denom";
-        let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
-        single_step_reply_args.ibc_data = Some(IbcSingleStepData {
-            ibc_denom: ibc_denom.to_string(),
-            remote_amount: remote_amount.clone(),
-        });
-        // if has ibc denom then it's evm based, need to undo reducing balance
-        CHANNEL_REVERSE_STATE
-            .save(
-                deps.as_mut().storage,
-                (local_channel_id, ibc_denom),
-                &ChannelState {
-                    outstanding: Uint128::from(0u128),
-                    total_sent: Uint128::from(100u128),
-                },
-            )
-            .unwrap();
-        handle_follow_up_failure(
-            deps.as_mut().storage,
-            single_step_reply_args.clone(),
-            err.to_string(),
-        )
-        .unwrap();
-        let channel_state = CHANNEL_REVERSE_STATE
-            .load(deps.as_mut().storage, (local_channel_id, ibc_denom))
-            .unwrap();
-        // should undo reduce channel state
-        assert_eq!(channel_state.outstanding, remote_amount)
     }
 
     #[test]
@@ -1103,14 +1069,14 @@ mod test {
     }
 
     #[test]
-    fn test_process_deduct_fee() {
+    fn test_deduct_token_fee() {
         let mut deps = mock_dependencies();
         let amount = Uint128::from(1000u64);
         let storage = deps.as_mut().storage;
         let token_fee_denom = "foo0x";
         // should return amount because we have not set relayer fee yet
         assert_eq!(
-            process_deduct_fee(storage, "foo", amount, "foo").unwrap(),
+            deduct_token_fee(storage, "foo", amount, "foo").unwrap(),
             amount.clone()
         );
         TOKEN_FEE
@@ -1124,7 +1090,7 @@ mod test {
             )
             .unwrap();
         assert_eq!(
-            process_deduct_fee(storage, token_fee_denom, amount, "foo").unwrap(),
+            deduct_token_fee(storage, token_fee_denom, amount, "foo").unwrap(),
             Uint128::from(990u64)
         );
         assert_eq!(
