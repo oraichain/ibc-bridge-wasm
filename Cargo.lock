@@ -377,14 +377,16 @@ dependencies = [
 
 [[package]]
 name = "cw20-ics20-msg"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e04064b936344caa428fa764b4f92859c9619cc0cfc6b3d155d26f8f0a45b13f"
+checksum = "ef63faf224f73304e73679494041bf5c31274aad4109d7ce38c1259e6e9e9551"
 dependencies = [
+ "bech32",
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw-storage-plus 1.0.1",
  "cw20",
+ "oraiswap",
  "schemars",
  "serde",
 ]

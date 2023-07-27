@@ -2,12 +2,14 @@ use std::ops::Mul;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, coin, entry_point, from_binary, to_binary, Addr, Api, BankMsg, Binary, CosmosMsg,
-    Decimal, Deps, DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
-    IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
-    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
-    Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
-    Uint128, WasmMsg,
+    attr, coin, entry_point, from_binary, to_binary, Addr, Api, Binary, CosmosMsg, Decimal, Deps,
+    DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
+    IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket, IbcPacketAckMsg,
+    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout, Order,
+    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Uint128,
+};
+use cw20_ics20_msg::helper::{
+    denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
@@ -20,7 +22,6 @@ use crate::state::{
     SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, REPLY_ARGS,
     SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
-use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, TokenInfoResponse};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
 pub const ICS20_VERSION: &str = "ics20-1";
@@ -414,7 +415,7 @@ pub fn get_follow_up_msgs(
     let destination: DestinationInfo = DestinationInfo::from_str(memo);
     if is_follow_up_msgs_only_send_amount(&memo, &destination.destination_denom) {
         return Ok((
-            vec![send_amount(to_send, receiver.to_string(), None)],
+            vec![to_send.send_amount(receiver.to_string(), None)],
             "".to_string(),
         ));
     }
@@ -447,16 +448,16 @@ pub fn get_follow_up_msgs(
         config.default_timeout,
     );
 
-    let mut ibc_error_msg = String::from("");
     // by default, the receiver is the original address sent in ics20packet
     let mut to = Some(api.addr_validate(receiver)?);
-    if let Some(ibc_msg) = ibc_msg.as_ref().ok() {
+    let ibc_error_msg = if let Some(ibc_msg) = ibc_msg.as_ref().ok() {
         cosmos_msgs.push(ibc_msg.to_owned());
         // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
         to = None;
+        String::from("")
     } else {
-        ibc_error_msg = ibc_msg.unwrap_err().to_string();
-    }
+        ibc_msg.unwrap_err().to_string()
+    };
     build_swap_msgs(
         minimum_receive,
         &config.swap_router_contract,
@@ -469,7 +470,7 @@ pub fn get_follow_up_msgs(
     // fallback case. If there's no cosmos messages then we return send amount
     if cosmos_msgs.is_empty() {
         return Ok((
-            vec![send_amount(to_send, receiver.to_string(), None)],
+            vec![to_send.send_amount(receiver.to_string(), None)],
             ibc_error_msg,
         ));
     }
@@ -574,11 +575,11 @@ pub fn build_ibc_msg(
         .prefix(receiver_asset_info.to_string())
         .range(storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
-    let (is_evm_based, destination) = destination.is_receiver_evm_based();
+    let (is_evm_based, evm_destination) = destination.is_receiver_evm_based();
     if is_evm_based {
         let mapping = pair_mappings
             .into_iter()
-            .find(|(key, _)| key.contains(&destination.destination_channel))
+            .find(|(key, _)| key.contains(&evm_destination.destination_channel))
             .ok_or(StdError::generic_err("cannot find pair mappings"))?;
         // also deduct fee here because of round trip
         // TODO: add relayer fee here?
@@ -610,7 +611,7 @@ pub fn build_ibc_msg(
             &mapping.0,
             env.contract.address.as_str(),
             remote_address,
-            Some(destination.receiver),
+            Some(evm_destination.receiver),
             local_channel_id,
             timeout.into(),
         )?;
@@ -631,9 +632,9 @@ pub fn build_ibc_msg(
     // by using ibc transfer, the contract must actually owns native ibc tokens, which is not possible if it's oraibridge tokens
     // we do not need to reduce channel balance because this transfer is not on our contract channel, but on destination channel
     let ibc_msg = IbcMsg::Transfer {
-        channel_id: destination.destination_channel,
-        to_address: destination.receiver,
-        amount: coin(amount.u128(), destination.destination_denom),
+        channel_id: destination.destination_channel.clone(),
+        to_address: destination.receiver.clone(),
+        amount: coin(amount.u128(), destination.destination_denom.clone()),
         timeout: timeout.into(),
     };
     Ok(ibc_msg.into())
@@ -665,7 +666,7 @@ pub fn handle_follow_up_failure(
         reply_args.local_amount,
     );
     // we send refund to the local receiver of the single-step tx because the funds are currently in this contract
-    let send = send_amount(refund_amount, reply_args.receiver, None);
+    let send = refund_amount.send_amount(reply_args.receiver, None);
     response = response
         .add_submessage(SubMsg::reply_on_error(send, REFUND_FAILURE_ID))
         .set_data(ack_fail(err.clone()))
@@ -778,15 +779,8 @@ pub fn deduct_relayer_fee(
         return Ok((amount, Uint128::from(0u64)));
     }
 
-    let decode_result = bech32::decode(remote_address);
-    if decode_result.is_err() {
-        return Err(StdError::generic_err(format!(
-            "Cannot decode remote sender: {}",
-            remote_address
-        )));
-    }
+    let mut prefix = get_prefix_decode_bech32(remote_address)?;
     // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
-    let mut prefix = decode_result.unwrap().0;
     // evm case, need to filter remote token denom since prefix is always oraib
     if prefix.eq("oraib") {
         prefix = convert_remote_denom_to_evm_prefix(remote_token_denom);
@@ -844,11 +838,7 @@ pub fn collect_transfer_fee_msgs(
                 if fee_info.1.is_zero() {
                     return None;
                 }
-                Some(send_amount(
-                    Amount::from_parts(fee_info.0, fee_info.1),
-                    receiver.clone(),
-                    None,
-                ))
+                Some(Amount::from_parts(fee_info.0, fee_info.1).send_amount(receiver.clone(), None))
             })
             .ok()
         })
@@ -969,7 +959,7 @@ fn on_packet_failure(
             pair_mapping.asset_info_decimals,
         )?,
     );
-    let cosmos_msg = send_amount(to_send, msg.sender.clone(), None);
+    let cosmos_msg = to_send.send_amount(msg.sender.clone(), None);
     // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
     // similar event messages like ibctransfer module
     let submsg = SubMsg::reply_on_error(cosmos_msg, ACK_FAILURE_ID);
@@ -987,60 +977,6 @@ fn on_packet_failure(
     Ok(res)
 
     // send ack fail to custom contract for refund
-}
-
-pub fn send_amount(amount: Amount, recipient: String, msg: Option<Binary>) -> CosmosMsg {
-    match amount {
-        Amount::Native(coin) => BankMsg::Send {
-            to_address: recipient,
-            amount: vec![coin],
-        }
-        .into(),
-        Amount::Cw20(coin) => {
-            let mut msg_cw20 = Cw20ExecuteMsg::Transfer {
-                recipient: recipient.clone(),
-                amount: coin.amount,
-            };
-            if let Some(msg) = msg {
-                msg_cw20 = Cw20ExecuteMsg::Send {
-                    contract: recipient,
-                    amount: coin.amount,
-                    msg,
-                };
-            }
-            WasmMsg::Execute {
-                contract_addr: coin.address,
-                msg: to_binary(&msg_cw20).unwrap(),
-                funds: vec![],
-            }
-            .into()
-        }
-    }
-}
-
-pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
-    match asset_info {
-        AssetInfo::Token { contract_addr } => format!("cw20:{}", contract_addr.to_string()),
-        AssetInfo::NativeToken { denom } => denom,
-    }
-}
-
-pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
-    format!("wasm.{}", contract_addr)
-}
-
-pub fn denom_to_asset_info(querier: &QuerierWrapper, denom: &str) -> AssetInfo {
-    if querier
-        .query_wasm_smart::<TokenInfoResponse>(denom.clone(), &Cw20QueryMsg::TokenInfo {})
-        .is_ok()
-    {
-        return AssetInfo::Token {
-            contract_addr: Addr::unchecked(denom),
-        };
-    }
-    AssetInfo::NativeToken {
-        denom: denom.to_string(),
-    }
 }
 
 pub fn build_ibc_send_packet(

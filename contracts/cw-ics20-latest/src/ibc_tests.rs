@@ -9,8 +9,8 @@ mod test {
         ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
         convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
         handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
-        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, send_amount, Ics20Ack,
-        Ics20Packet, REFUND_FAILURE_ID,
+        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, Ics20Ack, Ics20Packet,
+        REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -998,11 +998,8 @@ mod test {
             result,
             Response::new()
                 .add_submessage(SubMsg::reply_on_error(
-                    send_amount(
-                        Amount::from_parts(native_denom.to_string(), amount.clone()),
-                        single_step_reply_args.receiver.clone(),
-                        None
-                    ),
+                    Amount::from_parts(native_denom.to_string(), amount.clone())
+                        .send_amount(single_step_reply_args.receiver.clone(), None),
                     REFUND_FAILURE_ID
                 ))
                 .set_data(ack_fail(err.to_string()))

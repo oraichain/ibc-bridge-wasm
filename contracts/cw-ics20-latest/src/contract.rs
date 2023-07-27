@@ -6,14 +6,14 @@ use cosmwasm_std::{
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
+use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{
-    build_ibc_send_packet, collect_transfer_fee_msgs, parse_ibc_wasm_port_id, parse_voucher_denom,
-    process_deduct_fee,
+    build_ibc_send_packet, collect_transfer_fee_msgs, parse_voucher_denom, process_deduct_fee,
 };
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,

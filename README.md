@@ -26,3 +26,5 @@ This is really important because by using the CosmosMsg, we force the `allow_con
 If we use CosmosMsg, then the acknowledgement packet will fail entirely, and it will be retried by the relayer as long as we fix the `allow_contract`.
 
 Normally, if it is a `ibctransfer` application developed as a submodule in Cosmos SDK, then the refund part must not fail, and we can trust that it will not fail. However, the `allow_contract` can be developed by anyone, and can be replaced => cannot be trusted.
+
+# build packages
