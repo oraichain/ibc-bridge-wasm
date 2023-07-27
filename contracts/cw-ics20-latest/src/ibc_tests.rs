@@ -709,6 +709,7 @@ mod test {
         let send_channel = "channel-9";
         let receive_channel = "channel-1";
         let allowed = "foobar";
+        let pair_mapping_denom = "trx-mainnet0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C";
         let allowed_gas = 777666;
         let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
         let receiver_asset_info = AssetInfo::NativeToken {
@@ -752,6 +753,7 @@ mod test {
 
         // not evm based case, should be successful & cosmos msg is ibc transfer
         destination.destination_channel = "channel-10".to_string();
+        destination.receiver = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string();
         let result = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
@@ -768,7 +770,7 @@ mod test {
             result,
             CosmosMsg::Ibc(IbcMsg::Transfer {
                 channel_id: "channel-10".to_string(),
-                to_address: "0x1234".to_string(),
+                to_address: destination.receiver,
                 amount: coin(10u128, "atom"),
                 timeout: mock_env().block.time.plus_seconds(timeout).into()
             })
@@ -793,7 +795,7 @@ mod test {
         // add a pair mapping so we can test the happy case evm based happy case
         let update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
-            denom: "trx-mainnet".to_string(),
+            denom: pair_mapping_denom.to_string(),
             asset_info: receiver_asset_info.clone(),
             remote_decimals,
             asset_info_decimals,
@@ -806,7 +808,7 @@ mod test {
         execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
         let pair_mapping_key = format!(
             "wasm.{}/{}/{}",
-            "cosmos2contract", update.local_channel_id, "trx-mainnet"
+            "cosmos2contract", update.local_channel_id, pair_mapping_denom
         );
         increase_channel_balance(
             deps.as_mut().storage,

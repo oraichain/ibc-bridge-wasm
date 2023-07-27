@@ -6,7 +6,8 @@ use cosmwasm_std::{
     DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
     IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket, IbcPacketAckMsg,
     IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout, Order,
-    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Uint128,
+    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Timestamp,
+    Uint128,
 };
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
@@ -543,6 +544,7 @@ pub fn build_swap_msgs(
     Ok(())
 }
 
+// TODO: update unit tests for this function
 pub fn build_ibc_msg(
     storage: &mut dyn Storage,
     env: Env,
@@ -561,83 +563,145 @@ pub fn build_ibc_msg(
         ));
     }
     let timeout = env.block.time.plus_seconds(default_timeout);
-    let mut reply_args = SingleStepReplyArgs {
+    let reply_args = SingleStepReplyArgs {
         channel: destination.destination_channel.clone(),
         refund_asset_info: receiver_asset_info.clone(),
         ibc_data: None,
         receiver: local_receiver.to_string(),
         local_amount: amount,
     };
-    // use sender from ICS20Packet as receiver when transferring back
     let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
         .idx
         .asset_info
         .prefix(receiver_asset_info.to_string())
         .range(storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
+
     let (is_evm_based, evm_destination) = destination.is_receiver_evm_based();
     if is_evm_based {
         let mapping = pair_mappings
             .into_iter()
-            .find(|(key, _)| key.contains(&evm_destination.destination_channel))
+            .find(|(key, _)| {
+                // eg: 'wasm.orai195269awwnt5m6c843q6w7hp8rt0k7syfu9de4h0wz384slshuzps8y7ccm/channel-29/eth-mainnet0x4c11249814f11b9346808179Cf06e71ac328c1b5'
+                // parse to get eth-mainnet0x...
+                // then collect eth-mainnet prefix, and compare with dest channel
+                convert_remote_denom_to_evm_prefix(
+                    parse_voucher_denom_without_sanity_checks(key).unwrap_or_default(),
+                )
+                .eq(&evm_destination.destination_channel)
+            })
             .ok_or(StdError::generic_err("cannot find pair mappings"))?;
-        // also deduct fee here because of round trip
-        // TODO: add relayer fee here?
-        let (new_deducted_amount, _) = deduct_token_fee(
+        let msg = process_ibc_msg(
             storage,
-            parse_voucher_denom_without_sanity_checks(&mapping.0)?, // denom mapping in the form port/channel/denom
-            amount,
-            &parse_asset_info_denom(receiver_asset_info.clone()),
-        )?;
-        let remote_amount = convert_local_to_remote(
-            new_deducted_amount,
-            mapping.1.remote_decimals,
-            mapping.1.asset_info_decimals,
-        )?;
-
-        // because we are transferring back, we reduce the channel's balance
-        reduce_channel_balance(
-            storage,
-            &local_channel_id.clone(),
-            &mapping.0.clone(),
-            remote_amount,
-            false,
-        )
-        .map_err(|err| StdError::generic_err(err.to_string()))?;
-
-        // prepare ibc message
-        let msg = build_ibc_send_packet(
-            remote_amount,
-            &mapping.0,
-            env.contract.address.as_str(),
-            remote_address,
-            Some(evm_destination.receiver),
+            mapping,
+            receiver_asset_info,
             local_channel_id,
-            timeout.into(),
+            env.contract.address.as_str(),
+            remote_address, // use sender from ICS20Packet as receiver when transferring back because we have the actual receiver in memo for evm cases
+            Some(evm_destination.receiver),
+            amount,
+            timeout,
+            reply_args,
         )?;
-
-        reply_args.channel = local_channel_id.to_string();
-        reply_args.ibc_data = Some(IbcSingleStepData {
-            ibc_denom: mapping.0,
-            remote_amount,
-        });
-        // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on in reply
-        SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
-
         return Ok(msg.into());
     }
     // 2nd case, where destination network is not evm, but it is still supported on our channel (eg: cw20 ATOM mapped with native ATOM on Cosmos), then we call
-    // final case, where the destination token is from a remote chain that we dont have a pair mapping with.
-    // we use ibc transfer so that attackers cannot manipulate the data to send to oraibridge without reducing the channel balance
-    // by using ibc transfer, the contract must actually owns native ibc tokens, which is not possible if it's oraibridge tokens
-    // we do not need to reduce channel balance because this transfer is not on our contract channel, but on destination channel
-    let ibc_msg = IbcMsg::Transfer {
-        channel_id: destination.destination_channel.clone(),
-        to_address: destination.receiver.clone(),
-        amount: coin(amount.u128(), destination.destination_denom.clone()),
-        timeout: timeout.into(),
-    };
-    Ok(ibc_msg.into())
+    let (is_cosmos_based, cosmos_destination) = destination.is_receiver_cosmos_based();
+    if is_cosmos_based {
+        let mapping = pair_mappings.into_iter().find(|(key, _)| {
+            get_prefix_decode_bech32(
+                parse_voucher_denom_without_sanity_checks(key).unwrap_or_default(),
+            )
+            .unwrap_or_default()
+            .eq(&cosmos_destination.destination_channel)
+        });
+        if let Some(mapping) = mapping {
+            let msg = process_ibc_msg(
+                storage,
+                mapping,
+                receiver_asset_info,
+                local_channel_id,
+                env.contract.address.as_str(),
+                &cosmos_destination.receiver, // now we use dest receiver since cosmos based universal swap wont be sent to oraibridge, so the receiver is the correct receive addr
+                None, // no need memo because it is not used in the remote cosmos based chain
+                amount,
+                timeout,
+                reply_args,
+            )?;
+            return Ok(msg.into());
+        }
+
+        // final case, where the destination token is from a remote chain that we dont have a pair mapping with.
+        // we use ibc transfer so that attackers cannot manipulate the data to send to oraibridge without reducing the channel balance
+        // by using ibc transfer, the contract must actually owns native ibc tokens, which is not possible if it's oraibridge tokens
+        // we do not need to reduce channel balance because this transfer is not on our contract channel, but on destination channel
+        let ibc_msg = IbcMsg::Transfer {
+            channel_id: destination.destination_channel.clone(),
+            to_address: destination.receiver.clone(),
+            amount: coin(amount.u128(), destination.destination_denom.clone()),
+            timeout: timeout.into(),
+        };
+        return Ok(ibc_msg.into());
+    }
+    Err(StdError::generic_err(
+        "The destination info is neither evm or cosmos based",
+    ))
+}
+
+// TODO: write unit tests for this function. Write unit tests for relayer fee & cosmos based universal swap in simulate js
+pub fn process_ibc_msg(
+    storage: &mut dyn Storage,
+    pair_mapping: (String, MappingMetadata),
+    receiver_asset_info: AssetInfo,
+    local_channel_id: &str,
+    ibc_msg_sender: &str,
+    ibc_msg_receiver: &str,
+    memo: Option<String>,
+    amount: Uint128,
+    timeout: Timestamp,
+    mut reply_args: SingleStepReplyArgs,
+) -> StdResult<IbcMsg> {
+    let (new_deducted_amount, _) = deduct_token_fee(
+        storage,
+        parse_voucher_denom_without_sanity_checks(&pair_mapping.0)?, // denom mapping in the form port/channel/denom
+        amount,
+        &parse_asset_info_denom(receiver_asset_info.clone()),
+    )?;
+    let remote_amount = convert_local_to_remote(
+        new_deducted_amount,
+        pair_mapping.1.remote_decimals,
+        pair_mapping.1.asset_info_decimals,
+    )?;
+
+    // because we are transferring back, we reduce the channel's balance
+    reduce_channel_balance(
+        storage,
+        local_channel_id.clone(),
+        &pair_mapping.0.clone(),
+        remote_amount,
+        false,
+    )
+    .map_err(|err| StdError::generic_err(err.to_string()))?;
+
+    // prepare ibc message
+    let msg = build_ibc_send_packet(
+        remote_amount,
+        &pair_mapping.0,
+        ibc_msg_sender,
+        ibc_msg_receiver,
+        memo,
+        local_channel_id,
+        timeout.into(),
+    )?;
+
+    reply_args.channel = local_channel_id.to_string();
+    reply_args.ibc_data = Some(IbcSingleStepData {
+        ibc_denom: pair_mapping.0.to_string(),
+        remote_amount,
+    });
+    // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on in reply
+    SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
+    Ok(msg)
 }
 
 pub fn handle_follow_up_failure(
