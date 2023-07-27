@@ -5,9 +5,9 @@ use cosmwasm_std::{
     attr, coin, entry_point, from_binary, to_binary, Addr, Api, BankMsg, Binary, CosmosMsg,
     Decimal, Deps, DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
     IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
-    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, Order,
-    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Uint128,
-    WasmMsg,
+    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
+    Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
+    Uint128, WasmMsg,
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
@@ -594,14 +594,6 @@ pub fn build_ibc_msg(
             mapping.1.asset_info_decimals,
         )?;
 
-        // build ics20 packet
-        let packet = Ics20Packet::new(
-            remote_amount.clone(),
-            mapping.0.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
-            env.contract.address.as_str(),
-            &remote_address,
-            Some(destination.receiver),
-        );
         // because we are transferring back, we reduce the channel's balance
         reduce_channel_balance(
             storage,
@@ -611,6 +603,18 @@ pub fn build_ibc_msg(
             false,
         )
         .map_err(|err| StdError::generic_err(err.to_string()))?;
+
+        // prepare ibc message
+        let msg = build_ibc_send_packet(
+            remote_amount,
+            &mapping.0,
+            env.contract.address.as_str(),
+            remote_address,
+            Some(destination.receiver),
+            local_channel_id,
+            timeout.into(),
+        )?;
+
         reply_args.channel = local_channel_id.to_string();
         reply_args.ibc_data = Some(IbcSingleStepData {
             ibc_denom: mapping.0,
@@ -619,12 +623,6 @@ pub fn build_ibc_msg(
         // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on in reply
         SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
 
-        // prepare ibc message
-        let msg = IbcMsg::SendPacket {
-            channel_id: local_channel_id.to_string(),
-            data: to_binary(&packet)?,
-            timeout: timeout.into(),
-        };
         return Ok(msg.into());
     }
     // 2nd case, where destination network is not evm, but it is still supported on our channel (eg: cw20 ATOM mapped with native ATOM on Cosmos), then we call
@@ -1043,4 +1041,33 @@ pub fn denom_to_asset_info(querier: &QuerierWrapper, denom: &str) -> AssetInfo {
     AssetInfo::NativeToken {
         denom: denom.to_string(),
     }
+}
+
+pub fn build_ibc_send_packet(
+    amount: Uint128,
+    denom: &str,
+    sender: &str,
+    receiver: &str,
+    memo: Option<String>,
+    src_channel: &str,
+    timeout: IbcTimeout,
+) -> StdResult<IbcMsg> {
+    // build ics20 packet
+    let packet = Ics20Packet::new(
+        amount.clone(),
+        denom, // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
+        sender,
+        receiver,
+        memo,
+    );
+    packet
+        .validate()
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
+
+    // prepare ibc message
+    Ok(IbcMsg::SendPacket {
+        channel_id: src_channel.to_string(),
+        data: to_binary(&packet)?,
+        timeout: timeout.into(),
+    })
 }

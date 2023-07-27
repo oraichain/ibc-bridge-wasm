@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcMsg, IbcQuery,
+    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcQuery,
     MessageInfo, Order, PortIdResponse, Response, StdResult, Storage,
 };
 use cw2::set_contract_version;
@@ -12,8 +12,8 @@ use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{
-    collect_transfer_fee_msgs, parse_ibc_wasm_port_id, parse_voucher_denom, process_deduct_fee,
-    Ics20Packet,
+    build_ibc_send_packet, collect_transfer_fee_msgs, parse_ibc_wasm_port_id, parse_voucher_denom,
+    process_deduct_fee,
 };
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
@@ -336,16 +336,6 @@ pub fn execute_transfer_back_to_remote_chain(
         mapping.pair_mapping.asset_info_decimals,
     )?;
 
-    // build ics20 packet
-    let packet = Ics20Packet::new(
-        amount_remote.clone(),
-        ibc_denom.clone(), // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
-        sender.as_str(),
-        &msg.remote_address,
-        msg.memo,
-    );
-    packet.validate()?;
-
     // now this is processed in ack
     // // because we are transferring back, we reduce the channel's balance
     reduce_channel_balance(
@@ -357,25 +347,29 @@ pub fn execute_transfer_back_to_remote_chain(
     )?;
 
     // prepare ibc message
-    let msg = IbcMsg::SendPacket {
-        channel_id: msg.local_channel_id,
-        data: to_binary(&packet)?,
-        timeout: timeout.into(),
-    };
+    let ibc_msg = build_ibc_send_packet(
+        amount_remote,
+        &ibc_denom, // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
+        sender.as_str(),
+        &msg.remote_address,
+        msg.memo,
+        &msg.local_channel_id,
+        timeout.into(),
+    )?;
 
     let mut cosmos_msgs =
         collect_transfer_fee_msgs(config.fee_receiver.into_string(), deps.storage)?;
-    cosmos_msgs.push(msg.into());
+    cosmos_msgs.push(ibc_msg.into());
 
     // send response
     let res = Response::new()
         .add_messages(cosmos_msgs)
         .add_attribute("action", "transfer")
         .add_attribute("type", "transfer_back_to_remote_chain")
-        .add_attribute("sender", &packet.sender)
-        .add_attribute("receiver", &packet.receiver)
-        .add_attribute("denom", &packet.denom)
-        .add_attribute("amount", &packet.amount.to_string());
+        .add_attribute("sender", sender.as_str())
+        .add_attribute("receiver", &msg.remote_address)
+        .add_attribute("denom", &ibc_denom)
+        .add_attribute("amount", &amount_remote.to_string());
     Ok(res)
 }
 
@@ -696,7 +690,7 @@ mod test {
     use std::ops::Sub;
 
     use super::*;
-    use crate::ibc::ibc_packet_receive;
+    use crate::ibc::{ibc_packet_receive, Ics20Packet};
     use crate::state::{Ratio, TOKEN_FEE_ACCUMULATOR};
     use crate::test_helpers::*;
 
