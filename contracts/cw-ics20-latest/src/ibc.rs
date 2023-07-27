@@ -379,7 +379,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .collect();
 
     let transfer_fee_to_admin =
-        collect_transfer_fee_msgs(CONFIG.load(storage)?.fee_receiver.into_string(), storage)?;
+        collect_transfer_fee_msgs(config.fee_receiver.into_string(), storage)?;
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_messages(transfer_fee_to_admin)
