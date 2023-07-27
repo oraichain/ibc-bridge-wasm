@@ -6,11 +6,11 @@ mod test {
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit, deduct_fee, deduct_relayer_fee,
-        deduct_token_fee, handle_follow_up_failure, ibc_packet_receive,
-        is_follow_up_msgs_only_send_amount, parse_voucher_denom,
-        parse_voucher_denom_without_sanity_checks, send_amount, Ics20Ack, Ics20Packet,
-        REFUND_FAILURE_ID,
+        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
+        convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
+        handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
+        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, send_amount, Ics20Ack,
+        Ics20Packet, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -1089,15 +1089,15 @@ mod test {
         );
     }
 
-    // #[test]
-    // fn test_convert_remote_denom_to_evm_prefix() {
-    //     assert_eq!(convert_remote_denom_to_evm_prefix("abcd"), "".to_string());
-    //     assert_eq!(convert_remote_denom_to_evm_prefix("0x"), "".to_string());
-    //     assert_eq!(
-    //         convert_remote_denom_to_evm_prefix("evm0x"),
-    //         "evm".to_string()
-    //     );
-    // }
+    #[test]
+    fn test_convert_remote_denom_to_evm_prefix() {
+        assert_eq!(convert_remote_denom_to_evm_prefix("abcd"), "".to_string());
+        assert_eq!(convert_remote_denom_to_evm_prefix("0x"), "".to_string());
+        assert_eq!(
+            convert_remote_denom_to_evm_prefix("evm0x"),
+            "evm".to_string()
+        );
+    }
 
     #[test]
     fn test_parse_voucher_denom_without_sanity_checks() {

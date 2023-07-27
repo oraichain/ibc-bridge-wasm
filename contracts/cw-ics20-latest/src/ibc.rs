@@ -791,10 +791,7 @@ pub fn deduct_relayer_fee(
     let mut prefix = decode_result.unwrap().0;
     // evm case, need to filter remote token denom since prefix is always oraib
     if prefix.eq("oraib") {
-        prefix = match remote_token_denom.split_once("0x") {
-            Some((evm_prefix, _)) => evm_prefix.to_string(),
-            None => "".to_string(),
-        }
+        prefix = convert_remote_denom_to_evm_prefix(remote_token_denom);
     }
     let relayer_fee = RELAYER_FEE.may_load(storage, &prefix)?;
     // no need to deduct fee if no fee is found in the mapping
@@ -831,12 +828,12 @@ pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
     ))
 }
 
-// pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
-//     match remote_denom.split_once("0x") {
-//         Some((evm_prefix, _)) => return evm_prefix.to_string(),
-//         None => "".to_string(),
-//     }
-// }
+pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
+    match remote_denom.split_once("0x") {
+        Some((evm_prefix, _)) => return evm_prefix.to_string(),
+        None => "".to_string(),
+    }
+}
 
 pub fn collect_transfer_fee_msgs(
     receiver: String,
