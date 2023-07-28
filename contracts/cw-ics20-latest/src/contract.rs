@@ -306,11 +306,11 @@ pub fn execute_transfer_back_to_remote_chain(
     let (new_deducted_amount, token_fee, relayer_fee) = process_deduct_fee(
         deps.storage,
         &deps.querier,
+        deps.api,
         &msg.remote_address,
         &msg.remote_denom,
-        amount.amount(),
+        amount,
         mapping.pair_mapping.asset_info_decimals,
-        &amount.denom(),
         &config.swap_router_contract,
     )?;
 

@@ -27,6 +27,7 @@ use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, A
 
 pub const ICS20_VERSION: &str = "ics20-1";
 pub const ICS20_ORDERING: IbcOrder = IbcOrder::Unordered;
+pub const ORAIBRIDGE_PREFIX: &str = "oraib";
 
 /// The format for sending an ics20 packet.
 /// Proto defined here: https://github.com/cosmos/cosmos-sdk/blob/v0.42.0/proto/ibc/applications/transfer/v1/transfer.proto#L11-L20
@@ -351,11 +352,11 @@ fn handle_ibc_packet_receive_native_remote_chain(
     let (new_deducted_amount, token_fee, relayer_fee) = process_deduct_fee(
         storage,
         querier,
+        api,
         &msg.sender,
         &msg.denom,
-        to_send.amount(),
+        to_send.clone(),
         pair_mapping.asset_info_decimals,
-        &to_send.denom(),
         &config.swap_router_contract,
     )?;
     let new_deducted_to_send = Amount::from_parts(to_send.denom(), new_deducted_amount);
@@ -421,7 +422,7 @@ pub fn get_follow_up_msgs(
         ));
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
-    let receiver_asset_info = denom_to_asset_info(querier, &destination.destination_denom);
+    let receiver_asset_info = denom_to_asset_info(querier, api, &destination.destination_denom)?;
     let swap_operations = build_swap_operations(
         receiver_asset_info.clone(),
         initial_receive_asset_info.clone(),
@@ -765,16 +766,21 @@ pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, Contr
 pub fn process_deduct_fee(
     storage: &mut dyn Storage,
     querier: &QuerierWrapper,
+    api: &dyn Api,
     remote_sender: &str,
     remote_token_denom: &str,
-    amount: Uint128, // local amount
+    local_amount: Amount, // local amount
     decimals: u8,
-    local_token_denom: &str, // local denom
     swap_router_contract: &RouterController,
 ) -> StdResult<(Uint128, Uint128, Uint128)> {
-    let (_, token_fee) = deduct_token_fee(storage, remote_token_denom, amount, local_token_denom)?;
+    let (_, token_fee) = deduct_token_fee(
+        storage,
+        remote_token_denom,
+        local_amount.amount(),
+        &local_amount.denom(),
+    )?;
     // simulate for relayer fee
-    let offer_asset_info = denom_to_asset_info(querier, local_token_denom);
+    let offer_asset_info = denom_to_asset_info(querier, api, &local_amount.raw_denom())?;
     let offer_amount = Uint128::from(10u64.pow(decimals as u32) as u64);
     let token_price = swap_router_contract
         .simulate_swap(
@@ -792,14 +798,16 @@ pub fn process_deduct_fee(
         .unwrap_or_default();
     let (_, relayer_fee) = deduct_relayer_fee(
         storage,
+        api,
         remote_sender,
         remote_token_denom,
-        amount,
+        local_amount.amount(),
         offer_amount,
-        local_token_denom,
+        &local_amount.denom(),
         token_price,
     )?;
-    let new_amount = amount
+    let new_amount = local_amount
+        .amount()
         .checked_sub(token_fee)
         .unwrap_or_default()
         .checked_sub(relayer_fee)
@@ -834,6 +842,7 @@ pub fn deduct_token_fee(
 
 pub fn deduct_relayer_fee(
     storage: &mut dyn Storage,
+    api: &dyn Api,
     remote_address: &str,
     remote_token_denom: &str,
     amount: Uint128,         // local amount
@@ -841,28 +850,32 @@ pub fn deduct_relayer_fee(
     local_token_denom: &str, // local denom
     token_price: Uint128,
 ) -> StdResult<(Uint128, Uint128)> {
+    api.debug(format!("token price: {}", token_price).as_str());
     if token_price.is_zero() {
         return Ok((amount, Uint128::from(0u64)));
     }
 
-    let mut prefix = get_prefix_decode_bech32(remote_address)?;
     // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
     // evm case, need to filter remote token denom since prefix is always oraib
-    if prefix.eq("oraib") {
+    let mut prefix = get_prefix_decode_bech32(remote_address)?;
+    api.debug(format!("prefix: {}", prefix).as_str());
+    if prefix.eq(ORAIBRIDGE_PREFIX) {
         prefix = convert_remote_denom_to_evm_prefix(remote_token_denom);
     }
+    api.debug(format!("prefix after evm prefix: {}", prefix).as_str());
     let relayer_fee = RELAYER_FEE.may_load(storage, &prefix)?;
+    api.debug(format!("relayer fee: {}", relayer_fee.unwrap_or_default()).as_str());
     // no need to deduct fee if no fee is found in the mapping
     if relayer_fee.is_none() {
         return Ok((amount, Uint128::from(0u64)));
     }
     let relayer_fee = relayer_fee.unwrap();
-    println!("offer amount: {:?}", offer_amount);
     let required_fee_needed = relayer_fee
         .checked_mul(offer_amount)
         .unwrap_or_default()
         .checked_div(token_price)
         .unwrap_or_default();
+    api.debug(format!("required fee needed: {}", required_fee_needed).as_str());
     // accumulate fee so that we can collect it later after everything
     // we share the same accumulator because it's the same data structure, and we are accumulating so it's fine
     TOKEN_FEE_ACCUMULATOR.update(

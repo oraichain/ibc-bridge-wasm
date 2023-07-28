@@ -378,8 +378,6 @@ dependencies = [
 [[package]]
 name = "cw20-ics20-msg"
 version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef63faf224f73304e73679494041bf5c31274aad4109d7ce38c1259e6e9e9551"
 dependencies = [
  "bech32",
  "cosmwasm-schema",

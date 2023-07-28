@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, QuerierWrapper, StdError, StdResult};
+use cosmwasm_std::{Api, QuerierWrapper, StdError, StdResult};
 use cw20::{Cw20QueryMsg, TokenInfoResponse};
 use oraiswap::asset::AssetInfo;
 
@@ -24,16 +24,22 @@ pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
     format!("wasm.{}", contract_addr)
 }
 
-pub fn denom_to_asset_info(querier: &QuerierWrapper, denom: &str) -> AssetInfo {
-    if querier
+pub fn denom_to_asset_info(
+    querier: &QuerierWrapper,
+    api: &dyn Api,
+    denom: &str,
+) -> StdResult<AssetInfo> {
+    let info = if querier
         .query_wasm_smart::<TokenInfoResponse>(denom.clone(), &Cw20QueryMsg::TokenInfo {})
         .is_ok()
     {
-        return AssetInfo::Token {
-            contract_addr: Addr::unchecked(denom),
-        };
-    }
-    AssetInfo::NativeToken {
-        denom: denom.to_string(),
-    }
+        AssetInfo::Token {
+            contract_addr: api.addr_validate(denom)?,
+        }
+    } else {
+        AssetInfo::NativeToken {
+            denom: denom.to_string(),
+        }
+    };
+    Ok(info)
 }

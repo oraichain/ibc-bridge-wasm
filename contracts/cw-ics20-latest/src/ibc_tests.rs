@@ -1289,14 +1289,15 @@ mod test {
     fn test_deduct_relayer_fee() {
         let mut deps = mock_dependencies();
         let amount = Uint128::from(1000u64);
-        let storage = deps.as_mut().storage;
+        let deps_mut = deps.as_mut();
         let token_fee_denom = "cosmos";
         let remote_address = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n";
         let offer_amount = Uint128::from(10u32.pow(0 as u32));
         let token_price = Uint128::from(10u64);
         // token price empty case. Should return zero fee
         let result = deduct_relayer_fee(
-            storage,
+            deps_mut.storage,
+            deps_mut.api,
             remote_address,
             token_fee_denom,
             amount,
@@ -1310,7 +1311,8 @@ mod test {
         // remote address is wrong (dont follow bech32 form)
         assert_eq!(
             deduct_relayer_fee(
-                storage,
+                deps_mut.storage,
+                deps_mut.api,
                 "foobar",
                 token_fee_denom,
                 amount,
@@ -1325,7 +1327,8 @@ mod test {
         // no relayer fee case
         assert_eq!(
             deduct_relayer_fee(
-                storage,
+                deps_mut.storage,
+                deps_mut.api,
                 remote_address,
                 token_fee_denom,
                 amount,
@@ -1340,16 +1343,17 @@ mod test {
 
         // oraib prefix case.
         RELAYER_FEE
-            .save(storage, token_fee_denom, &Uint128::from(100u64))
+            .save(deps_mut.storage, token_fee_denom, &Uint128::from(100u64))
             .unwrap();
 
         RELAYER_FEE
-            .save(storage, "foo", &Uint128::from(1000u64))
+            .save(deps_mut.storage, "foo", &Uint128::from(1000u64))
             .unwrap();
 
         assert_eq!(
             deduct_relayer_fee(
-                storage,
+                deps_mut.storage,
+                deps_mut.api,
                 "oraib1603j3e4juddh7cuhfquxspl0p0nsun047wz3rl",
                 "foo0x",
                 amount,
@@ -1365,7 +1369,8 @@ mod test {
         // normal case with remote address
         assert_eq!(
             deduct_relayer_fee(
-                storage,
+                deps_mut.storage,
+                deps_mut.api,
                 remote_address,
                 token_fee_denom,
                 amount,
