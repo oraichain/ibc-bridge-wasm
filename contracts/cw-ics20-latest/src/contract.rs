@@ -1191,11 +1191,11 @@ mod test {
         let cw20_raw_denom = token_addr.as_str();
         let local_channel = "channel-1234";
         let ratio = Ratio {
-            nominator: 1,
+            numerator: 1,
             denominator: 10,
         };
         let fee_amount =
-            Uint128::from(amount) * Decimal::from_ratio(ratio.nominator, ratio.denominator);
+            Uint128::from(amount) * Decimal::from_ratio(ratio.numerator, ratio.denominator);
         let mut deps = setup(&[remote_channel, local_channel], &[]);
         TOKEN_FEE
             .save(deps.as_mut().storage, denom, &ratio)
@@ -1379,14 +1379,14 @@ mod test {
                 TokenFee {
                     token_denom: "orai".to_string(),
                     ratio: Ratio {
-                        nominator: 1,
+                        numerator: 1,
                         denominator: 10,
                     },
                 },
                 TokenFee {
                     token_denom: "atom".to_string(),
                     ratio: Ratio {
-                        nominator: 1,
+                        numerator: 1,
                         denominator: 5,
                     },
                 },

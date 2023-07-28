@@ -481,7 +481,7 @@ mod test {
                 deps.as_mut().storage,
                 denom,
                 &Ratio {
-                    nominator: 1,
+                    numerator: 1,
                     denominator: 10,
                 },
             )
@@ -1199,7 +1199,7 @@ mod test {
         assert_eq!(
             deduct_fee(
                 Ratio {
-                    nominator: 1,
+                    numerator: 1,
                     denominator: 0,
                 },
                 Uint128::from(1000u64)
@@ -1209,7 +1209,7 @@ mod test {
         assert_eq!(
             deduct_fee(
                 Ratio {
-                    nominator: 1,
+                    numerator: 1,
                     denominator: 1,
                 },
                 Uint128::from(1000u64)
@@ -1219,7 +1219,7 @@ mod test {
         assert_eq!(
             deduct_fee(
                 Ratio {
-                    nominator: 1,
+                    numerator: 1,
                     denominator: 100,
                 },
                 Uint128::from(1000u64)
@@ -1268,7 +1268,7 @@ mod test {
                 storage,
                 token_fee_denom,
                 &Ratio {
-                    nominator: 1,
+                    numerator: 1,
                     denominator: 100,
                 },
             )

@@ -1,6 +1,9 @@
 # IBC transfer flow:
 
 Let's assume the network that has the contract cw20-ics20 deployed is network B, the other network is A.
+
+In the source code, we call the network having cw20-ics20 deployed local chain, other networks are remote chains.
+
 In the cw-ics20-latest contract, there are couple transfer flows in the code below:
 
 ## Network A transfers native tokens to B first (A->B, where native token is not IBC token)
