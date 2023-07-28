@@ -1292,6 +1292,7 @@ mod test {
         let storage = deps.as_mut().storage;
         let token_fee_denom = "cosmos";
         let remote_address = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n";
+        let offer_amount = Uint128::from(10u32.pow(0 as u32));
         let token_price = Uint128::from(10u64);
         // token price empty case. Should return zero fee
         let result = deduct_relayer_fee(
@@ -1299,6 +1300,7 @@ mod test {
             remote_address,
             token_fee_denom,
             amount,
+            offer_amount.clone(),
             "local_token_denom",
             Uint128::from(0u64),
         )
@@ -1312,6 +1314,7 @@ mod test {
                 "foobar",
                 token_fee_denom,
                 amount,
+                offer_amount.clone(),
                 "local_token_denom",
                 token_price,
             )
@@ -1326,6 +1329,7 @@ mod test {
                 remote_address,
                 token_fee_denom,
                 amount,
+                offer_amount.clone(),
                 "local_token_denom",
                 token_price,
             )
@@ -1349,6 +1353,7 @@ mod test {
                 "oraib1603j3e4juddh7cuhfquxspl0p0nsun047wz3rl",
                 "foo0x",
                 amount,
+                offer_amount.clone(),
                 "local_token_denom",
                 token_price,
             )
@@ -1364,6 +1369,7 @@ mod test {
                 remote_address,
                 token_fee_denom,
                 amount,
+                offer_amount.clone(),
                 "local_token_denom",
                 token_price,
             )

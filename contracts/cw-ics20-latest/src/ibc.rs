@@ -775,10 +775,11 @@ pub fn process_deduct_fee(
     let (_, token_fee) = deduct_token_fee(storage, remote_token_denom, amount, local_token_denom)?;
     // simulate for relayer fee
     let offer_asset_info = denom_to_asset_info(querier, local_token_denom);
+    let offer_amount = Uint128::from(10u32.pow(decimals as u32));
     let token_price = swap_router_contract
         .simulate_swap(
             querier,
-            Uint128::from(1u64).checked_mul(Uint128::from(10 * decimals as u32))?,
+            offer_amount,
             vec![SwapOperation::OraiSwap {
                 offer_asset_info,
                 // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
@@ -794,6 +795,7 @@ pub fn process_deduct_fee(
         remote_sender,
         remote_token_denom,
         amount,
+        offer_amount,
         local_token_denom,
         token_price,
     )?;
@@ -835,6 +837,7 @@ pub fn deduct_relayer_fee(
     remote_address: &str,
     remote_token_denom: &str,
     amount: Uint128,         // local amount
+    offer_amount: Uint128,   // offer amount of token that swaps to ORAI
     local_token_denom: &str, // local denom
     token_price: Uint128,
 ) -> StdResult<(Uint128, Uint128)> {
@@ -854,7 +857,11 @@ pub fn deduct_relayer_fee(
         return Ok((amount, Uint128::from(0u64)));
     }
     let relayer_fee = relayer_fee.unwrap();
-    let required_fee_needed = relayer_fee.checked_div(token_price).unwrap_or_default();
+    let required_fee_needed = relayer_fee
+        .checked_mul(offer_amount)
+        .unwrap_or_default()
+        .checked_div(token_price)
+        .unwrap_or_default();
     // accumulate fee so that we can collect it later after everything
     // we share the same accumulator because it's the same data structure, and we are accumulating so it's fine
     TOKEN_FEE_ACCUMULATOR.update(
