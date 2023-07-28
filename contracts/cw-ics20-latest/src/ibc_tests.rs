@@ -834,57 +834,148 @@ mod test {
         assert_eq!(reply_args.refund_asset_info, receiver_asset_info)
     }
 
-    // fn test_get_ibc_msg_cosmos_based_case() {
-    //     let send_channel = "channel-9";
-    //     let receive_channel = "channel-1";
-    //     let allowed = "foobar";
-    //     let pair_mapping_denom = "trx-mainnet0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C";
-    //     let allowed_gas = 777666;
-    //     let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
-    //     let receiver_asset_info = AssetInfo::NativeToken {
-    //         denom: "orai".to_string(),
-    //     };
-    //     let amount = Uint128::from(10u128);
-    //     let remote_decimals = 18;
-    //     let asset_info_decimals = 6;
-    //     let remote_amount =
-    //         convert_local_to_remote(amount, remote_decimals, asset_info_decimals).unwrap();
-    //     let remote_address = "eth-mainnet0x1235";
-    //     let mut env = mock_env();
-    //     env.contract.address = Addr::unchecked("addr");
-    //     let mut destination = DestinationInfo {
-    //         receiver: "0x1234".to_string(),
-    //         destination_channel: "channel-10".to_string(),
-    //         destination_denom: "atom".to_string(),
-    //     };
-    //     let timeout = 1000u64;
-    //     let local_receiver = "local_receiver";
+    #[test]
+    fn test_get_ibc_msg_cosmos_based_case() {
+        // setup
+        let send_channel = "channel-9";
+        let allowed = "foobar";
+        let allowed_gas = 777666;
+        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
+        let amount = Uint128::from(1000u64);
+        let pair_mapping_denom = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n";
+        let receiver_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("usdt"),
+        };
+        let local_channel_id = "channel";
+        let local_receiver = "receiver";
+        let timeout = 10u64;
+        let remote_amount = convert_local_to_remote(amount.clone(), 18, 6).unwrap();
+        let destination = DestinationInfo {
+            receiver: "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string(),
+            destination_channel: "channel-10".to_string(),
+            destination_denom: "atom".to_string(),
+        };
+        let env = mock_env();
+        let remote_address = "foobar";
+        let ibc_denom = format!("foo/bar/{}", pair_mapping_denom);
+        let remote_decimals = 18;
+        let asset_info_decimals = 6;
 
-    //     // cosmos based case, should be successful & cosmos msg is ibc transfer
-    //     destination.destination_channel = "channel-10".to_string();
-    //     destination.receiver = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string();
-    //     let result = build_ibc_msg(
-    //         deps.as_mut().storage,
-    //         env.clone(),
-    //         receiver_asset_info.clone(),
-    //         local_receiver,
-    //         receive_channel,
-    //         amount,
-    //         remote_address,
-    //         &destination,
-    //         timeout,
-    //     )
-    //     .unwrap();
-    //     assert_eq!(
-    //         result,
-    //         CosmosMsg::Ibc(IbcMsg::Transfer {
-    //             channel_id: "channel-10".to_string(),
-    //             to_address: destination.receiver,
-    //             amount: coin(10u128, "atom"),
-    //             timeout: mock_env().block.time.plus_seconds(timeout).into()
-    //         })
-    //     );
-    // }
+        CHANNEL_REVERSE_STATE
+            .save(
+                deps.as_mut().storage,
+                (local_channel_id, ibc_denom.as_str()),
+                &ChannelState {
+                    outstanding: remote_amount.clone(),
+                    total_sent: Uint128::from(100u128),
+                },
+            )
+            .unwrap();
+
+        // cosmos based case but no mapping found. should be successful & cosmos msg is ibc transfer
+        let result = build_ibc_msg(
+            deps.as_mut().storage,
+            env.clone(),
+            receiver_asset_info.clone(),
+            local_receiver,
+            local_channel_id,
+            amount,
+            remote_address,
+            &destination,
+            timeout,
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            CosmosMsg::Ibc(IbcMsg::Transfer {
+                channel_id: "channel-10".to_string(),
+                to_address: destination.receiver.clone(),
+                amount: coin(1000u128, "atom"),
+                timeout: mock_env().block.time.plus_seconds(timeout).into()
+            })
+        );
+
+        // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
+        // add a pair mapping so we can test the happy case evm based happy case
+        let update = UpdatePairMsg {
+            local_channel_id: "mars-channel".to_string(),
+            denom: pair_mapping_denom.to_string(),
+            asset_info: receiver_asset_info.clone(),
+            remote_decimals,
+            asset_info_decimals,
+        };
+
+        let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+
+        let info = mock_info("gov", &coins(1234567, "ucosm"));
+        execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+
+        CHANNEL_REVERSE_STATE
+            .save(
+                deps.as_mut().storage,
+                (local_channel_id, "wasm.cosmos2contract/mars-channel/cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n"),
+                &ChannelState {
+                    outstanding: remote_amount.clone(),
+                    total_sent: Uint128::from(100u128),
+                },
+            )
+            .unwrap();
+
+        // now we get ibc msg
+        let result = build_ibc_msg(
+            deps.as_mut().storage,
+            env.clone(),
+            receiver_asset_info.clone(),
+            local_receiver,
+            local_channel_id,
+            amount,
+            remote_address,
+            &destination,
+            timeout,
+        )
+        .unwrap();
+        assert_eq!(format!("{:?}", result).contains("SendPacket"), true);
+    }
+
+    #[test]
+    fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
+        // setup
+        let send_channel = "channel-9";
+        let allowed = "foobar";
+        let allowed_gas = 777666;
+        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
+        let amount = Uint128::from(1000u64);
+        let receiver_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("usdt"),
+        };
+        let local_channel_id = "channel";
+        let local_receiver = "receiver";
+        let timeout = 10u64;
+        let destination = DestinationInfo {
+            receiver: "foo".to_string(),
+            destination_channel: "channel-10".to_string(),
+            destination_denom: "atom".to_string(),
+        };
+        let env = mock_env();
+        let remote_address = "foobar";
+        // cosmos based case but no mapping found. should be successful & cosmos msg is ibc transfer
+        let result = build_ibc_msg(
+            deps.as_mut().storage,
+            env.clone(),
+            receiver_asset_info.clone(),
+            local_receiver,
+            local_channel_id,
+            amount,
+            remote_address,
+            &destination,
+            timeout,
+        )
+        .unwrap_err();
+        assert_eq!(
+            result,
+            StdError::generic_err("The destination info is neither evm or cosmos based")
+        )
+    }
 
     #[test]
     fn test_follow_up_msgs() {
