@@ -648,7 +648,7 @@ pub fn build_ibc_msg(
     ))
 }
 
-// TODO: write unit tests for this function. Write unit tests for relayer fee & cosmos based universal swap in simulate js
+// TODO: Write unit tests for relayer fee & cosmos based universal swap in simulate js
 pub fn process_ibc_msg(
     storage: &mut dyn Storage,
     pair_mapping: (String, MappingMetadata),

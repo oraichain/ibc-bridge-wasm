@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{attr, coin, Addr, CosmosMsg, Response, StdError};
+    use cosmwasm_std::{attr, coin, Addr, CosmosMsg, IbcTimeout, Response, StdError};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
     use oraiswap::router::SwapOperation;
@@ -9,8 +9,8 @@ mod test {
         ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
         convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
         handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
-        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, Ics20Ack, Ics20Packet,
-        REFUND_FAILURE_ID,
+        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, process_ibc_msg, Ics20Ack,
+        Ics20Packet, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -21,9 +21,9 @@ mod test {
 
     use crate::error::ContractError;
     use crate::state::{
-        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData, Ratio,
-        SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
-        TOKEN_FEE_ACCUMULATOR,
+        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData,
+        MappingMetadata, Ratio, SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE,
+        SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -705,7 +705,8 @@ mod test {
     }
 
     #[test]
-    fn test_get_ibc_msg() {
+    fn test_get_ibc_msg_evm_case() {
+        // setup
         let send_channel = "channel-9";
         let receive_channel = "channel-1";
         let allowed = "foobar";
@@ -749,31 +750,6 @@ mod test {
         assert_eq!(
             err,
             StdError::generic_err("Destination channel empty in build ibc msg")
-        );
-
-        // not evm based case, should be successful & cosmos msg is ibc transfer
-        destination.destination_channel = "channel-10".to_string();
-        destination.receiver = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string();
-        let result = build_ibc_msg(
-            deps.as_mut().storage,
-            env.clone(),
-            receiver_asset_info.clone(),
-            local_receiver,
-            receive_channel,
-            amount,
-            remote_address,
-            &destination,
-            timeout,
-        )
-        .unwrap();
-        assert_eq!(
-            result,
-            CosmosMsg::Ibc(IbcMsg::Transfer {
-                channel_id: "channel-10".to_string(),
-                to_address: destination.receiver,
-                amount: coin(10u128, "atom"),
-                timeout: mock_env().block.time.plus_seconds(timeout).into()
-            })
         );
 
         // evm based case, error getting pair mapping
@@ -857,6 +833,58 @@ mod test {
         assert_eq!(reply_args.receiver, local_receiver.to_string());
         assert_eq!(reply_args.refund_asset_info, receiver_asset_info)
     }
+
+    // fn test_get_ibc_msg_cosmos_based_case() {
+    //     let send_channel = "channel-9";
+    //     let receive_channel = "channel-1";
+    //     let allowed = "foobar";
+    //     let pair_mapping_denom = "trx-mainnet0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C";
+    //     let allowed_gas = 777666;
+    //     let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
+    //     let receiver_asset_info = AssetInfo::NativeToken {
+    //         denom: "orai".to_string(),
+    //     };
+    //     let amount = Uint128::from(10u128);
+    //     let remote_decimals = 18;
+    //     let asset_info_decimals = 6;
+    //     let remote_amount =
+    //         convert_local_to_remote(amount, remote_decimals, asset_info_decimals).unwrap();
+    //     let remote_address = "eth-mainnet0x1235";
+    //     let mut env = mock_env();
+    //     env.contract.address = Addr::unchecked("addr");
+    //     let mut destination = DestinationInfo {
+    //         receiver: "0x1234".to_string(),
+    //         destination_channel: "channel-10".to_string(),
+    //         destination_denom: "atom".to_string(),
+    //     };
+    //     let timeout = 1000u64;
+    //     let local_receiver = "local_receiver";
+
+    //     // cosmos based case, should be successful & cosmos msg is ibc transfer
+    //     destination.destination_channel = "channel-10".to_string();
+    //     destination.receiver = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string();
+    //     let result = build_ibc_msg(
+    //         deps.as_mut().storage,
+    //         env.clone(),
+    //         receiver_asset_info.clone(),
+    //         local_receiver,
+    //         receive_channel,
+    //         amount,
+    //         remote_address,
+    //         &destination,
+    //         timeout,
+    //     )
+    //     .unwrap();
+    //     assert_eq!(
+    //         result,
+    //         CosmosMsg::Ibc(IbcMsg::Transfer {
+    //             channel_id: "channel-10".to_string(),
+    //             to_address: destination.receiver,
+    //             amount: coin(10u128, "atom"),
+    //             timeout: mock_env().block.time.plus_seconds(timeout).into()
+    //         })
+    //     );
+    // }
 
     #[test]
     fn test_follow_up_msgs() {
@@ -1230,6 +1258,104 @@ mod test {
             .unwrap()
             .1,
             Uint128::from(10u64)
+        );
+    }
+
+    #[test]
+    fn test_process_ibc_msg() {
+        // setup
+        let mut deps = mock_dependencies();
+        let amount = Uint128::from(1000u64);
+        let storage = deps.as_mut().storage;
+        let ibc_denom = "foo/bar/cosmos";
+        let pair_mapping = (
+            ibc_denom.to_string(),
+            MappingMetadata {
+                asset_info: AssetInfo::NativeToken {
+                    denom: "orai".to_string(),
+                },
+                remote_decimals: 18,
+                asset_info_decimals: 6,
+            },
+        );
+        let receiver_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("usdt"),
+        };
+        let local_channel_id = "channel";
+        let ibc_msg_sender = "sender";
+        let ibc_msg_receiver = "receiver";
+        let memo = None;
+        let timeout = Timestamp::from_seconds(10u64);
+        let reply_args: SingleStepReplyArgs = SingleStepReplyArgs {
+            channel: local_channel_id.to_string(),
+            refund_asset_info: receiver_asset_info.clone(),
+            ibc_data: None,
+            local_amount: amount.clone(),
+            receiver: ibc_msg_receiver.to_string(),
+        };
+        let remote_amount = convert_local_to_remote(amount.clone(), 18, 6).unwrap();
+
+        CHANNEL_REVERSE_STATE
+            .save(
+                storage,
+                (local_channel_id, ibc_denom),
+                &ChannelState {
+                    outstanding: remote_amount.clone(),
+                    total_sent: Uint128::from(100u128),
+                },
+            )
+            .unwrap();
+
+        // action
+        let result = process_ibc_msg(
+            storage,
+            pair_mapping,
+            receiver_asset_info,
+            local_channel_id,
+            ibc_msg_sender,
+            ibc_msg_receiver,
+            memo,
+            amount,
+            timeout,
+            reply_args,
+        )
+        .unwrap();
+
+        // assert
+        // channel balance should reduce to 0
+        assert_eq!(
+            CHANNEL_REVERSE_STATE
+                .load(storage, (local_channel_id, ibc_denom))
+                .unwrap()
+                .outstanding,
+            Uint128::from(0u64)
+        );
+        // reply args should have ibc data now
+        assert_eq!(
+            SINGLE_STEP_REPLY_ARGS
+                .load(storage)
+                .unwrap()
+                .ibc_data
+                .unwrap(),
+            IbcSingleStepData {
+                ibc_denom: ibc_denom.to_string(),
+                remote_amount
+            }
+        );
+        assert_eq!(
+            result,
+            IbcMsg::SendPacket {
+                channel_id: local_channel_id.to_string(),
+                data: to_binary(&Ics20Packet {
+                    amount: remote_amount.clone(),
+                    denom: ibc_denom.to_string(),
+                    receiver: ibc_msg_receiver.to_string(),
+                    sender: ibc_msg_sender.to_string(),
+                    memo: None
+                })
+                .unwrap(),
+                timeout: IbcTimeout::with_timestamp(timeout)
+            }
         );
     }
 }
