@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Binary, IbcEndpoint};
+use cosmwasm_std::{Addr, Binary, IbcEndpoint};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
@@ -33,7 +33,8 @@ pub struct MigrateMsg {
     pub default_gas_limit: Option<u64>,
     pub fee_denom: String,
     pub swap_router_contract: String,
-    pub fee_receiver: String,
+    pub token_fee_receiver: String,
+    pub relayer_fee_receiver: String,
 }
 
 #[cw_serde]
@@ -57,6 +58,7 @@ pub enum ExecuteMsg {
         token_fee: Option<Vec<TokenFee>>,
         relayer_fee: Option<Vec<RelayerFee>>,
         fee_receiver: Option<String>,
+        relayer_fee_receiver: Option<String>,
     },
 }
 
@@ -191,6 +193,8 @@ pub struct ConfigResponse {
     pub fee_denom: String,
     pub swap_router_contract: String,
     pub gov_contract: String,
+    pub token_fee_receiver: Addr,
+    pub relayer_fee_receiver: Addr,
 }
 
 #[cw_serde]

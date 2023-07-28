@@ -13,6 +13,7 @@ use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
+use cw_storage_plus::Map;
 use oraiswap::asset::AssetInfo;
 use oraiswap::router::{RouterController, SwapOperation};
 
@@ -20,8 +21,8 @@ use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
     undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData, MappingMetadata, Ratio, ReplyArgs,
-    SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
+    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
@@ -379,11 +380,19 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .map(|msg| SubMsg::reply_on_error(msg, FOLLOW_UP_ID))
         .collect();
 
-    let transfer_fee_to_admin =
-        collect_transfer_fee_msgs(config.fee_receiver.into_string(), storage)?;
+    let mut fee_msgs = collect_fee_msgs(
+        storage,
+        config.token_fee_receiver.into_string(),
+        TOKEN_FEE_ACCUMULATOR,
+    )?;
+    fee_msgs.append(&mut collect_fee_msgs(
+        storage,
+        config.relayer_fee_receiver.to_string(),
+        RELAYER_FEE_ACCUMULATOR,
+    )?);
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
-        .add_messages(transfer_fee_to_admin)
+        .add_messages(fee_msgs)
         .add_submessages(submsgs)
         .add_attribute("action", "receive_native")
         .add_attribute("sender", msg.sender.clone())
@@ -878,7 +887,7 @@ pub fn deduct_relayer_fee(
     api.debug(format!("required fee needed: {}", required_fee_needed).as_str());
     // accumulate fee so that we can collect it later after everything
     // we share the same accumulator because it's the same data structure, and we are accumulating so it's fine
-    TOKEN_FEE_ACCUMULATOR.update(
+    RELAYER_FEE_ACCUMULATOR.update(
         storage,
         local_token_denom,
         |prev_fee| -> StdResult<Uint128> {
@@ -911,11 +920,12 @@ pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
     }
 }
 
-pub fn collect_transfer_fee_msgs(
-    receiver: String,
+pub fn collect_fee_msgs(
     storage: &mut dyn Storage,
+    receiver: String,
+    fee_accumulator: Map<&str, Uint128>,
 ) -> StdResult<Vec<CosmosMsg>> {
-    let cosmos_msgs = TOKEN_FEE_ACCUMULATOR
+    let cosmos_msgs = fee_accumulator
         .range(storage, None, None, Order::Ascending)
         .filter_map(|data| {
             data.map(|fee_info| {
@@ -929,11 +939,11 @@ pub fn collect_transfer_fee_msgs(
         .flatten()
         .collect::<Vec<_>>();
     // we reset all the accumulator keys to zero so that it wont accumulate more in the next txs. This action will be reverted if the fee payment txs fail.
-    TOKEN_FEE_ACCUMULATOR
+    fee_accumulator
         .keys(storage, None, None, Order::Ascending)
         .collect::<Result<Vec<String>, StdError>>()?
         .into_iter()
-        .for_each(|key| TOKEN_FEE_ACCUMULATOR.remove(storage, &key));
+        .for_each(|key| fee_accumulator.remove(storage, &key));
     Ok(cosmos_msgs)
 }
 

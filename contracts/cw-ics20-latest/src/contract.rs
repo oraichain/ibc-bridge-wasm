@@ -13,7 +13,7 @@ use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{
-    build_ibc_send_packet, collect_transfer_fee_msgs, parse_voucher_denom, process_deduct_fee,
+    build_ibc_send_packet, collect_fee_msgs, parse_voucher_denom, process_deduct_fee,
 };
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
@@ -23,7 +23,7 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
     MappingMetadata, RelayerFee, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE,
-    CONFIG, RELAYER_FEE, TOKEN_FEE,
+    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -47,7 +47,8 @@ pub fn instantiate(
         default_gas_limit: msg.default_gas_limit,
         fee_denom: "orai".to_string(),
         swap_router_contract: RouterController(msg.swap_router_contract),
-        fee_receiver: admin,
+        token_fee_receiver: admin.clone(),
+        relayer_fee_receiver: admin,
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -91,6 +92,7 @@ pub fn execute(
             admin,
             token_fee,
             fee_receiver,
+            relayer_fee_receiver,
             relayer_fee,
         } => update_config(
             deps,
@@ -102,6 +104,7 @@ pub fn execute(
             admin,
             token_fee,
             fee_receiver,
+            relayer_fee_receiver,
             relayer_fee,
         ),
     }
@@ -117,6 +120,7 @@ pub fn update_config(
     admin: Option<String>,
     token_fee: Option<Vec<TokenFee>>,
     fee_receiver: Option<String>,
+    relayer_fee_receiver: Option<String>,
     relayer_fee: Option<Vec<RelayerFee>>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
@@ -141,7 +145,10 @@ pub fn update_config(
             config.swap_router_contract = RouterController(swap_router_contract);
         }
         if let Some(fee_receiver) = fee_receiver {
-            config.fee_receiver = deps.api.addr_validate(&fee_receiver)?;
+            config.token_fee_receiver = deps.api.addr_validate(&fee_receiver)?;
+        }
+        if let Some(relayer_fee_receiver) = relayer_fee_receiver {
+            config.relayer_fee_receiver = deps.api.addr_validate(&relayer_fee_receiver)?;
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -357,9 +364,17 @@ pub fn execute_transfer_back_to_remote_chain(
         timeout.into(),
     )?;
 
-    let mut cosmos_msgs =
-        collect_transfer_fee_msgs(config.fee_receiver.into_string(), deps.storage)?;
+    let mut cosmos_msgs = collect_fee_msgs(
+        deps.storage,
+        config.token_fee_receiver.into_string(),
+        TOKEN_FEE_ACCUMULATOR,
+    )?;
     cosmos_msgs.push(ibc_msg.into());
+    cosmos_msgs.append(&mut collect_fee_msgs(
+        deps.storage,
+        config.relayer_fee_receiver.into_string(),
+        RELAYER_FEE_ACCUMULATOR,
+    )?);
 
     // send response
     let res = Response::new()
@@ -487,7 +502,8 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             default_gas_limit: msg.default_gas_limit,
             fee_denom: msg.fee_denom,
             swap_router_contract: RouterController(msg.swap_router_contract),
-            fee_receiver: deps.api.addr_validate(&msg.fee_receiver)?,
+            token_fee_receiver: deps.api.addr_validate(&msg.token_fee_receiver)?,
+            relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
         },
     )?;
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -573,6 +589,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         fee_denom: cfg.fee_denom,
         swap_router_contract: cfg.swap_router_contract.addr(),
         gov_contract: admin.into(),
+        relayer_fee_receiver: cfg.relayer_fee_receiver,
+        token_fee_receiver: cfg.token_fee_receiver,
     };
     Ok(res)
 }
@@ -1395,7 +1413,8 @@ mod test {
                 prefix: "foo".to_string(),
                 fee: Uint128::from(1000000u64),
             }]),
-            fee_receiver: None,
+            fee_receiver: Some("token_fee_receiver".to_string()),
+            relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),
         };
         // unauthorized case
         let unauthorized_info = mock_info(&String::from("somebody"), &[]);
@@ -1416,6 +1435,14 @@ mod test {
         assert_eq!(config.default_timeout, 1);
         assert_eq!(config.fee_denom, "hehe".to_string());
         assert_eq!(config.swap_router_contract, "new_router".to_string());
+        assert_eq!(
+            config.relayer_fee_receiver,
+            Addr::unchecked("relayer_fee_receiver")
+        );
+        assert_eq!(
+            config.token_fee_receiver,
+            Addr::unchecked("token_fee_receiver")
+        );
         assert_eq!(
             TOKEN_FEE
                 .range(deps.as_ref().storage, None, None, Order::Ascending)

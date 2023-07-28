@@ -23,7 +23,7 @@ mod test {
     use crate::state::{
         get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData,
         MappingMetadata, Ratio, SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE,
-        SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+        RELAYER_FEE_ACCUMULATOR, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -317,7 +317,8 @@ mod test {
             mock_env(),
             MigrateMsg {
                 default_gas_limit: Some(def_limit),
-                fee_receiver: "receiver".to_string(),
+                token_fee_receiver: "receiver".to_string(),
+                relayer_fee_receiver: "relayer_fee_receiver".to_string(),
                 default_timeout: 100u64,
                 fee_denom: "orai".to_string(),
                 swap_router_contract: "foobar".to_string(),
@@ -1366,6 +1367,13 @@ mod test {
             Uint128::from(100u64)
         );
 
+        assert_eq!(
+            RELAYER_FEE_ACCUMULATOR
+                .load(deps_mut.storage, "local_token_denom")
+                .unwrap(),
+            Uint128::from(100u64)
+        );
+
         // normal case with remote address
         assert_eq!(
             deduct_relayer_fee(
@@ -1381,6 +1389,13 @@ mod test {
             .unwrap()
             .1,
             Uint128::from(10u64)
+        );
+
+        assert_eq!(
+            RELAYER_FEE_ACCUMULATOR
+                .load(deps_mut.storage, "local_token_denom")
+                .unwrap(),
+            Uint128::from(110u64)
         );
     }
 
