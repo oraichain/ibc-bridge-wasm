@@ -790,7 +790,7 @@ pub fn process_deduct_fee(
     )?;
     // simulate for relayer fee
     let offer_asset_info = denom_to_asset_info(querier, api, &local_amount.raw_denom())?;
-    let offer_amount = Uint128::from(10u64.pow(decimals as u32) as u64);
+    let offer_amount = Uint128::from(10u64.pow((decimals + 1) as u32) as u64); // +1 to make sure the offer amount is large enough to swap successfully
     let token_price = swap_router_contract
         .simulate_swap(
             querier,
