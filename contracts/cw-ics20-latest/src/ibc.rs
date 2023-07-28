@@ -859,7 +859,7 @@ pub fn deduct_relayer_fee(
     local_token_denom: &str, // local denom
     token_price: Uint128,
 ) -> StdResult<(Uint128, Uint128)> {
-    api.debug(format!("token price: {}", token_price).as_str());
+    // api.debug(format!("token price: {}", token_price).as_str());
     if token_price.is_zero() {
         return Ok((amount, Uint128::from(0u64)));
     }
@@ -867,13 +867,13 @@ pub fn deduct_relayer_fee(
     // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
     // evm case, need to filter remote token denom since prefix is always oraib
     let mut prefix = get_prefix_decode_bech32(remote_address)?;
-    api.debug(format!("prefix: {}", prefix).as_str());
+    // api.debug(format!("prefix: {}", prefix).as_str());
     if prefix.eq(ORAIBRIDGE_PREFIX) {
         prefix = convert_remote_denom_to_evm_prefix(remote_token_denom);
     }
-    api.debug(format!("prefix after evm prefix: {}", prefix).as_str());
+    // api.debug(format!("prefix after evm prefix: {}", prefix).as_str());
     let relayer_fee = RELAYER_FEE.may_load(storage, &prefix)?;
-    api.debug(format!("relayer fee: {}", relayer_fee.unwrap_or_default()).as_str());
+    // api.debug(format!("relayer fee: {}", relayer_fee.unwrap_or_default()).as_str());
     // no need to deduct fee if no fee is found in the mapping
     if relayer_fee.is_none() {
         return Ok((amount, Uint128::from(0u64)));
@@ -884,7 +884,7 @@ pub fn deduct_relayer_fee(
         .unwrap_or_default()
         .checked_div(token_price)
         .unwrap_or_default();
-    api.debug(format!("required fee needed: {}", required_fee_needed).as_str());
+    // api.debug(format!("required fee needed: {}", required_fee_needed).as_str());
     // accumulate fee so that we can collect it later after everything
     // we share the same accumulator because it's the same data structure, and we are accumulating so it's fine
     RELAYER_FEE_ACCUMULATOR.update(
