@@ -348,19 +348,17 @@ fn handle_ibc_packet_receive_native_remote_chain(
     };
     REPLY_ARGS.save(storage, &reply_args)?;
 
-    let new_deducted_to_send = Amount::from_parts(
-        to_send.denom(),
-        process_deduct_fee(
-            storage,
-            querier,
-            &msg.sender,
-            &msg.denom,
-            to_send.amount(),
-            pair_mapping.asset_info_decimals,
-            &to_send.denom(),
-            &config.swap_router_contract,
-        )?,
-    );
+    let (new_deducted_amount, token_fee, relayer_fee) = process_deduct_fee(
+        storage,
+        querier,
+        &msg.sender,
+        &msg.denom,
+        to_send.amount(),
+        pair_mapping.asset_info_decimals,
+        &to_send.denom(),
+        &config.swap_router_contract,
+    )?;
+    let new_deducted_to_send = Amount::from_parts(to_send.denom(), new_deducted_amount);
 
     // after receiving the cw20 amount, we try to do fee swapping for the user if needed so he / she can create txs on the network
     let (submsgs, ibc_error_msg) = get_follow_up_msgs(
@@ -391,7 +389,9 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .add_attribute("receiver", msg.receiver.clone())
         .add_attribute("denom", denom)
         .add_attribute("amount", msg.amount.to_string())
-        .add_attribute("success", "true");
+        .add_attribute("success", "true")
+        .add_attribute("token_fee", token_fee)
+        .add_attribute("relayer_fee", relayer_fee);
     if !ibc_error_msg.is_empty() {
         res = res.add_attribute("ibc_error_msg", ibc_error_msg);
     }
@@ -771,11 +771,11 @@ pub fn process_deduct_fee(
     decimals: u8,
     local_token_denom: &str, // local denom
     swap_router_contract: &RouterController,
-) -> StdResult<Uint128> {
+) -> StdResult<(Uint128, Uint128, Uint128)> {
     let (_, token_fee) = deduct_token_fee(storage, remote_token_denom, amount, local_token_denom)?;
     // simulate for relayer fee
     let offer_asset_info = denom_to_asset_info(querier, local_token_denom);
-    let offer_amount = Uint128::from(10u32.pow(decimals as u32));
+    let offer_amount = Uint128::from(10u64.pow(decimals as u32) as u64);
     let token_price = swap_router_contract
         .simulate_swap(
             querier,
@@ -809,7 +809,7 @@ pub fn process_deduct_fee(
             "Not enough transfer amount to cover the token and relayer fees",
         ));
     }
-    Ok(new_amount)
+    Ok((new_amount, token_fee, relayer_fee))
 }
 
 pub fn deduct_token_fee(
@@ -857,6 +857,7 @@ pub fn deduct_relayer_fee(
         return Ok((amount, Uint128::from(0u64)));
     }
     let relayer_fee = relayer_fee.unwrap();
+    println!("offer amount: {:?}", offer_amount);
     let required_fee_needed = relayer_fee
         .checked_mul(offer_amount)
         .unwrap_or_default()

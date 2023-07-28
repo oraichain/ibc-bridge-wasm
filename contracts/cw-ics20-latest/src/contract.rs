@@ -303,7 +303,7 @@ pub fn execute_transfer_back_to_remote_chain(
         .ok_or(ContractError::MappingPairNotFound {})?;
 
     // if found mapping, then deduct fee based on mapping
-    let new_deducted_amount = process_deduct_fee(
+    let (new_deducted_amount, token_fee, relayer_fee) = process_deduct_fee(
         deps.storage,
         &deps.querier,
         &msg.remote_address,
@@ -369,7 +369,9 @@ pub fn execute_transfer_back_to_remote_chain(
         .add_attribute("sender", sender.as_str())
         .add_attribute("receiver", &msg.remote_address)
         .add_attribute("denom", &ibc_denom)
-        .add_attribute("amount", &amount_remote.to_string());
+        .add_attribute("amount", &amount_remote.to_string())
+        .add_attribute("token_fee", token_fee)
+        .add_attribute("relayer_fee", relayer_fee);
     Ok(res)
 }
 
