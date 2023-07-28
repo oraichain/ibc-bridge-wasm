@@ -754,6 +754,7 @@ mod test {
 
         // evm based case, error getting pair mapping
         destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
+        destination.destination_channel = send_channel.to_string();
         let err = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
@@ -860,6 +861,11 @@ mod test {
         let ibc_denom = format!("foo/bar/{}", pair_mapping_denom);
         let remote_decimals = 18;
         let asset_info_decimals = 6;
+        let remote_channel = "mars-channel";
+        let pair_mapping_key = format!(
+            "wasm.cosmos2contract/{}/{}",
+            remote_channel, pair_mapping_denom
+        );
 
         CHANNEL_REVERSE_STATE
             .save(
@@ -913,7 +919,7 @@ mod test {
         CHANNEL_REVERSE_STATE
             .save(
                 deps.as_mut().storage,
-                (local_channel_id, "wasm.cosmos2contract/mars-channel/cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n"),
+                (local_channel_id, &pair_mapping_key),
                 &ChannelState {
                     outstanding: remote_amount.clone(),
                     total_sent: Uint128::from(100u128),
@@ -934,7 +940,22 @@ mod test {
             timeout,
         )
         .unwrap();
-        assert_eq!(format!("{:?}", result).contains("SendPacket"), true);
+
+        assert_eq!(
+            result,
+            CosmosMsg::Ibc(IbcMsg::SendPacket {
+                channel_id: local_channel_id.to_string(),
+                data: to_binary(&Ics20Packet::new(
+                    remote_amount.clone(),
+                    pair_mapping_key.clone(),
+                    env.contract.address.as_str(),
+                    &destination.receiver,
+                    None,
+                ))
+                .unwrap(),
+                timeout: env.block.time.plus_seconds(timeout).into()
+            })
+        );
     }
 
     #[test]

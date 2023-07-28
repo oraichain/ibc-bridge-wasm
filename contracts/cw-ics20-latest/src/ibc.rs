@@ -544,7 +544,6 @@ pub fn build_swap_msgs(
     Ok(())
 }
 
-// TODO: update unit tests for this function
 pub fn build_ibc_msg(
     storage: &mut dyn Storage,
     env: Env,
