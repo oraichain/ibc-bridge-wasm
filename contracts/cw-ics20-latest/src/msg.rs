@@ -68,9 +68,9 @@ pub struct UpdatePairMsg {
     /// native denom of the remote chain. Eg: orai
     pub denom: String,
     /// asset info of the local chain.
-    pub asset_info: AssetInfo,
+    pub local_asset_info: AssetInfo,
     pub remote_decimals: u8,
-    pub asset_info_decimals: u8,
+    pub local_asset_info_decimals: u8,
 }
 
 #[cw_serde]

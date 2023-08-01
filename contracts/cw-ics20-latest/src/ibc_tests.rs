@@ -491,9 +491,9 @@ mod test {
         let pair = UpdatePairMsg {
             local_channel_id: send_channel.to_string(),
             denom: denom.to_string(),
-            asset_info: asset_info.clone(),
+            local_asset_info: asset_info.clone(),
             remote_decimals: 18u8,
-            asset_info_decimals: 18u8,
+            local_asset_info_decimals: 18u8,
         };
 
         let _ = execute(
@@ -774,9 +774,9 @@ mod test {
         let update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: pair_mapping_denom.to_string(),
-            asset_info: receiver_asset_info.clone(),
+            local_asset_info: receiver_asset_info.clone(),
             remote_decimals,
-            asset_info_decimals,
+            local_asset_info_decimals: asset_info_decimals,
         };
 
         // works with proper funds
@@ -907,9 +907,9 @@ mod test {
         let update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: pair_mapping_denom.to_string(),
-            asset_info: receiver_asset_info.clone(),
+            local_asset_info: receiver_asset_info.clone(),
             remote_decimals,
-            asset_info_decimals,
+            local_asset_info_decimals: asset_info_decimals,
         };
 
         let msg = ExecuteMsg::UpdateMappingPair(update.clone());

@@ -457,16 +457,19 @@ pub fn execute_update_mapping_pair(
         deps.storage,
         &ibc_denom,
         &MappingMetadata {
-            asset_info: mapping_pair_msg.asset_info.clone(),
+            asset_info: mapping_pair_msg.local_asset_info.clone(),
             remote_decimals: mapping_pair_msg.remote_decimals,
-            asset_info_decimals: mapping_pair_msg.asset_info_decimals,
+            asset_info_decimals: mapping_pair_msg.local_asset_info_decimals,
         },
     )?;
 
     let res = Response::new()
         .add_attribute("action", "execute_update_mapping_pair")
         .add_attribute("denom", mapping_pair_msg.denom)
-        .add_attribute("new_asset_info", mapping_pair_msg.asset_info.to_string());
+        .add_attribute(
+            "new_asset_info",
+            mapping_pair_msg.local_asset_info.to_string(),
+        );
     Ok(res)
 }
 
@@ -797,9 +800,9 @@ mod test {
         let mut update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: "earth".to_string(),
-            asset_info: asset_info.clone(),
+            local_asset_info: asset_info.clone(),
             remote_decimals: 18,
-            asset_info_decimals: 18,
+            local_asset_info_decimals: 18,
         };
 
         // works with proper funds
@@ -816,7 +819,7 @@ mod test {
 
         // add another pair with a different asset info
         update.denom = "moon".to_string();
-        update.asset_info = AssetInfo::NativeToken {
+        update.local_asset_info = AssetInfo::NativeToken {
             denom: "orai".to_string(),
         };
         msg = ExecuteMsg::UpdateMappingPair(update.clone());
@@ -880,9 +883,9 @@ mod test {
         let mut update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: "earth".to_string(),
-            asset_info: asset_info.clone(),
+            local_asset_info: asset_info.clone(),
             remote_decimals: 18,
-            asset_info_decimals: 18,
+            local_asset_info_decimals: 18,
         };
 
         // works with proper funds
@@ -929,7 +932,7 @@ mod test {
         assert_ne!(response.pairs.first().unwrap().key, "foobar".to_string());
 
         // update existing key case must pass
-        update.asset_info = asset_info_second.clone();
+        update.local_asset_info = asset_info_second.clone();
         msg = ExecuteMsg::UpdateMappingPair(update.clone());
 
         let info = mock_info("gov", &coins(1234567, "ucosm"));
@@ -968,9 +971,9 @@ mod test {
         let update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: "earth".to_string(),
-            asset_info: cw20_denom.clone(),
+            local_asset_info: cw20_denom.clone(),
             remote_decimals: 18,
-            asset_info_decimals: 18,
+            local_asset_info_decimals: 18,
         };
 
         // works with proper funds
@@ -1241,9 +1244,9 @@ mod test {
         let pair = UpdatePairMsg {
             local_channel_id: local_channel.to_string(),
             denom: denom.to_string(),
-            asset_info: asset_info.clone(),
+            local_asset_info: asset_info.clone(),
             remote_decimals: 18u8,
-            asset_info_decimals: 18u8,
+            local_asset_info_decimals: 18u8,
         };
 
         let _ = execute(
@@ -1377,11 +1380,11 @@ mod test {
         let pair = UpdatePairMsg {
             local_channel_id: "not_registered_channel".to_string(),
             denom: denom.to_string(),
-            asset_info: AssetInfo::Token {
+            local_asset_info: AssetInfo::Token {
                 contract_addr: Addr::unchecked("random_cw20_denom".to_string()),
             },
             remote_decimals: 18u8,
-            asset_info_decimals: 18u8,
+            local_asset_info_decimals: 18u8,
         };
 
         execute(
