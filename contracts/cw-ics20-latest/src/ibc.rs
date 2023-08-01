@@ -652,7 +652,7 @@ pub fn build_ibc_msg(
         .range(storage, None, None, Order::Ascending)
         .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
 
-    let (is_evm_based, evm_destination) = destination.is_receiver_evm_based();
+    let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
     if is_evm_based {
         let mapping = pair_mappings
             .into_iter()
@@ -660,10 +660,14 @@ pub fn build_ibc_msg(
                 // eg: 'wasm.orai195269awwnt5m6c843q6w7hp8rt0k7syfu9de4h0wz384slshuzps8y7ccm/channel-29/eth-mainnet0x4c11249814f11b9346808179Cf06e71ac328c1b5'
                 // parse to get eth-mainnet0x...
                 // then collect eth-mainnet prefix, and compare with dest channel
+                // then we compare the dest channel with the pair mapping. They should match as well
                 convert_remote_denom_to_evm_prefix(
                     parse_ibc_denom_without_sanity_checks(key).unwrap_or_default(),
                 )
-                .eq(&evm_destination.destination_channel)
+                .eq(&evm_prefix)
+                    && parse_ibc_channel_without_sanity_checks(key)
+                        .unwrap_or_default()
+                        .eq(&destination.destination_channel)
             })
             .ok_or(StdError::generic_err("cannot find pair mappings"))?;
         let msg: CosmosMsg = process_ibc_msg(
@@ -673,7 +677,7 @@ pub fn build_ibc_msg(
             local_channel_id,
             env.contract.address.as_str(),
             remote_address, // use sender from ICS20Packet as receiver when transferring back because we have the actual receiver in memo for evm cases
-            Some(evm_destination.receiver),
+            Some(destination.receiver.clone()),
             amount,
             timeout,
             reply_args,
