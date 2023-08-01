@@ -102,9 +102,9 @@ fn initialize_basic_data_for_testings() -> (App, Addr, Addr, IbcEndpoint, String
     let update_allow_msg = ExecuteMsg::UpdateMappingPair(UpdatePairMsg {
         local_channel_id: local_channel_id.clone(),
         denom: native_denom.to_string(),
-        asset_info: asset_info.clone(),
+        local_asset_info: asset_info.clone(),
         remote_decimals,
-        asset_info_decimals,
+        local_asset_info_decimals: asset_info_decimals,
     });
     router
         .execute_contract(

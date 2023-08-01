@@ -2,13 +2,13 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
-use oraiswap::asset::AssetInfo;
+use oraiswap::{asset::AssetInfo, router::RouterController};
 
 use crate::ContractError;
 
 pub const ADMIN: Admin = Admin::new("admin");
 
-pub const CONFIG: Item<Config> = Item::new("ics20_config_v11");
+pub const CONFIG: Item<Config> = Item::new("ics20_config_v1.0.2");
 
 // Used to pass info from the ibc_packet_receive to the reply handler
 pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args");
@@ -18,20 +18,32 @@ pub const SINGLE_STEP_REPLY_ARGS: Item<SingleStepReplyArgs> = Item::new("single_
 /// static info on one channel that doesn't change
 pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
 
-/// Forward channel state is used when LOCAL chain initiates ibc transfer to remote chain
-pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
-    Map::new("channel_forward_state");
+// /// Forward channel state is used when LOCAL chain initiates ibc transfer to remote chain
+// pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
+//     Map::new("channel_forward_state");
 
 /// Reverse channel state is used when REMOTE chain initiates ibc transfer to local chain
 pub const CHANNEL_REVERSE_STATE: Map<(&str, &str), ChannelState> =
     Map::new("channel_reverse_state");
+
+/// Reverse channel state is used when LOCAL chain initiates ibc transfer to remote chain
+pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
+    Map::new("channel_forward_state");
 
 /// Every cw20 contract we allow to be sent is stored here, possibly with a gas_limit
 pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
 
 pub const TOKEN_FEE: Map<&str, Ratio> = Map::new("token_fee");
 
+// relayer fee. This fee depends on the network type, not token type
+// decimals of relayer fee should always be 10^6 because we use ORAI as relayer fee
+pub const RELAYER_FEE: Map<&str, Uint128> = Map::new("relayer_fee");
+
+// accumulated token fee
 pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
+
+// accumulated relayer fee
+pub const RELAYER_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("relayer_fee_accumulator");
 
 // MappingMetadataIndexex structs keeps a list of indexers
 pub struct MappingMetadataIndexex<'a> {
@@ -71,8 +83,9 @@ pub struct Config {
     pub default_timeout: u64,
     pub default_gas_limit: Option<u64>,
     pub fee_denom: String,
-    pub swap_router_contract: String,
-    pub fee_receiver: Addr,
+    pub swap_router_contract: RouterController,
+    pub token_fee_receiver: Addr,
+    pub relayer_fee_receiver: Addr,
 }
 
 #[cw_serde]
@@ -97,8 +110,14 @@ pub struct TokenFee {
 }
 
 #[cw_serde]
+pub struct RelayerFee {
+    pub prefix: String,
+    pub fee: Uint128,
+}
+
+#[cw_serde]
 pub struct Ratio {
-    pub nominator: u64,
+    pub numerator: u64,
     pub denominator: u64,
 }
 

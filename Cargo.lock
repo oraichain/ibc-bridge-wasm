@@ -38,6 +38,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
+name = "bech32"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf9ff0bbfd639f15c74af777d81383cf53efb7c93613f6cab67c6c11e05bbf8b"
+
+[[package]]
 name = "block-buffer"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -370,14 +376,14 @@ dependencies = [
 
 [[package]]
 name = "cw20-ics20-msg"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e04064b936344caa428fa764b4f92859c9619cc0cfc6b3d155d26f8f0a45b13f"
+version = "0.0.3"
 dependencies = [
+ "bech32",
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw-storage-plus 1.0.1",
  "cw20",
+ "oraiswap",
  "schemars",
  "serde",
 ]
@@ -601,9 +607,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "oraiswap"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d647cd0b70b11b8b78364ca2f885753b0c870785788bcf9d3d05f522fe54344e"
+checksum = "2dd3f2603bc41e2c9218e1103ce762e50ad8ee7a3648aabe03f7d48437f841c6"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",

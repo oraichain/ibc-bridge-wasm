@@ -1,6 +1,9 @@
 # IBC transfer flow:
 
 Let's assume the network that has the contract cw20-ics20 deployed is network B, the other network is A.
+
+In the source code, we call the network having cw20-ics20 deployed local chain, other networks are remote chains.
+
 In the cw-ics20-latest contract, there are couple transfer flows in the code below:
 
 ## Network A transfers native tokens to B first (A->B, where native token is not IBC token)
@@ -26,3 +29,5 @@ This is really important because by using the CosmosMsg, we force the `allow_con
 If we use CosmosMsg, then the acknowledgement packet will fail entirely, and it will be retried by the relayer as long as we fix the `allow_contract`.
 
 Normally, if it is a `ibctransfer` application developed as a submodule in Cosmos SDK, then the refund part must not fail, and we can trust that it will not fail. However, the `allow_contract` can be developed by anyone, and can be replaced => cannot be trusted.
+
+# build packages
