@@ -670,7 +670,7 @@ pub fn build_ibc_msg(
                         .eq(&destination.destination_channel)
             })
             .ok_or(StdError::generic_err("cannot find pair mappings"))?;
-        let msg: CosmosMsg = process_ibc_msg(
+        return process_ibc_msg(
             storage,
             mapping,
             receiver_asset_info,
@@ -681,9 +681,7 @@ pub fn build_ibc_msg(
             amount,
             timeout,
             reply_args,
-        )?
-        .into();
-        return Ok(SubMsg::reply_on_error(msg, NATIVE_RECEIVE_ID));
+        );
     }
     // 2nd case, where destination network is not evm, but it is still supported on our channel (eg: cw20 ATOM mapped with native ATOM on Cosmos), then we call
     let is_cosmos_based = destination.is_receiver_cosmos_based();
@@ -696,7 +694,7 @@ pub fn build_ibc_msg(
                 .eq(&destination.destination_channel)
         });
         if let Some(mapping) = mapping {
-            let msg: CosmosMsg = process_ibc_msg(
+            return process_ibc_msg(
                 storage,
                 mapping,
                 receiver_asset_info,
@@ -707,9 +705,7 @@ pub fn build_ibc_msg(
                 amount,
                 timeout,
                 reply_args,
-            )?
-            .into();
-            return Ok(SubMsg::reply_on_error(msg, NATIVE_RECEIVE_ID));
+            );
         }
 
         // final case, where the destination token is from a remote chain that we dont have a pair mapping with.
@@ -745,7 +741,7 @@ pub fn process_ibc_msg(
     amount: Uint128,
     timeout: Timestamp,
     mut reply_args: SingleStepReplyArgs,
-) -> StdResult<IbcMsg> {
+) -> StdResult<SubMsg> {
     let (new_deducted_amount, _) = deduct_token_fee(
         storage,
         parse_ibc_denom_without_sanity_checks(&pair_mapping.0)?, // denom mapping in the form port/channel/denom
@@ -769,7 +765,7 @@ pub fn process_ibc_msg(
     .map_err(|err| StdError::generic_err(err.to_string()))?;
 
     // prepare ibc message
-    let msg = build_ibc_send_packet(
+    let msg: CosmosMsg = build_ibc_send_packet(
         remote_amount,
         &pair_mapping.0,
         ibc_msg_sender,
@@ -777,7 +773,8 @@ pub fn process_ibc_msg(
         memo,
         src_channel,
         timeout.into(),
-    )?;
+    )?
+    .into();
 
     reply_args.channel = src_channel.to_string();
     reply_args.ibc_data = Some(IbcSingleStepData {
@@ -786,13 +783,13 @@ pub fn process_ibc_msg(
     });
     // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on in reply
     SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
-    Ok(msg)
+    Ok(SubMsg::reply_on_error(msg, FOLLOW_UP_ERROR_ID))
 }
 
 pub fn handle_follow_up_failure(
     storage: &mut dyn Storage,
     reply_args: SingleStepReplyArgs,
-    err: String,
+    _err: String,
 ) -> Result<Response, ContractError> {
     // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
     let mut response: Response = Response::new();
@@ -810,23 +807,24 @@ pub fn handle_follow_up_failure(
             attr("undo_reduce_channel_balance", ibc_data.remote_amount),
         ]);
     }
-    let refund_amount = Amount::from_parts(
-        parse_asset_info_denom(reply_args.refund_asset_info.clone()),
-        reply_args.local_amount,
-    );
-    // we send refund to the local receiver of the single-step tx because the funds are currently in this contract
-    let send = refund_amount.send_amount(reply_args.receiver, None);
-    response = response
-        .add_submessage(SubMsg::reply_on_error(send, REFUND_FAILURE_ID))
-        .set_data(ack_fail(err.clone()))
-        .add_attributes(vec![
-            attr("error_follow_up_msgs", err),
-            attr(
-                "attempt_refund_denom",
-                reply_args.refund_asset_info.to_string(),
-            ),
-            attr("attempt_refund_amount", reply_args.local_amount),
-        ]);
+    // remove refunding because there can be unexpected risks. Will refund manually if this happens
+    // let refund_amount = Amount::from_parts(
+    //     parse_asset_info_denom(reply_args.refund_asset_info.clone()),
+    //     reply_args.local_amount,
+    // );
+    // // we send refund to the local receiver of the single-step tx because the funds are currently in this contract
+    // let send = refund_amount.send_amount(reply_args.receiver, None);
+    // response = response
+    //     .add_submessage(SubMsg::reply_on_error(send, REFUND_FAILURE_ID))
+    //     .set_data(ack_fail(err.clone()))
+    //     .add_attributes(vec![
+    //         attr("error_follow_up_msgs", err),
+    //         attr(
+    //             "attempt_refund_denom",
+    //             reply_args.refund_asset_info.to_string(),
+    //         ),
+    //         attr("attempt_refund_amount", reply_args.local_amount),
+    //     ]);
     Ok(response)
 }
 

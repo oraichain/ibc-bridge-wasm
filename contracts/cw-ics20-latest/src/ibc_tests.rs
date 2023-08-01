@@ -10,8 +10,8 @@ mod test {
         convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
         handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
         parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
-        parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, IBC_TRANSFER_NATIVE_ERROR_ID,
-        NATIVE_RECEIVE_ID, REFUND_FAILURE_ID,
+        parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, FOLLOW_UP_ERROR_ID,
+        IBC_TRANSFER_NATIVE_ERROR_ID, NATIVE_RECEIVE_ID, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -830,7 +830,7 @@ mod test {
                     .unwrap(),
                     timeout: env.block.time.plus_seconds(timeout).into()
                 }),
-                NATIVE_RECEIVE_ID
+                FOLLOW_UP_ERROR_ID
             )
         );
         let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.as_mut().storage).unwrap();
@@ -977,7 +977,7 @@ mod test {
                     .unwrap(),
                     timeout: env.block.time.plus_seconds(timeout).into()
                 }),
-                NATIVE_RECEIVE_ID
+                FOLLOW_UP_ERROR_ID
             )
         );
     }
@@ -1169,24 +1169,25 @@ mod test {
             err.to_string(),
         )
         .unwrap();
-        assert_eq!(
-            result,
-            Response::new()
-                .add_submessage(SubMsg::reply_on_error(
-                    Amount::from_parts(native_denom.to_string(), amount.clone())
-                        .send_amount(single_step_reply_args.receiver.clone(), None),
-                    REFUND_FAILURE_ID
-                ))
-                .set_data(ack_fail(err.to_string()))
-                .add_attributes(vec![
-                    attr("error_follow_up_msgs", err),
-                    attr(
-                        "attempt_refund_denom",
-                        single_step_reply_args.refund_asset_info.to_string(),
-                    ),
-                    attr("attempt_refund_amount", single_step_reply_args.local_amount),
-                ])
-        );
+        // assert_eq!(
+        //     result,
+        //     Response::new()
+        //         .add_submessage(SubMsg::reply_on_error(
+        //             Amount::from_parts(native_denom.to_string(), amount.clone())
+        //                 .send_amount(single_step_reply_args.receiver.clone(), None),
+        //             REFUND_FAILURE_ID
+        //         ))
+        //         .set_data(ack_fail(err.to_string()))
+        //         .add_attributes(vec![
+        //             attr("error_follow_up_msgs", err),
+        //             attr(
+        //                 "attempt_refund_denom",
+        //                 single_step_reply_args.refund_asset_info.to_string(),
+        //             ),
+        //             attr("attempt_refund_amount", single_step_reply_args.local_amount),
+        //         ])
+        // );
+        assert_eq!(result, Response::new());
         let ibc_denom = "ibc_denom";
         let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
         single_step_reply_args.ibc_data = Some(IbcSingleStepData {
@@ -1525,18 +1526,21 @@ mod test {
         );
         assert_eq!(
             result,
-            IbcMsg::SendPacket {
-                channel_id: local_channel_id.to_string(),
-                data: to_binary(&Ics20Packet {
-                    amount: remote_amount.clone(),
-                    denom: ibc_denom.to_string(),
-                    receiver: ibc_msg_receiver.to_string(),
-                    sender: ibc_msg_sender.to_string(),
-                    memo: None
-                })
-                .unwrap(),
-                timeout: IbcTimeout::with_timestamp(timeout)
-            }
-        );
+            SubMsg::reply_on_error(
+                IbcMsg::SendPacket {
+                    channel_id: local_channel_id.to_string(),
+                    data: to_binary(&Ics20Packet {
+                        amount: remote_amount.clone(),
+                        denom: ibc_denom.to_string(),
+                        receiver: ibc_msg_receiver.to_string(),
+                        sender: ibc_msg_sender.to_string(),
+                        memo: None
+                    })
+                    .unwrap(),
+                    timeout: IbcTimeout::with_timestamp(timeout)
+                },
+                FOLLOW_UP_ERROR_ID
+            )
+        )
     }
 }
