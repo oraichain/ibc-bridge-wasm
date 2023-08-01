@@ -24,7 +24,8 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
     MappingMetadata, RelayerFee, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE,
-    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -510,6 +511,9 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
         },
     )?;
+    // remove all reply so that after migrating all the data is reset
+    REPLY_ARGS.remove(deps.storage);
+    SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     Ok(Response::new())
 }

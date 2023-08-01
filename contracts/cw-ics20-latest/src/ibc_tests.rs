@@ -9,8 +9,9 @@ mod test {
         ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
         convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
         handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
-        parse_voucher_denom, parse_voucher_denom_without_sanity_checks, process_ibc_msg, Ics20Ack,
-        Ics20Packet, REFUND_FAILURE_ID,
+        parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
+        parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, IBC_TRANSFER_NATIVE_ERROR_ID,
+        NATIVE_RECEIVE_ID, REFUND_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -641,7 +642,7 @@ mod test {
         };
         let native_denom = "foobar";
         let to: Option<Addr> = None;
-        let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+        let mut cosmos_msgs: Vec<SubMsg> = vec![];
         let mut operations: Vec<SwapOperation> = vec![];
         build_swap_msgs(
             minimum_receive.clone(),
@@ -691,16 +692,19 @@ mod test {
             format!("{:?}", cosmos_msgs[0]).contains("execute_swap_operations")
         );
         assert_eq!(
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: swap_router_contract.to_string(),
-                msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
-                    operations: operations,
-                    minimum_receive: Some(minimum_receive),
-                    to
-                })
-                .unwrap(),
-                funds: coins(amount.u128(), native_denom)
-            }),
+            SubMsg::reply_on_error(
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: swap_router_contract.to_string(),
+                    msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
+                        operations: operations,
+                        minimum_receive: Some(minimum_receive),
+                        to
+                    })
+                    .unwrap(),
+                    funds: coins(amount.u128(), native_denom)
+                }),
+                NATIVE_RECEIVE_ID
+            ),
             cosmos_msgs[0]
         );
     }
@@ -813,18 +817,21 @@ mod test {
 
         assert_eq!(
             result,
-            CosmosMsg::Ibc(IbcMsg::SendPacket {
-                channel_id: receive_channel.to_string(),
-                data: to_binary(&Ics20Packet::new(
-                    remote_amount.clone(),
-                    pair_mapping_key.clone(),
-                    env.contract.address.as_str(),
-                    &remote_address,
-                    Some(destination.receiver),
-                ))
-                .unwrap(),
-                timeout: env.block.time.plus_seconds(timeout).into()
-            })
+            SubMsg::reply_on_error(
+                CosmosMsg::Ibc(IbcMsg::SendPacket {
+                    channel_id: receive_channel.to_string(),
+                    data: to_binary(&Ics20Packet::new(
+                        remote_amount.clone(),
+                        pair_mapping_key.clone(),
+                        env.contract.address.as_str(),
+                        &remote_address,
+                        Some(destination.receiver),
+                    ))
+                    .unwrap(),
+                    timeout: env.block.time.plus_seconds(timeout).into()
+                }),
+                NATIVE_RECEIVE_ID
+            )
         );
         let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.as_mut().storage).unwrap();
         let ibc_data = reply_args.ibc_data.unwrap();
@@ -839,7 +846,7 @@ mod test {
     #[test]
     fn test_get_ibc_msg_cosmos_based_case() {
         // setup
-        let send_channel = "channel-9";
+        let send_channel = "channel-10";
         let allowed = "foobar";
         let allowed_gas = 777666;
         let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
@@ -854,7 +861,7 @@ mod test {
         let remote_amount = convert_local_to_remote(amount.clone(), 18, 6).unwrap();
         let destination = DestinationInfo {
             receiver: "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string(),
-            destination_channel: "channel-10".to_string(),
+            destination_channel: send_channel.to_string(),
             destination_denom: "atom".to_string(),
         };
         let env = mock_env();
@@ -862,16 +869,26 @@ mod test {
         let ibc_denom = format!("foo/bar/{}", pair_mapping_denom);
         let remote_decimals = 18;
         let asset_info_decimals = 6;
-        let remote_channel = "mars-channel";
         let pair_mapping_key = format!(
             "wasm.cosmos2contract/{}/{}",
-            remote_channel, pair_mapping_denom
+            send_channel, pair_mapping_denom
         );
 
         CHANNEL_REVERSE_STATE
             .save(
                 deps.as_mut().storage,
                 (local_channel_id, ibc_denom.as_str()),
+                &ChannelState {
+                    outstanding: remote_amount.clone(),
+                    total_sent: Uint128::from(100u128),
+                },
+            )
+            .unwrap();
+
+        CHANNEL_REVERSE_STATE
+            .save(
+                deps.as_mut().storage,
+                (send_channel, pair_mapping_key.as_str()),
                 &ChannelState {
                     outstanding: remote_amount.clone(),
                     total_sent: Uint128::from(100u128),
@@ -894,18 +911,21 @@ mod test {
         .unwrap();
         assert_eq!(
             result,
-            CosmosMsg::Ibc(IbcMsg::Transfer {
-                channel_id: "channel-10".to_string(),
-                to_address: destination.receiver.clone(),
-                amount: coin(1000u128, "atom"),
-                timeout: mock_env().block.time.plus_seconds(timeout).into()
-            })
+            SubMsg::reply_on_error(
+                CosmosMsg::Ibc(IbcMsg::Transfer {
+                    channel_id: send_channel.to_string(),
+                    to_address: destination.receiver.clone(),
+                    amount: coin(1000u128, "atom"),
+                    timeout: mock_env().block.time.plus_seconds(timeout).into()
+                }),
+                IBC_TRANSFER_NATIVE_ERROR_ID
+            )
         );
 
         // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
         // add a pair mapping so we can test the happy case evm based happy case
         let update = UpdatePairMsg {
-            local_channel_id: "mars-channel".to_string(),
+            local_channel_id: send_channel.to_string(),
             denom: pair_mapping_denom.to_string(),
             local_asset_info: receiver_asset_info.clone(),
             remote_decimals,
@@ -944,18 +964,21 @@ mod test {
 
         assert_eq!(
             result,
-            CosmosMsg::Ibc(IbcMsg::SendPacket {
-                channel_id: local_channel_id.to_string(),
-                data: to_binary(&Ics20Packet::new(
-                    remote_amount.clone(),
-                    pair_mapping_key.clone(),
-                    env.contract.address.as_str(),
-                    &destination.receiver,
-                    None,
-                ))
-                .unwrap(),
-                timeout: env.block.time.plus_seconds(timeout).into()
-            })
+            SubMsg::reply_on_error(
+                CosmosMsg::Ibc(IbcMsg::SendPacket {
+                    channel_id: send_channel.to_string(),
+                    data: to_binary(&Ics20Packet::new(
+                        remote_amount.clone(),
+                        pair_mapping_key.clone(),
+                        env.contract.address.as_str(),
+                        &destination.receiver,
+                        None,
+                    ))
+                    .unwrap(),
+                    timeout: env.block.time.plus_seconds(timeout).into()
+                }),
+                NATIVE_RECEIVE_ID
+            )
         );
     }
 
@@ -1035,15 +1058,18 @@ mod test {
 
         assert_eq!(
             result.0,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: env.contract.address.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: receiver.to_string(),
-                    amount: amount.clone()
-                })
-                .unwrap(),
-                funds: vec![]
-            })]
+            vec![SubMsg::reply_on_error(
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: env.contract.address.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: receiver.to_string(),
+                        amount: amount.clone()
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                }),
+                NATIVE_RECEIVE_ID
+            )]
         );
 
         // 2nd case, destination denom is empty => destination is collected from memo
@@ -1067,15 +1093,18 @@ mod test {
 
         assert_eq!(
             result.0,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: env.contract.address.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: receiver.to_string(),
-                    amount: amount.clone()
-                })
-                .unwrap(),
-                funds: vec![]
-            })]
+            vec![SubMsg::reply_on_error(
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: env.contract.address.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: receiver.to_string(),
+                        amount: amount.clone()
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                }),
+                NATIVE_RECEIVE_ID
+            )]
         );
 
         // 3rd case, cosmos msgs empty case, also send amount
@@ -1101,15 +1130,18 @@ mod test {
 
         assert_eq!(
             result.0,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: env.contract.address.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: receiver.to_string(),
-                    amount: amount.clone()
-                })
-                .unwrap(),
-                funds: vec![]
-            })]
+            vec![SubMsg::reply_on_error(
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: env.contract.address.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: receiver.to_string(),
+                        amount: amount.clone()
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                }),
+                NATIVE_RECEIVE_ID
+            )]
         );
     }
 
@@ -1240,17 +1272,28 @@ mod test {
     }
 
     #[test]
-    fn test_parse_voucher_denom_without_sanity_checks() {
+    fn test_parse_ibc_denom_without_sanity_checks() {
+        assert_eq!(parse_ibc_denom_without_sanity_checks("foo").is_err(), true);
         assert_eq!(
-            parse_voucher_denom_without_sanity_checks("foo").is_err(),
+            parse_ibc_denom_without_sanity_checks("foo/bar").is_err(),
             true
         );
-        assert_eq!(
-            parse_voucher_denom_without_sanity_checks("foo/bar").is_err(),
-            true
-        );
-        let result = parse_voucher_denom_without_sanity_checks("foo/bar/helloworld").unwrap();
+        let result = parse_ibc_denom_without_sanity_checks("foo/bar/helloworld").unwrap();
         assert_eq!(result, "helloworld");
+    }
+
+    #[test]
+    fn test_parse_ibc_channel_without_sanity_checks() {
+        assert_eq!(
+            parse_ibc_channel_without_sanity_checks("foo").is_err(),
+            true
+        );
+        assert_eq!(
+            parse_ibc_channel_without_sanity_checks("foo/bar").is_err(),
+            true
+        );
+        let result = parse_ibc_channel_without_sanity_checks("foo/bar/helloworld").unwrap();
+        assert_eq!(result, "bar");
     }
 
     #[test]

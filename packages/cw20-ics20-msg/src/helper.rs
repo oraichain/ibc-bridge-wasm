@@ -43,3 +43,9 @@ pub fn denom_to_asset_info(
     };
     Ok(info)
 }
+
+#[test]
+fn test_get_prefix_decode_bech32() {
+    let result = get_prefix_decode_bech32("cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm").unwrap();
+    assert_eq!(result, "cosmos".to_string());
+}

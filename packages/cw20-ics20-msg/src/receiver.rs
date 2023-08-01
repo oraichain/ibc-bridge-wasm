@@ -50,16 +50,14 @@ impl DestinationInfo {
         }
     }
 
-    pub fn is_receiver_cosmos_based(&self) -> (bool, Self) {
-        let mut new_destination: DestinationInfo = DestinationInfo { ..self.clone() };
-        match get_prefix_decode_bech32(&new_destination.receiver).ok() {
-            None => (false, new_destination),
+    pub fn is_receiver_cosmos_based(&self) -> bool {
+        match get_prefix_decode_bech32(&self.receiver).ok() {
+            None => false,
             Some(prefix) => {
                 if prefix.is_empty() {
-                    return (false, new_destination);
+                    return false;
                 }
-                new_destination.destination_channel = prefix.to_string();
-                (true, new_destination)
+                true
             }
         }
     }
@@ -90,28 +88,29 @@ fn test_is_evm_based() {
 #[test]
 fn test_is_cosmos_based() {
     let d1 = DestinationInfo::from_str("foo");
-    assert_eq!(false, d1.is_receiver_cosmos_based().0);
+    assert_eq!(false, d1.is_receiver_cosmos_based());
 
     let d1 = DestinationInfo::from_str("channel-15/foo:usdt");
-    assert_eq!(false, d1.is_receiver_cosmos_based().0);
+    assert_eq!(false, d1.is_receiver_cosmos_based());
 
     let d1 =
         DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:usdt");
     let result = d1.is_receiver_cosmos_based();
-    assert_eq!(true, result.0);
-    assert_eq!("cosmos", result.1.destination_channel);
+    assert_eq!(true, result);
 
     let d1 =
         DestinationInfo::from_str("channel-15/akash1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejjpn5xp:usdt");
     let result = d1.is_receiver_cosmos_based();
-    assert_eq!(true, result.0);
-    assert_eq!("akash", result.1.destination_channel);
+    assert_eq!(true, result);
 
     let d1 =
         DestinationInfo::from_str("channel-15/bostrom1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejuf2qpu:usdt");
     let result = d1.is_receiver_cosmos_based();
-    assert_eq!(true, result.0);
-    assert_eq!("bostrom", result.1.destination_channel);
+    assert_eq!(true, result);
+
+    let d1 = DestinationInfo::from_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
+    let result = d1.is_receiver_cosmos_based();
+    assert_eq!(true, result);
 }
 
 #[test]
@@ -213,4 +212,14 @@ fn test_parse_destination_info() {
                 "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78".to_string()
         }
     );
+    let d8 = DestinationInfo::from_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
+    assert_eq!(
+        d8,
+        DestinationInfo {
+            receiver: "cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm".to_string(),
+            destination_channel: "channel-124".to_string(),
+            destination_denom: "orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf"
+                .to_string(),
+        }
+    )
 }

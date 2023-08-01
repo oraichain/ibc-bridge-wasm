@@ -230,7 +230,6 @@ dependencies = [
 name = "cw-ics20"
 version = "1.0.2"
 dependencies = [
- "bech32",
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw-controllers",
