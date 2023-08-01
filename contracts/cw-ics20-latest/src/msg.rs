@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Binary, IbcEndpoint};
+use cosmwasm_std::{Addr, Binary, IbcEndpoint, Uint128};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
@@ -195,6 +195,14 @@ pub struct ConfigResponse {
     pub gov_contract: String,
     pub token_fee_receiver: Addr,
     pub relayer_fee_receiver: Addr,
+    pub token_fees: Vec<TokenFee>,
+    pub relayer_fees: Vec<RelayerFeeResponse>,
+}
+
+#[cw_serde]
+pub struct RelayerFeeResponse {
+    pub prefix: String,
+    pub amount: Uint128,
 }
 
 #[cw_serde]

@@ -18,7 +18,8 @@ use crate::ibc::{
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
     ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, ListMappingResponse,
-    MigrateMsg, PairQuery, PortResponse, QueryMsg, TransferBackMsg, UpdatePairMsg,
+    MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse, TransferBackMsg,
+    UpdatePairMsg,
 };
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
@@ -591,6 +592,24 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         gov_contract: admin.into(),
         relayer_fee_receiver: cfg.relayer_fee_receiver,
         token_fee_receiver: cfg.token_fee_receiver,
+        token_fees: TOKEN_FEE
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|data_result| {
+                data_result.map(|data| TokenFee {
+                    token_denom: data.0,
+                    ratio: data.1,
+                })
+            })
+            .collect::<StdResult<Vec<TokenFee>>>()?,
+        relayer_fees: RELAYER_FEE
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|data_result| {
+                data_result.map(|data| RelayerFeeResponse {
+                    prefix: data.0,
+                    amount: data.1,
+                })
+            })
+            .collect::<StdResult<Vec<RelayerFeeResponse>>>()?,
     };
     Ok(res)
 }
@@ -1443,30 +1462,14 @@ mod test {
             config.token_fee_receiver,
             Addr::unchecked("token_fee_receiver")
         );
-        assert_eq!(
-            TOKEN_FEE
-                .range(deps.as_ref().storage, None, None, Order::Ascending)
-                .count(),
-            2usize
-        );
-        assert_eq!(
-            TOKEN_FEE
-                .load(deps.as_ref().storage, "orai")
-                .unwrap()
-                .denominator,
-            10
-        );
-        assert_eq!(
-            TOKEN_FEE
-                .load(deps.as_ref().storage, "atom")
-                .unwrap()
-                .denominator,
-            5
-        );
-        assert_eq!(
-            RELAYER_FEE.load(deps.as_ref().storage, "foo").unwrap(),
-            Uint128::from(1000000u64),
-        );
+        assert_eq!(config.token_fees.len(), 2usize);
+        assert_eq!(config.token_fees[0].ratio.denominator, 5);
+        assert_eq!(config.token_fees[0].token_denom, "atom".to_string());
+        assert_eq!(config.token_fees[1].ratio.denominator, 10);
+        assert_eq!(config.token_fees[1].token_denom, "orai".to_string());
+        assert_eq!(config.relayer_fees.len(), 1);
+        assert_eq!(config.relayer_fees[0].prefix, "foo".to_string());
+        assert_eq!(config.relayer_fees[0].amount, Uint128::from(1000000u64));
     }
 
     #[test]
