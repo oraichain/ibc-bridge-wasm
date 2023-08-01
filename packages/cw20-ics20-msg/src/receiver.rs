@@ -30,23 +30,21 @@ impl DestinationInfo {
         }
     }
 
-    pub fn is_receiver_evm_based(&self) -> (bool, Self) {
-        let mut new_destination: DestinationInfo = DestinationInfo { ..self.clone() };
+    pub fn is_receiver_evm_based(&self) -> (bool, String) {
         match self.receiver.split_once("0x") {
             Some((evm_prefix, address)) => {
                 // has to have evm_prefix, otherwise we would not be able to know the real denom
                 if evm_prefix.is_empty() {
-                    return (false, new_destination);
+                    return (false, "".to_string());
                 }
                 // after spliting (removing 0x) => size 40 for eth address
                 if address.len() != 40usize {
-                    return (false, new_destination);
+                    return (false, "".to_string());
                 }
                 // we store evm-preifx as destination channel so we can filter in the pair mapping based on asset info
-                new_destination.destination_channel = evm_prefix.to_string();
-                (true, new_destination)
+                (true, evm_prefix.to_string())
             }
-            None => (false, new_destination),
+            None => (false, "".to_string()),
         }
     }
 
@@ -76,9 +74,9 @@ fn test_is_evm_based() {
     let d1 = DestinationInfo::from_str(
         "channel-15/foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222:usdt",
     );
-    let (is_evm_based, d1) = d1.is_receiver_evm_based();
+    let (is_evm_based, prefix) = d1.is_receiver_evm_based();
     assert_eq!(true, is_evm_based);
-    assert_eq!("foobar".to_string(), d1.destination_channel);
+    assert_eq!("foobar".to_string(), prefix);
     assert_eq!(
         "foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222".to_string(),
         d1.receiver

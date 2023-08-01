@@ -801,7 +801,7 @@ mod test {
         )
         .unwrap();
         destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
-        destination.destination_channel = "trx-mainnet".to_string();
+        destination.destination_channel = update.local_channel_id;
         let result = build_ibc_msg(
             deps.as_mut().storage,
             env.clone(),
