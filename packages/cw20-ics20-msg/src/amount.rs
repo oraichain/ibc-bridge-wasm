@@ -1,6 +1,8 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Coin, Decimal, StdError, StdResult, Uint128};
-use cw20::Cw20Coin;
+use cosmwasm_std::{
+    to_binary, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128, WasmMsg,
+};
+use cw20::{Cw20Coin, Cw20ExecuteMsg};
 use std::convert::TryInto;
 
 #[cw_serde]
@@ -71,6 +73,35 @@ impl Amount {
         match self {
             Amount::Native(c) => c.amount.is_zero(),
             Amount::Cw20(c) => c.amount.is_zero(),
+        }
+    }
+
+    pub fn send_amount(&self, recipient: String, msg: Option<Binary>) -> CosmosMsg {
+        match self.to_owned() {
+            Amount::Native(coin) => BankMsg::Send {
+                to_address: recipient,
+                amount: vec![coin],
+            }
+            .into(),
+            Amount::Cw20(coin) => {
+                let mut msg_cw20 = Cw20ExecuteMsg::Transfer {
+                    recipient: recipient.clone(),
+                    amount: coin.amount,
+                };
+                if let Some(msg) = msg {
+                    msg_cw20 = Cw20ExecuteMsg::Send {
+                        contract: recipient,
+                        amount: coin.amount,
+                        msg,
+                    };
+                }
+                WasmMsg::Execute {
+                    contract_addr: coin.address,
+                    msg: to_binary(&msg_cw20).unwrap(),
+                    funds: vec![],
+                }
+                .into()
+            }
         }
     }
 }

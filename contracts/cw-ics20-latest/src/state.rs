@@ -10,11 +10,6 @@ pub const ADMIN: Admin = Admin::new("admin");
 
 pub const CONFIG: Item<Config> = Item::new("ics20_config_v1.0.2");
 
-// Used to pass info from the ibc_packet_receive to the reply handler
-pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args");
-
-pub const SINGLE_STEP_REPLY_ARGS: Item<SingleStepReplyArgs> = Item::new("single_step_reply_args");
-
 /// static info on one channel that doesn't change
 pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
 
@@ -39,8 +34,11 @@ pub const TOKEN_FEE: Map<&str, Ratio> = Map::new("token_fee");
 // decimals of relayer fee should always be 10^6 because we use ORAI as relayer fee
 pub const RELAYER_FEE: Map<&str, Uint128> = Map::new("relayer_fee");
 
-// shared accumulator fee for token & relayer
+// accumulated token fee
 pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
+
+// accumulated relayer fee
+pub const RELAYER_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("relayer_fee_accumulator");
 
 // MappingMetadataIndexex structs keeps a list of indexers
 pub struct MappingMetadataIndexex<'a> {
@@ -81,7 +79,8 @@ pub struct Config {
     pub default_gas_limit: Option<u64>,
     pub fee_denom: String,
     pub swap_router_contract: RouterController,
-    pub fee_receiver: Addr,
+    pub token_fee_receiver: Addr,
+    pub relayer_fee_receiver: Addr,
 }
 
 #[cw_serde]
@@ -113,7 +112,7 @@ pub struct RelayerFee {
 
 #[cw_serde]
 pub struct Ratio {
-    pub nominator: u64,
+    pub numerator: u64,
     pub denominator: u64,
 }
 
@@ -123,28 +122,6 @@ pub struct MappingMetadata {
     pub asset_info: AssetInfo,
     pub remote_decimals: u8,
     pub asset_info_decimals: u8,
-}
-
-#[cw_serde]
-pub struct ReplyArgs {
-    pub channel: String,
-    pub denom: String,
-    pub amount: Uint128,
-}
-
-#[cw_serde]
-pub struct IbcSingleStepData {
-    pub ibc_denom: String,
-    pub remote_amount: Uint128,
-}
-
-#[cw_serde]
-pub struct SingleStepReplyArgs {
-    pub channel: String,
-    pub refund_asset_info: AssetInfo,
-    pub ibc_data: Option<IbcSingleStepData>,
-    pub local_amount: Uint128,
-    pub receiver: String,
 }
 
 pub fn increase_channel_balance(

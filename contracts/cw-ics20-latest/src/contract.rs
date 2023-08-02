@@ -6,24 +6,25 @@ use cosmwasm_std::{
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
+use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{
-    build_ibc_send_packet, collect_transfer_fee_msgs, parse_ibc_wasm_port_id, parse_voucher_denom,
-    process_deduct_fee,
+    build_ibc_send_packet, collect_fee_msgs, parse_voucher_denom, process_deduct_fee,
 };
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
     ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, ListMappingResponse,
-    MigrateMsg, PairQuery, PortResponse, QueryMsg, TransferBackMsg, UpdatePairMsg,
+    MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse, TransferBackMsg,
+    UpdatePairMsg,
 };
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
     MappingMetadata, RelayerFee, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE,
-    CONFIG, RELAYER_FEE, TOKEN_FEE,
+    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -47,7 +48,8 @@ pub fn instantiate(
         default_gas_limit: msg.default_gas_limit,
         fee_denom: "orai".to_string(),
         swap_router_contract: RouterController(msg.swap_router_contract),
-        fee_receiver: admin,
+        token_fee_receiver: admin.clone(),
+        relayer_fee_receiver: admin,
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -71,10 +73,6 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::Receive(msg) => execute_receive(deps, env, info, msg),
-        // ExecuteMsg::Transfer(msg) => {
-        //     let coin = one_coin(&info)?;
-        //     execute_transfer(deps, env, msg, Amount::Native(coin), info.sender)
-        // }
         ExecuteMsg::TransferToRemote(msg) => {
             let coin = one_coin(&info)?;
             let amount = Amount::from_parts(coin.denom, coin.amount);
@@ -91,6 +89,7 @@ pub fn execute(
             admin,
             token_fee,
             fee_receiver,
+            relayer_fee_receiver,
             relayer_fee,
         } => update_config(
             deps,
@@ -102,6 +101,7 @@ pub fn execute(
             admin,
             token_fee,
             fee_receiver,
+            relayer_fee_receiver,
             relayer_fee,
         ),
     }
@@ -117,6 +117,7 @@ pub fn update_config(
     admin: Option<String>,
     token_fee: Option<Vec<TokenFee>>,
     fee_receiver: Option<String>,
+    relayer_fee_receiver: Option<String>,
     relayer_fee: Option<Vec<RelayerFee>>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
@@ -141,7 +142,10 @@ pub fn update_config(
             config.swap_router_contract = RouterController(swap_router_contract);
         }
         if let Some(fee_receiver) = fee_receiver {
-            config.fee_receiver = deps.api.addr_validate(&fee_receiver)?;
+            config.token_fee_receiver = deps.api.addr_validate(&fee_receiver)?;
+        }
+        if let Some(relayer_fee_receiver) = relayer_fee_receiver {
+            config.relayer_fee_receiver = deps.api.addr_validate(&relayer_fee_receiver)?;
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -182,80 +186,6 @@ pub fn execute_receive(
         api.addr_validate(&wrapper.sender)?,
     )
 }
-
-// pub fn execute_transfer(
-//     deps: DepsMut,
-//     env: Env,
-//     msg: TransferMsg,
-//     amount: Amount,
-//     sender: Addr,
-// ) -> Result<Response, ContractError> {
-//     if amount.is_empty() {
-//         return Err(ContractError::NoFunds {});
-//     }
-//     // ensure the requested channel is registered
-//     if !CHANNEL_INFO.has(deps.storage, &msg.channel) {
-//         return Err(ContractError::NoSuchChannel { id: msg.channel });
-//     }
-//     let config = CONFIG.load(deps.storage)?;
-
-//     // if cw20 token, validate and ensure it is whitelisted, or we set default gas limit
-//     if let Amount::Cw20(coin) = &amount {
-//         let addr = deps.api.addr_validate(&coin.address)?;
-//         // if limit is set, then we always allow cw20
-//         if config.default_gas_limit.is_none() {
-//             ALLOW_LIST
-//                 .may_load(deps.storage, &addr)?
-//                 .ok_or(ContractError::NotOnAllowList)?;
-//         }
-//     };
-
-//     // delta from user is in seconds
-//     let timeout_delta = match msg.timeout {
-//         Some(t) => t,
-//         None => config.default_timeout,
-//     };
-//     // timeout is in nanoseconds
-//     let timeout = env.block.time.plus_seconds(timeout_delta);
-
-//     // build ics20 packet
-//     let packet = Ics20Packet::new(
-//         amount.amount(),
-//         amount.denom(),
-//         sender.as_ref(),
-//         &msg.remote_address,
-//         msg.memo,
-//     );
-//     packet.validate()?;
-
-//     // Update the balance now (optimistically) like ibctransfer modules.
-//     // In on_packet_failure (ack with error message or a timeout), we reduce the balance appropriately.
-//     // This means the channel works fine if success acks are not relayed.
-//     increase_channel_balance(
-//         deps.storage,
-//         &msg.channel,
-//         &amount.denom(),
-//         amount.amount(),
-//         true,
-//     )?;
-
-//     // prepare ibc message
-//     let msg = IbcMsg::SendPacket {
-//         channel_id: msg.channel,
-//         data: to_binary(&packet)?,
-//         timeout: timeout.into(),
-//     };
-
-//     // send response
-//     let res = Response::new()
-//         .add_message(msg)
-//         .add_attribute("action", "transfer")
-//         .add_attribute("sender", &packet.sender)
-//         .add_attribute("receiver", &packet.receiver)
-//         .add_attribute("denom", &packet.denom)
-//         .add_attribute("amount", &packet.amount.to_string());
-//     Ok(res)
-// }
 
 pub fn execute_transfer_back_to_remote_chain(
     deps: DepsMut,
@@ -303,14 +233,14 @@ pub fn execute_transfer_back_to_remote_chain(
         .ok_or(ContractError::MappingPairNotFound {})?;
 
     // if found mapping, then deduct fee based on mapping
-    let new_deducted_amount = process_deduct_fee(
+    let (new_deducted_amount, token_fee, relayer_fee) = process_deduct_fee(
         deps.storage,
         &deps.querier,
+        deps.api,
         &msg.remote_address,
         &msg.remote_denom,
-        amount.amount(),
+        amount,
         mapping.pair_mapping.asset_info_decimals,
-        &amount.denom(),
         &config.swap_router_contract,
     )?;
 
@@ -357,9 +287,17 @@ pub fn execute_transfer_back_to_remote_chain(
         timeout.into(),
     )?;
 
-    let mut cosmos_msgs =
-        collect_transfer_fee_msgs(config.fee_receiver.into_string(), deps.storage)?;
+    let mut cosmos_msgs = collect_fee_msgs(
+        deps.storage,
+        config.token_fee_receiver.into_string(),
+        TOKEN_FEE_ACCUMULATOR,
+    )?;
     cosmos_msgs.push(ibc_msg.into());
+    cosmos_msgs.append(&mut collect_fee_msgs(
+        deps.storage,
+        config.relayer_fee_receiver.into_string(),
+        RELAYER_FEE_ACCUMULATOR,
+    )?);
 
     // send response
     let res = Response::new()
@@ -369,7 +307,9 @@ pub fn execute_transfer_back_to_remote_chain(
         .add_attribute("sender", sender.as_str())
         .add_attribute("receiver", &msg.remote_address)
         .add_attribute("denom", &ibc_denom)
-        .add_attribute("amount", &amount_remote.to_string());
+        .add_attribute("amount", &amount_remote.to_string())
+        .add_attribute("token_fee", token_fee)
+        .add_attribute("relayer_fee", relayer_fee);
     Ok(res)
 }
 
@@ -439,16 +379,19 @@ pub fn execute_update_mapping_pair(
         deps.storage,
         &ibc_denom,
         &MappingMetadata {
-            asset_info: mapping_pair_msg.asset_info.clone(),
+            asset_info: mapping_pair_msg.local_asset_info.clone(),
             remote_decimals: mapping_pair_msg.remote_decimals,
-            asset_info_decimals: mapping_pair_msg.asset_info_decimals,
+            asset_info_decimals: mapping_pair_msg.local_asset_info_decimals,
         },
     )?;
 
     let res = Response::new()
         .add_attribute("action", "execute_update_mapping_pair")
         .add_attribute("denom", mapping_pair_msg.denom)
-        .add_attribute("new_asset_info", mapping_pair_msg.asset_info.to_string());
+        .add_attribute(
+            "new_asset_info",
+            mapping_pair_msg.local_asset_info.to_string(),
+        );
     Ok(res)
 }
 
@@ -485,7 +428,8 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             default_gas_limit: msg.default_gas_limit,
             fee_denom: msg.fee_denom,
             swap_router_contract: RouterController(msg.swap_router_contract),
-            fee_receiver: deps.api.addr_validate(&msg.fee_receiver)?,
+            token_fee_receiver: deps.api.addr_validate(&msg.token_fee_receiver)?,
+            relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
         },
     )?;
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -571,6 +515,26 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         fee_denom: cfg.fee_denom,
         swap_router_contract: cfg.swap_router_contract.addr(),
         gov_contract: admin.into(),
+        relayer_fee_receiver: cfg.relayer_fee_receiver,
+        token_fee_receiver: cfg.token_fee_receiver,
+        token_fees: TOKEN_FEE
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|data_result| {
+                data_result.map(|data| TokenFee {
+                    token_denom: data.0,
+                    ratio: data.1,
+                })
+            })
+            .collect::<StdResult<Vec<TokenFee>>>()?,
+        relayer_fees: RELAYER_FEE
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|data_result| {
+                data_result.map(|data| RelayerFeeResponse {
+                    prefix: data.0,
+                    amount: data.1,
+                })
+            })
+            .collect::<StdResult<Vec<RelayerFeeResponse>>>()?,
     };
     Ok(res)
 }
@@ -758,9 +722,9 @@ mod test {
         let mut update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: "earth".to_string(),
-            asset_info: asset_info.clone(),
+            local_asset_info: asset_info.clone(),
             remote_decimals: 18,
-            asset_info_decimals: 18,
+            local_asset_info_decimals: 18,
         };
 
         // works with proper funds
@@ -777,7 +741,7 @@ mod test {
 
         // add another pair with a different asset info
         update.denom = "moon".to_string();
-        update.asset_info = AssetInfo::NativeToken {
+        update.local_asset_info = AssetInfo::NativeToken {
             denom: "orai".to_string(),
         };
         msg = ExecuteMsg::UpdateMappingPair(update.clone());
@@ -841,9 +805,9 @@ mod test {
         let mut update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: "earth".to_string(),
-            asset_info: asset_info.clone(),
+            local_asset_info: asset_info.clone(),
             remote_decimals: 18,
-            asset_info_decimals: 18,
+            local_asset_info_decimals: 18,
         };
 
         // works with proper funds
@@ -890,7 +854,7 @@ mod test {
         assert_ne!(response.pairs.first().unwrap().key, "foobar".to_string());
 
         // update existing key case must pass
-        update.asset_info = asset_info_second.clone();
+        update.local_asset_info = asset_info_second.clone();
         msg = ExecuteMsg::UpdateMappingPair(update.clone());
 
         let info = mock_info("gov", &coins(1234567, "ucosm"));
@@ -929,9 +893,9 @@ mod test {
         let update = UpdatePairMsg {
             local_channel_id: "mars-channel".to_string(),
             denom: "earth".to_string(),
-            asset_info: cw20_denom.clone(),
+            local_asset_info: cw20_denom.clone(),
             remote_decimals: 18,
-            asset_info_decimals: 18,
+            local_asset_info_decimals: 18,
         };
 
         // works with proper funds
@@ -993,154 +957,6 @@ mod test {
         assert_eq!(response.pairs.len(), 0)
     }
 
-    // #[test]
-    // fn proper_checks_on_execute_native() {
-    //     let send_channel = "channel-5";
-    //     let mut deps = setup(&[send_channel, "channel-10"], &[]);
-
-    //     let mut transfer = TransferMsg {
-    //         channel: send_channel.to_string(),
-    //         remote_address: "foreign-address".to_string(),
-    //         timeout: None,
-    //         memo: Some("memo".to_string()),
-    //     };
-
-    //     // works with proper funds
-    //     let msg = ExecuteMsg::Transfer(transfer.clone());
-    //     let info = mock_info("foobar", &coins(1234567, "ucosm"));
-    //     let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-    //     assert_eq!(res.messages[0].gas_limit, None);
-    //     assert_eq!(1, res.messages.len());
-    //     if let CosmosMsg::Ibc(IbcMsg::SendPacket {
-    //         channel_id,
-    //         data,
-    //         timeout,
-    //     }) = &res.messages[0].msg
-    //     {
-    //         let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
-    //         assert_eq!(timeout, &expected_timeout.into());
-    //         assert_eq!(channel_id.as_str(), send_channel);
-    //         let msg: Ics20Packet = from_binary(data).unwrap();
-    //         assert_eq!(msg.amount, Uint128::new(1234567));
-    //         assert_eq!(msg.denom.as_str(), "ucosm");
-    //         assert_eq!(msg.sender.as_str(), "foobar");
-    //         assert_eq!(msg.receiver.as_str(), "foreign-address");
-    //     } else {
-    //         panic!("Unexpected return message: {:?}", res.messages[0]);
-    //     }
-
-    //     // reject with no funds
-    //     let msg = ExecuteMsg::Transfer(transfer.clone());
-    //     let info = mock_info("foobar", &[]);
-    //     let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
-    //     assert_eq!(err, ContractError::Payment(PaymentError::NoFunds {}));
-
-    //     // reject with multiple tokens funds
-    //     let msg = ExecuteMsg::Transfer(transfer.clone());
-    //     let info = mock_info("foobar", &[coin(1234567, "ucosm"), coin(54321, "uatom")]);
-    //     let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
-    //     assert_eq!(err, ContractError::Payment(PaymentError::MultipleDenoms {}));
-
-    //     // reject with bad channel id
-    //     transfer.channel = "channel-45".to_string();
-    //     let msg = ExecuteMsg::Transfer(transfer);
-    //     let info = mock_info("foobar", &coins(1234567, "ucosm"));
-    //     let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
-    //     assert_eq!(
-    //         err,
-    //         ContractError::NoSuchChannel {
-    //             id: "channel-45".to_string()
-    //         }
-    //     );
-    // }
-
-    // #[test]
-    // fn proper_checks_on_execute_cw20() {
-    //     let send_channel = "channel-15";
-    //     let cw20_addr = "my-token";
-    //     let mut deps = setup(&["channel-3", send_channel], &[(cw20_addr, 123456)]);
-
-    //     let transfer = TransferMsg {
-    //         channel: send_channel.to_string(),
-    //         remote_address: "foreign-address".to_string(),
-    //         timeout: Some(7777),
-    //         memo: Some("memo".to_string()),
-    //     };
-    //     let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //         sender: "my-account".into(),
-    //         amount: Uint128::new(888777666),
-    //         msg: to_binary(&transfer).unwrap(),
-    //     });
-
-    //     // works with proper funds
-    //     let info = mock_info(cw20_addr, &[]);
-    //     let res = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    //     assert_eq!(1, res.messages.len());
-    //     assert_eq!(res.messages[0].gas_limit, None);
-    //     if let CosmosMsg::Ibc(IbcMsg::SendPacket {
-    //         channel_id,
-    //         data,
-    //         timeout,
-    //     }) = &res.messages[0].msg
-    //     {
-    //         let expected_timeout = mock_env().block.time.plus_seconds(7777);
-    //         assert_eq!(timeout, &expected_timeout.into());
-    //         assert_eq!(channel_id.as_str(), send_channel);
-    //         let msg: Ics20Packet = from_binary(data).unwrap();
-    //         assert_eq!(msg.amount, Uint128::new(888777666));
-    //         assert_eq!(msg.denom, format!("cw20:{}", cw20_addr));
-    //         assert_eq!(msg.sender.as_str(), "my-account");
-    //         assert_eq!(msg.receiver.as_str(), "foreign-address");
-    //     } else {
-    //         panic!("Unexpected return message: {:?}", res.messages[0]);
-    //     }
-
-    //     // reject with tokens funds
-    //     let info = mock_info("foobar", &coins(1234567, "ucosm"));
-    //     let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
-    //     assert_eq!(err, ContractError::Payment(PaymentError::NonPayable {}));
-    // }
-
-    // #[test]
-    // fn execute_cw20_fails_if_not_whitelisted_unless_default_gas_limit() {
-    //     let send_channel = "channel-15";
-    //     let mut deps = setup(&[send_channel], &[]);
-
-    //     let cw20_addr = "my-token";
-    //     let transfer = TransferMsg {
-    //         channel: send_channel.to_string(),
-    //         remote_address: "foreign-address".to_string(),
-    //         timeout: Some(7777),
-    //         memo: Some("memo".to_string()),
-    //     };
-    //     let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-    //         sender: "my-account".into(),
-    //         amount: Uint128::new(888777666),
-    //         msg: to_binary(&transfer).unwrap(),
-    //     });
-
-    //     // rejected as not on allow list
-    //     let info = mock_info(cw20_addr, &[]);
-    //     let err = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone()).unwrap_err();
-    //     assert_eq!(err, ContractError::NotOnAllowList);
-
-    //     // add a default gas limit
-    //     migrate(
-    //         deps.as_mut(),
-    //         mock_env(),
-    //         MigrateMsg {
-    //             default_gas_limit: Some(123456),
-    //             fee_receiver: "receiver".to_string(),
-    //             default_timeout: 100u64,
-    //             fee_denom: "orai".to_string(),
-    //             swap_router_contract: "foobar".to_string(),
-    //         },
-    //     )
-    //     .unwrap();
-
-    //     // try again
-    //     execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-    // }
     // test execute transfer back to native remote chain
 
     fn mock_receive_packet(
@@ -1189,11 +1005,11 @@ mod test {
         let cw20_raw_denom = token_addr.as_str();
         let local_channel = "channel-1234";
         let ratio = Ratio {
-            nominator: 1,
+            numerator: 1,
             denominator: 10,
         };
         let fee_amount =
-            Uint128::from(amount) * Decimal::from_ratio(ratio.nominator, ratio.denominator);
+            Uint128::from(amount) * Decimal::from_ratio(ratio.numerator, ratio.denominator);
         let mut deps = setup(&[remote_channel, local_channel], &[]);
         TOKEN_FEE
             .save(deps.as_mut().storage, denom, &ratio)
@@ -1202,9 +1018,9 @@ mod test {
         let pair = UpdatePairMsg {
             local_channel_id: local_channel.to_string(),
             denom: denom.to_string(),
-            asset_info: asset_info.clone(),
+            local_asset_info: asset_info.clone(),
             remote_decimals: 18u8,
-            asset_info_decimals: 18u8,
+            local_asset_info_decimals: 18u8,
         };
 
         let _ = execute(
@@ -1338,11 +1154,11 @@ mod test {
         let pair = UpdatePairMsg {
             local_channel_id: "not_registered_channel".to_string(),
             denom: denom.to_string(),
-            asset_info: AssetInfo::Token {
+            local_asset_info: AssetInfo::Token {
                 contract_addr: Addr::unchecked("random_cw20_denom".to_string()),
             },
             remote_decimals: 18u8,
-            asset_info_decimals: 18u8,
+            local_asset_info_decimals: 18u8,
         };
 
         execute(
@@ -1377,14 +1193,14 @@ mod test {
                 TokenFee {
                     token_denom: "orai".to_string(),
                     ratio: Ratio {
-                        nominator: 1,
+                        numerator: 1,
                         denominator: 10,
                     },
                 },
                 TokenFee {
                     token_denom: "atom".to_string(),
                     ratio: Ratio {
-                        nominator: 1,
+                        numerator: 1,
                         denominator: 5,
                     },
                 },
@@ -1393,7 +1209,8 @@ mod test {
                 prefix: "foo".to_string(),
                 fee: Uint128::from(1000000u64),
             }]),
-            fee_receiver: None,
+            fee_receiver: Some("token_fee_receiver".to_string()),
+            relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),
         };
         // unauthorized case
         let unauthorized_info = mock_info(&String::from("somebody"), &[]);
@@ -1415,29 +1232,21 @@ mod test {
         assert_eq!(config.fee_denom, "hehe".to_string());
         assert_eq!(config.swap_router_contract, "new_router".to_string());
         assert_eq!(
-            TOKEN_FEE
-                .range(deps.as_ref().storage, None, None, Order::Ascending)
-                .count(),
-            2usize
+            config.relayer_fee_receiver,
+            Addr::unchecked("relayer_fee_receiver")
         );
         assert_eq!(
-            TOKEN_FEE
-                .load(deps.as_ref().storage, "orai")
-                .unwrap()
-                .denominator,
-            10
+            config.token_fee_receiver,
+            Addr::unchecked("token_fee_receiver")
         );
-        assert_eq!(
-            TOKEN_FEE
-                .load(deps.as_ref().storage, "atom")
-                .unwrap()
-                .denominator,
-            5
-        );
-        assert_eq!(
-            RELAYER_FEE.load(deps.as_ref().storage, "foo").unwrap(),
-            Uint128::from(1000000u64),
-        );
+        assert_eq!(config.token_fees.len(), 2usize);
+        assert_eq!(config.token_fees[0].ratio.denominator, 5);
+        assert_eq!(config.token_fees[0].token_denom, "atom".to_string());
+        assert_eq!(config.token_fees[1].ratio.denominator, 10);
+        assert_eq!(config.token_fees[1].token_denom, "orai".to_string());
+        assert_eq!(config.relayer_fees.len(), 1);
+        assert_eq!(config.relayer_fees[0].prefix, "foo".to_string());
+        assert_eq!(config.relayer_fees[0].amount, Uint128::from(1000000u64));
     }
 
     #[test]
