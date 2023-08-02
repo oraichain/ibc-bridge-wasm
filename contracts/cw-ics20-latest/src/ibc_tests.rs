@@ -1,30 +1,29 @@
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{attr, coin, Addr, CosmosMsg, IbcTimeout, Response, StdError};
+    use cosmwasm_std::{coin, Addr, CosmosMsg, IbcTimeout, StdError};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
-        ack_fail, build_ibc_msg, build_swap_msgs, check_gas_limit,
-        convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
-        handle_follow_up_failure, ibc_packet_receive, is_follow_up_msgs_only_send_amount,
-        parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
-        parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, FOLLOW_UP_ERROR_ID,
-        IBC_TRANSFER_NATIVE_ERROR_ID, NATIVE_RECEIVE_ID, REFUND_FAILURE_ID,
+        build_ibc_msg, build_swap_msgs, check_gas_limit, convert_remote_denom_to_evm_prefix,
+        deduct_fee, deduct_relayer_fee, deduct_token_fee, ibc_packet_receive,
+        is_follow_up_msgs_only_send_amount, parse_ibc_channel_without_sanity_checks,
+        parse_ibc_denom_without_sanity_checks, parse_voucher_denom, process_ibc_msg, Ics20Ack,
+        Ics20Packet,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
     use cosmwasm_std::{
-        from_binary, to_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, SubMsg,
-        Timestamp, Uint128, WasmMsg,
+        from_binary, to_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, Timestamp,
+        Uint128, WasmMsg,
     };
 
     use crate::error::ContractError;
     use crate::state::{
-        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, IbcSingleStepData,
-        MappingMetadata, Ratio, SingleStepReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE,
-        RELAYER_FEE_ACCUMULATOR, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+        get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, MappingMetadata, Ratio,
+        CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE,
+        TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -642,7 +641,7 @@ mod test {
         };
         let native_denom = "foobar";
         let to: Option<Addr> = None;
-        let mut cosmos_msgs: Vec<SubMsg> = vec![];
+        let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
         let mut operations: Vec<SwapOperation> = vec![];
         build_swap_msgs(
             minimum_receive.clone(),
@@ -692,19 +691,16 @@ mod test {
             format!("{:?}", cosmos_msgs[0]).contains("execute_swap_operations")
         );
         assert_eq!(
-            SubMsg::reply_on_error(
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: swap_router_contract.to_string(),
-                    msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
-                        operations: operations,
-                        minimum_receive: Some(minimum_receive),
-                        to
-                    })
-                    .unwrap(),
-                    funds: coins(amount.u128(), native_denom)
-                }),
-                NATIVE_RECEIVE_ID
-            ),
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: swap_router_contract.to_string(),
+                msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
+                    operations: operations,
+                    minimum_receive: Some(minimum_receive),
+                    to
+                })
+                .unwrap(),
+                funds: coins(amount.u128(), native_denom)
+            }),
             cosmos_msgs[0]
         );
     }
@@ -735,7 +731,6 @@ mod test {
             destination_denom: "atom".to_string(),
         };
         let timeout = 1000u64;
-        let local_receiver = "local_receiver";
 
         // first case, destination channel empty
         destination.destination_channel = "".to_string();
@@ -744,7 +739,6 @@ mod test {
             deps.as_mut().storage,
             env.clone(),
             receiver_asset_info.clone(),
-            local_receiver,
             receive_channel,
             amount,
             remote_address,
@@ -764,7 +758,6 @@ mod test {
             deps.as_mut().storage,
             env.clone(),
             receiver_asset_info.clone(),
-            local_receiver,
             receive_channel,
             amount,
             remote_address,
@@ -806,7 +799,6 @@ mod test {
             deps.as_mut().storage,
             env.clone(),
             receiver_asset_info.clone(),
-            local_receiver,
             receive_channel,
             amount,
             remote_address,
@@ -817,30 +809,19 @@ mod test {
 
         assert_eq!(
             result,
-            SubMsg::reply_on_error(
-                CosmosMsg::Ibc(IbcMsg::SendPacket {
-                    channel_id: receive_channel.to_string(),
-                    data: to_binary(&Ics20Packet::new(
-                        remote_amount.clone(),
-                        pair_mapping_key.clone(),
-                        env.contract.address.as_str(),
-                        &remote_address,
-                        Some(destination.receiver),
-                    ))
-                    .unwrap(),
-                    timeout: env.block.time.plus_seconds(timeout).into()
-                }),
-                FOLLOW_UP_ERROR_ID
-            )
+            CosmosMsg::Ibc(IbcMsg::SendPacket {
+                channel_id: receive_channel.to_string(),
+                data: to_binary(&Ics20Packet::new(
+                    remote_amount.clone(),
+                    pair_mapping_key.clone(),
+                    env.contract.address.as_str(),
+                    &remote_address,
+                    Some(destination.receiver),
+                ))
+                .unwrap(),
+                timeout: env.block.time.plus_seconds(timeout).into()
+            }),
         );
-        let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.as_mut().storage).unwrap();
-        let ibc_data = reply_args.ibc_data.unwrap();
-        assert_eq!(ibc_data.remote_amount, remote_amount);
-        assert_eq!(reply_args.local_amount, amount);
-        assert_eq!(reply_args.channel, receive_channel);
-        assert_eq!(ibc_data.ibc_denom, pair_mapping_key);
-        assert_eq!(reply_args.receiver, local_receiver.to_string());
-        assert_eq!(reply_args.refund_asset_info, receiver_asset_info)
     }
 
     #[test]
@@ -856,7 +837,6 @@ mod test {
             contract_addr: Addr::unchecked("usdt"),
         };
         let local_channel_id = "channel";
-        let local_receiver = "receiver";
         let timeout = 10u64;
         let remote_amount = convert_local_to_remote(amount.clone(), 18, 6).unwrap();
         let destination = DestinationInfo {
@@ -901,7 +881,6 @@ mod test {
             deps.as_mut().storage,
             env.clone(),
             receiver_asset_info.clone(),
-            local_receiver,
             local_channel_id,
             amount,
             remote_address,
@@ -911,15 +890,12 @@ mod test {
         .unwrap();
         assert_eq!(
             result,
-            SubMsg::reply_on_error(
-                CosmosMsg::Ibc(IbcMsg::Transfer {
-                    channel_id: send_channel.to_string(),
-                    to_address: destination.receiver.clone(),
-                    amount: coin(1000u128, "atom"),
-                    timeout: mock_env().block.time.plus_seconds(timeout).into()
-                }),
-                IBC_TRANSFER_NATIVE_ERROR_ID
-            )
+            CosmosMsg::Ibc(IbcMsg::Transfer {
+                channel_id: send_channel.to_string(),
+                to_address: destination.receiver.clone(),
+                amount: coin(1000u128, "atom"),
+                timeout: mock_env().block.time.plus_seconds(timeout).into()
+            }),
         );
 
         // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
@@ -953,7 +929,6 @@ mod test {
             deps.as_mut().storage,
             env.clone(),
             receiver_asset_info.clone(),
-            local_receiver,
             local_channel_id,
             amount,
             remote_address,
@@ -964,21 +939,18 @@ mod test {
 
         assert_eq!(
             result,
-            SubMsg::reply_on_error(
-                CosmosMsg::Ibc(IbcMsg::SendPacket {
-                    channel_id: send_channel.to_string(),
-                    data: to_binary(&Ics20Packet::new(
-                        remote_amount.clone(),
-                        pair_mapping_key.clone(),
-                        env.contract.address.as_str(),
-                        &destination.receiver,
-                        None,
-                    ))
-                    .unwrap(),
-                    timeout: env.block.time.plus_seconds(timeout).into()
-                }),
-                FOLLOW_UP_ERROR_ID
-            )
+            CosmosMsg::Ibc(IbcMsg::SendPacket {
+                channel_id: send_channel.to_string(),
+                data: to_binary(&Ics20Packet::new(
+                    remote_amount.clone(),
+                    pair_mapping_key.clone(),
+                    env.contract.address.as_str(),
+                    &destination.receiver,
+                    None,
+                ))
+                .unwrap(),
+                timeout: env.block.time.plus_seconds(timeout).into()
+            }),
         );
     }
 
@@ -994,7 +966,6 @@ mod test {
             contract_addr: Addr::unchecked("usdt"),
         };
         let local_channel_id = "channel";
-        let local_receiver = "receiver";
         let timeout = 10u64;
         let destination = DestinationInfo {
             receiver: "foo".to_string(),
@@ -1008,7 +979,6 @@ mod test {
             deps.as_mut().storage,
             env.clone(),
             receiver_asset_info.clone(),
-            local_receiver,
             local_channel_id,
             amount,
             remote_address,
@@ -1058,18 +1028,15 @@ mod test {
 
         assert_eq!(
             result.0,
-            vec![SubMsg::reply_on_error(
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: env.contract.address.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                        recipient: receiver.to_string(),
-                        amount: amount.clone()
-                    })
-                    .unwrap(),
-                    funds: vec![]
-                }),
-                NATIVE_RECEIVE_ID
-            )]
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: env.contract.address.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: receiver.to_string(),
+                    amount: amount.clone()
+                })
+                .unwrap(),
+                funds: vec![]
+            })]
         );
 
         // 2nd case, destination denom is empty => destination is collected from memo
@@ -1093,18 +1060,15 @@ mod test {
 
         assert_eq!(
             result.0,
-            vec![SubMsg::reply_on_error(
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: env.contract.address.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                        recipient: receiver.to_string(),
-                        amount: amount.clone()
-                    })
-                    .unwrap(),
-                    funds: vec![]
-                }),
-                NATIVE_RECEIVE_ID
-            )]
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: env.contract.address.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: receiver.to_string(),
+                    amount: amount.clone()
+                })
+                .unwrap(),
+                funds: vec![]
+            })]
         );
 
         // 3rd case, cosmos msgs empty case, also send amount
@@ -1130,92 +1094,16 @@ mod test {
 
         assert_eq!(
             result.0,
-            vec![SubMsg::reply_on_error(
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: env.contract.address.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                        recipient: receiver.to_string(),
-                        amount: amount.clone()
-                    })
-                    .unwrap(),
-                    funds: vec![]
-                }),
-                NATIVE_RECEIVE_ID
-            )]
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: env.contract.address.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: receiver.to_string(),
+                    amount: amount.clone()
+                })
+                .unwrap(),
+                funds: vec![]
+            })]
         );
-    }
-
-    #[test]
-    fn test_handle_follow_up_failure() {
-        let local_channel_id = "channel-0";
-        let mut deps = setup(&[local_channel_id], &[]);
-        let native_denom = "cosmos";
-        let refund_asset_info = AssetInfo::NativeToken {
-            denom: native_denom.to_string(),
-        };
-        let amount = Uint128::from(100u128);
-        let receiver = "receiver";
-        let err = "ack_failed";
-        let mut single_step_reply_args = SingleStepReplyArgs {
-            channel: local_channel_id.to_string(),
-            refund_asset_info: refund_asset_info.clone(),
-            ibc_data: None,
-            local_amount: amount,
-            receiver: receiver.to_string(),
-        };
-        let result = handle_follow_up_failure(
-            deps.as_mut().storage,
-            single_step_reply_args.clone(),
-            err.to_string(),
-        )
-        .unwrap();
-        // assert_eq!(
-        //     result,
-        //     Response::new()
-        //         .add_submessage(SubMsg::reply_on_error(
-        //             Amount::from_parts(native_denom.to_string(), amount.clone())
-        //                 .send_amount(single_step_reply_args.receiver.clone(), None),
-        //             REFUND_FAILURE_ID
-        //         ))
-        //         .set_data(ack_fail(err.to_string()))
-        //         .add_attributes(vec![
-        //             attr("error_follow_up_msgs", err),
-        //             attr(
-        //                 "attempt_refund_denom",
-        //                 single_step_reply_args.refund_asset_info.to_string(),
-        //             ),
-        //             attr("attempt_refund_amount", single_step_reply_args.local_amount),
-        //         ])
-        // );
-        assert_eq!(result, Response::new());
-        let ibc_denom = "ibc_denom";
-        let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
-        single_step_reply_args.ibc_data = Some(IbcSingleStepData {
-            ibc_denom: ibc_denom.to_string(),
-            remote_amount: remote_amount.clone(),
-        });
-        // if has ibc denom then it's evm based, need to undo reducing balance
-        CHANNEL_REVERSE_STATE
-            .save(
-                deps.as_mut().storage,
-                (local_channel_id, ibc_denom),
-                &ChannelState {
-                    outstanding: Uint128::from(0u128),
-                    total_sent: Uint128::from(100u128),
-                },
-            )
-            .unwrap();
-        handle_follow_up_failure(
-            deps.as_mut().storage,
-            single_step_reply_args.clone(),
-            err.to_string(),
-        )
-        .unwrap();
-        let channel_state = CHANNEL_REVERSE_STATE
-            .load(deps.as_mut().storage, (local_channel_id, ibc_denom))
-            .unwrap();
-        // should undo reduce channel state
-        assert_eq!(channel_state.outstanding, remote_amount)
     }
 
     #[test]
@@ -1468,13 +1356,6 @@ mod test {
         let ibc_msg_receiver = "receiver";
         let memo = None;
         let timeout = Timestamp::from_seconds(10u64);
-        let reply_args: SingleStepReplyArgs = SingleStepReplyArgs {
-            channel: local_channel_id.to_string(),
-            refund_asset_info: receiver_asset_info.clone(),
-            ibc_data: None,
-            local_amount: amount.clone(),
-            receiver: ibc_msg_receiver.to_string(),
-        };
         let remote_amount = convert_local_to_remote(amount.clone(), 18, 6).unwrap();
 
         CHANNEL_REVERSE_STATE
@@ -1499,7 +1380,6 @@ mod test {
             memo,
             amount,
             timeout,
-            reply_args,
         )
         .unwrap();
 
@@ -1512,35 +1392,20 @@ mod test {
                 .outstanding,
             Uint128::from(0u64)
         );
-        // reply args should have ibc data now
-        assert_eq!(
-            SINGLE_STEP_REPLY_ARGS
-                .load(storage)
-                .unwrap()
-                .ibc_data
-                .unwrap(),
-            IbcSingleStepData {
-                ibc_denom: ibc_denom.to_string(),
-                remote_amount
-            }
-        );
         assert_eq!(
             result,
-            SubMsg::reply_on_error(
-                IbcMsg::SendPacket {
-                    channel_id: local_channel_id.to_string(),
-                    data: to_binary(&Ics20Packet {
-                        amount: remote_amount.clone(),
-                        denom: ibc_denom.to_string(),
-                        receiver: ibc_msg_receiver.to_string(),
-                        sender: ibc_msg_sender.to_string(),
-                        memo: None
-                    })
-                    .unwrap(),
-                    timeout: IbcTimeout::with_timestamp(timeout)
-                },
-                FOLLOW_UP_ERROR_ID
-            )
+            CosmosMsg::Ibc(IbcMsg::SendPacket {
+                channel_id: local_channel_id.to_string(),
+                data: to_binary(&Ics20Packet {
+                    amount: remote_amount.clone(),
+                    denom: ibc_denom.to_string(),
+                    receiver: ibc_msg_receiver.to_string(),
+                    sender: ibc_msg_sender.to_string(),
+                    memo: None
+                })
+                .unwrap(),
+                timeout: IbcTimeout::with_timestamp(timeout)
+            },)
         )
     }
 }

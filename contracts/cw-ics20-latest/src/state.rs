@@ -10,11 +10,6 @@ pub const ADMIN: Admin = Admin::new("admin");
 
 pub const CONFIG: Item<Config> = Item::new("ics20_config_v1.0.2");
 
-// Used to pass info from the ibc_packet_receive to the reply handler
-pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args");
-
-pub const SINGLE_STEP_REPLY_ARGS: Item<SingleStepReplyArgs> = Item::new("single_step_reply_args");
-
 /// static info on one channel that doesn't change
 pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
 
@@ -127,28 +122,6 @@ pub struct MappingMetadata {
     pub asset_info: AssetInfo,
     pub remote_decimals: u8,
     pub asset_info_decimals: u8,
-}
-
-#[cw_serde]
-pub struct ReplyArgs {
-    pub channel: String,
-    pub denom: String,
-    pub amount: Uint128,
-}
-
-#[cw_serde]
-pub struct IbcSingleStepData {
-    pub ibc_denom: String,
-    pub remote_amount: Uint128,
-}
-
-#[cw_serde]
-pub struct SingleStepReplyArgs {
-    pub channel: String,
-    pub refund_asset_info: AssetInfo,
-    pub ibc_data: Option<IbcSingleStepData>,
-    pub local_amount: Uint128,
-    pub receiver: String,
 }
 
 pub fn increase_channel_balance(
