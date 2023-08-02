@@ -105,6 +105,7 @@ pub const ACK_FAILURE_ID: u64 = 64023;
 #[entry_point]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
     match reply.id {
+        // happens only when send cw20 amount to recipient failed. Wont refund because this case is unlikely to happen
         NATIVE_RECEIVE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
@@ -130,11 +131,13 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     ]))
             }
         },
+        // happens when swap failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
         SWAP_OPS_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
                 let reply_args = REPLY_ARGS.load(deps.storage)?;
                 // after getting args, we should always clear old data just in case
+                // this ID shares the REPLY_ARGS because it does not override the previous one
                 REPLY_ARGS.remove(deps.storage);
                 undo_increase_channel_balance(
                     deps.storage,
@@ -162,6 +165,8 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     ]))
             }
         },
+        // happens when failed to ibc send the packet to another chain after receiving the packet from the first remote chain.
+        // also when swap is successful. Will refund similarly to swap ops
         FOLLOW_UP_IBC_SEND_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
@@ -194,6 +199,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     ]))
             }
         },
+        // fallback case when refund fails. Wont retry => will refund manually
         REFUND_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new()
@@ -201,6 +207,8 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                 .add_attribute("action", "refund_failure_id")
                 .add_attribute("error_trying_to_refund_single_step", err)),
         },
+        // fallback case when we dont have a mapping and have to do IBC transfer and it also failed. Wont refund because it is a rare case as we dont use IBC transfer as much
+        // this means that we are sending to a normal ibc transfer channel, not ibc wasm.
         IBC_TRANSFER_NATIVE_ERROR_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new()
@@ -1029,6 +1037,7 @@ pub fn collect_fee_msgs(
 
 #[entry_point]
 /// check if success or failure and update balance, or return funds
+/// This entrypoint is called when we receive an acknowledgement packet from a remote chain
 pub fn ibc_packet_ack(
     deps: DepsMut,
     _env: Env,
@@ -1076,6 +1085,10 @@ fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicRespon
 }
 
 // return the tokens to sender
+// only gets called when we receive an acknowledgement packet from the remote chain
+// it means that the ibc packet we sent must be successful, but there's something wrong with the remote chain that they cannot receive a successful acknowledgement
+// will refund because this case is different from the FOLLOW_UP_IBC_SEND_FAILURE_ID
+// FOLLOW_UP_IBC_SEND_FAILURE_ID failed to send ibc packet. This one has successfully sent
 fn on_packet_failure(
     deps: DepsMut,
     packet: IbcPacket,
