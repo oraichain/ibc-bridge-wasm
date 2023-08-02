@@ -912,32 +912,16 @@ fn on_packet_failure(
         return Ok(IbcBasicResponse::new());
     }
 
-    // since we reduce the channel's balance optimistically when transferring back, we undo reduce it again when receiving failed ack
-    undo_reduce_channel_balance(
+    let sub_msg = handle_on_packet_failure(
         deps.storage,
-        &packet.src.channel_id,
+        &msg.sender,
         &msg.denom,
         msg.amount,
-        false,
+        &packet.src.channel_id,
     )?;
 
-    // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
-    let pair_mapping = ics20_denoms().load(deps.storage, &msg.denom)?;
-    let to_send = Amount::from_parts(
-        parse_asset_info_denom(pair_mapping.asset_info),
-        convert_remote_to_local(
-            msg.amount,
-            pair_mapping.remote_decimals,
-            pair_mapping.asset_info_decimals,
-        )?,
-    );
-    let cosmos_msg = to_send.send_amount(msg.sender.clone(), None);
-    // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
-    // similar event messages like ibctransfer module
-    let submsg = SubMsg::reply_on_error(cosmos_msg, ACK_FAILURE_ID);
-
     let res = IbcBasicResponse::new()
-        .add_submessage(submsg)
+        .add_submessage(sub_msg)
         .add_attribute("action", "acknowledge")
         .add_attribute("sender", msg.sender)
         .add_attribute("receiver", msg.receiver)
@@ -949,6 +933,39 @@ fn on_packet_failure(
     Ok(res)
 
     // send ack fail to custom contract for refund
+}
+
+pub fn handle_on_packet_failure(
+    storage: &mut dyn Storage,
+    packet_sender: &str,
+    packet_denom: &str,
+    packet_amount: Uint128,
+    src_channel_id: &str,
+) -> Result<SubMsg, ContractError> {
+    // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
+    let pair_mapping = ics20_denoms().load(storage, &packet_denom)?;
+    let to_send = Amount::from_parts(
+        parse_asset_info_denom(pair_mapping.asset_info),
+        convert_remote_to_local(
+            packet_amount,
+            pair_mapping.remote_decimals,
+            pair_mapping.asset_info_decimals,
+        )?,
+    );
+    let cosmos_msg = to_send.send_amount(packet_sender.to_string(), None);
+
+    // since we reduce the channel's balance optimistically when transferring back, we undo reduce it again when receiving failed ack
+    undo_reduce_channel_balance(
+        storage,
+        src_channel_id,
+        packet_denom,
+        packet_amount.clone(),
+        false,
+    )?;
+
+    // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
+    // similar event messages like ibctransfer module
+    Ok(SubMsg::reply_on_error(cosmos_msg, ACK_FAILURE_ID))
 }
 
 pub fn build_ibc_send_packet(

@@ -1,16 +1,16 @@
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{coin, Addr, CosmosMsg, IbcTimeout, StdError};
+    use cosmwasm_std::{coin, Addr, BankMsg, CosmosMsg, IbcTimeout, StdError, SubMsg};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
     use oraiswap::router::SwapOperation;
 
     use crate::ibc::{
         build_ibc_msg, build_swap_msgs, check_gas_limit, convert_remote_denom_to_evm_prefix,
-        deduct_fee, deduct_relayer_fee, deduct_token_fee, ibc_packet_receive,
-        is_follow_up_msgs_only_send_amount, parse_ibc_channel_without_sanity_checks,
-        parse_ibc_denom_without_sanity_checks, parse_voucher_denom, process_ibc_msg, Ics20Ack,
-        Ics20Packet,
+        deduct_fee, deduct_relayer_fee, deduct_token_fee, handle_on_packet_failure,
+        ibc_packet_receive, is_follow_up_msgs_only_send_amount,
+        parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
+        parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, ACK_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -1407,5 +1407,75 @@ mod test {
                 timeout: IbcTimeout::with_timestamp(timeout)
             },)
         )
+    }
+
+    #[test]
+    fn test_handle_on_packet_failure() {
+        let local_channel_id = "channel-0";
+        let mut deps = setup(&[local_channel_id], &[]);
+        let native_denom = "cosmos";
+        let amount = Uint128::from(100u128);
+        let sender = "sender";
+        let local_asset_info = AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        };
+        let mapping_denom = format!("wasm.cosmos2contract/{}/{}", local_channel_id, native_denom);
+
+        let result = handle_on_packet_failure(
+            deps.as_mut().storage,
+            sender,
+            native_denom,
+            amount,
+            local_channel_id,
+        )
+        .unwrap_err();
+        assert_eq!(
+            result.to_string(),
+            "cw_ics20::state::MappingMetadata not found"
+        );
+
+        // update mapping pair so that we can get refunded
+        // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
+        // add a pair mapping so we can test the happy case evm based happy case
+        let update = UpdatePairMsg {
+            local_channel_id: local_channel_id.to_string(),
+            denom: native_denom.to_string(),
+            local_asset_info: local_asset_info.clone(),
+            remote_decimals: 6,
+            local_asset_info_decimals: 6,
+        };
+
+        let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+
+        let info = mock_info("gov", &coins(1234567, "ucosm"));
+        execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+
+        // now we handle packet failure. should get sub msg
+        let result = handle_on_packet_failure(
+            deps.as_mut().storage,
+            sender,
+            &mapping_denom,
+            amount,
+            local_channel_id,
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            SubMsg::reply_on_error(
+                CosmosMsg::Bank(BankMsg::Send {
+                    to_address: sender.to_string(),
+                    amount: coins(amount.u128(), "orai")
+                }),
+                ACK_FAILURE_ID
+            )
+        );
+        let result = CHANNEL_REVERSE_STATE
+            .load(
+                deps.as_mut().storage,
+                (local_channel_id, mapping_denom.as_str()),
+            )
+            .unwrap();
+        assert_eq!(result.outstanding, amount);
+        assert_eq!(result.total_sent, Uint128::from(0u128)); // 0 because we are undo reducing
     }
 }
