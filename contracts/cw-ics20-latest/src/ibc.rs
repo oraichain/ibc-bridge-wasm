@@ -139,12 +139,12 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
         },
         // happens when failed to ibc send the packet to another chain after receiving the packet from the first remote chain.
         // also when swap is successful. Will refund similarly to swap ops
-        // only time where we undo reduce chann balance because this message is sent from Oraichain. Tokens will stay inside the contract then we refund
         FOLLOW_UP_IBC_SEND_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
                 let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
                 SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
+                // only time where we undo reduce chann balance because this message is sent and reduced optimistically on Oraichain. If fail then we undo and then refund
                 undo_reduce_channel_balance(
                     deps.storage,
                     &reply_args.channel,
@@ -160,10 +160,12 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     reply_args.amount,
                 )?;
                 Ok(Response::new()
-                    .set_data(ack_fail(err.clone()))
+                    // we all set ack success so that this token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+                    .set_data(ack_success())
                     .add_submessage(sub_msg)
                     .add_attributes(vec![
                         attr("action", "follow_up_failure_id"),
+                        attr("error_ibc_send_failure", err),
                         attr("undo_reduce_channel", reply_args.channel),
                         attr("undo_reduce_channel_ibc_denom", reply_args.denom),
                         attr("undo_reduce_channel_balance", reply_args.amount),
@@ -175,7 +177,8 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
         REFUND_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new()
-                .set_data(ack_fail(err.clone()))
+                // we all set ack success so that this token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+                .set_data(ack_success())
                 .add_attribute("action", "refund_failure_id")
                 .add_attribute("error_trying_to_refund_single_step", err)),
         },
@@ -184,7 +187,8 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
         IBC_TRANSFER_NATIVE_ERROR_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new()
-                .set_data(ack_fail(err.clone()))
+                // we all set ack success so that this token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+                .set_data(ack_success())
                 .add_attribute("action", "ibc_transfer_native_error_id")
                 .add_attribute("error_trying_to_transfer_ibc_native_with_error", err)),
         },
