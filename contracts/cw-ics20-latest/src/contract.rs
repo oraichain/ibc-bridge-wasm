@@ -24,8 +24,7 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
     MappingMetadata, RelayerFee, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE,
-    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
-    TOKEN_FEE_ACCUMULATOR,
+    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -511,9 +510,6 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
         },
     )?;
-    // remove all reply so that after migrating all the data is reset
-    REPLY_ARGS.remove(deps.storage);
-    SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     Ok(Response::new())
 }
@@ -736,14 +732,14 @@ mod test {
     use std::ops::Sub;
 
     use super::*;
-    use crate::ibc::{ibc_packet_receive, Ics20Packet};
+    use crate::ibc::{handle_packet_refund, ibc_packet_receive, Ics20Packet, REFUND_FAILURE_ID};
     use crate::state::{Ratio, TOKEN_FEE_ACCUMULATOR};
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info};
     use cosmwasm_std::{
-        coins, CosmosMsg, Decimal, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, StdError,
-        Timestamp, Uint128, WasmMsg,
+        coin, coins, BankMsg, CosmosMsg, Decimal, IbcEndpoint, IbcMsg, IbcPacket,
+        IbcPacketReceiveMsg, StdError, SubMsg, Timestamp, Uint128, WasmMsg,
     };
     use cw20::Cw20ExecuteMsg;
     use cw_controllers::AdminError;
@@ -1410,6 +1406,174 @@ mod test {
     }
 
     #[test]
+    fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
+        // arrange
+        let remote_channel = "channel-5";
+        let remote_address = "cosmos1603j3e4juddh7cuhfquxspl0p0nsun046us7n0";
+        let custom_addr = "custom-addr";
+        let original_sender = "original_sender";
+        let denom = "uatom0x";
+        let amount = 1234567u128;
+        let asset_info = AssetInfo::NativeToken {
+            denom: denom.clone().into(),
+        };
+        let cw20_raw_denom = original_sender;
+        let local_channel = "channel-1234";
+        let ratio = Ratio {
+            numerator: 1,
+            denominator: 10,
+        };
+        let fee_amount =
+            Uint128::from(amount) * Decimal::from_ratio(ratio.numerator, ratio.denominator);
+        let mut deps = setup(&[remote_channel, local_channel], &[]);
+        TOKEN_FEE
+            .save(deps.as_mut().storage, denom, &ratio)
+            .unwrap();
+
+        let pair = UpdatePairMsg {
+            local_channel_id: local_channel.to_string(),
+            denom: denom.to_string(),
+            local_asset_info: asset_info.clone(),
+            remote_decimals: 18u8,
+            local_asset_info_decimals: 18u8,
+        };
+
+        let _ = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("gov", &[]),
+            ExecuteMsg::UpdateMappingPair(pair),
+        )
+        .unwrap();
+
+        // execute
+        let mut transfer = TransferBackMsg {
+            local_channel_id: local_channel.to_string(),
+            remote_address: remote_address.to_string(),
+            remote_denom: denom.to_string(),
+            timeout: Some(DEFAULT_TIMEOUT),
+            memo: None,
+        };
+
+        let msg = ExecuteMsg::TransferToRemote(transfer.clone());
+
+        // insufficient funds case because we need to receive from remote chain first
+        let info = mock_info(cw20_raw_denom, &[coin(amount, denom)]);
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone());
+        assert_eq!(
+            res.unwrap_err(),
+            ContractError::NoSuchChannelState {
+                id: local_channel.to_string(),
+                denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
+            }
+        );
+
+        // we need to reset fee accumulator because when execute returns error, the test state is still applied
+        TOKEN_FEE_ACCUMULATOR
+            .save(
+                deps.as_mut().storage,
+                "cw20:token-addr",
+                &Uint128::from(0u64),
+            )
+            .unwrap();
+
+        // prepare some mock packets
+        let recv_packet =
+            mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
+
+        // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
+        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
+
+        // error cases
+        // revert transfer state to correct state
+        transfer.local_channel_id = local_channel.to_string();
+        let msg: ExecuteMsg = ExecuteMsg::TransferToRemote(transfer.clone());
+
+        // now we execute transfer back to remote chain
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        assert_eq!(res.messages[0].gas_limit, None);
+        println!("res messages: {:?}", res.messages);
+        assert_eq!(2, res.messages.len()); // 2 because it also has deduct fee msg
+        match res.messages[1].msg.clone() {
+            CosmosMsg::Ibc(IbcMsg::SendPacket {
+                channel_id,
+                data,
+                timeout,
+            }) => {
+                let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
+                assert_eq!(timeout, expected_timeout.into());
+                assert_eq!(channel_id.as_str(), local_channel);
+                let msg: Ics20Packet = from_binary(&data).unwrap();
+                assert_eq!(
+                    msg.amount,
+                    Uint128::new(1234567).sub(Uint128::from(fee_amount))
+                );
+                assert_eq!(
+                    msg.denom.as_str(),
+                    get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+                );
+                assert_eq!(msg.sender.as_str(), original_sender);
+                assert_eq!(msg.receiver.as_str(), remote_address);
+                // assert_eq!(msg.memo, None);
+            }
+            _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+        }
+        match res.messages[0].msg.clone() {
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address,
+                amount: message_amount,
+            }) => {
+                assert_eq!(to_address, "gov".to_string());
+                assert_eq!(message_amount, coins(fee_amount.u128(), denom));
+            }
+            _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+        }
+
+        // check new channel state after reducing balance
+        let chan = query_channel(deps.as_ref(), local_channel.into(), None).unwrap();
+        assert_eq!(
+            chan.balances,
+            vec![Amount::native(
+                fee_amount.u128(),
+                &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+            )]
+        );
+        assert_eq!(
+            chan.total_sent,
+            vec![Amount::native(
+                amount,
+                &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+            )]
+        );
+
+        // mapping pair error with wrong voucher denom
+        let pair = UpdatePairMsg {
+            local_channel_id: "not_registered_channel".to_string(),
+            denom: denom.to_string(),
+            local_asset_info: AssetInfo::Token {
+                contract_addr: Addr::unchecked("random_cw20_denom".to_string()),
+            },
+            remote_decimals: 18u8,
+            local_asset_info_decimals: 18u8,
+        };
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("gov", &[]),
+            ExecuteMsg::UpdateMappingPair(pair),
+        )
+        .unwrap();
+
+        transfer.local_channel_id = "not_registered_channel".to_string();
+        let invalid_msg = ExecuteMsg::TransferToRemote(transfer);
+        let err = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap_err();
+        assert_eq!(err, ContractError::MappingPairNotFound {});
+    }
+
+    #[test]
     fn test_update_config() {
         // arrange
         let mut deps = setup(&[], &[]);
@@ -1489,5 +1653,55 @@ mod test {
             contract_addr: Addr::unchecked("oraiaxbc".to_string()),
         };
         assert_eq!(asset_info.to_string(), "oraiaxbc".to_string())
+    }
+
+    #[test]
+    fn test_handle_packet_refund() {
+        let local_channel_id = "channel-0";
+        let mut deps = setup(&[local_channel_id], &[]);
+        let native_denom = "cosmos";
+        let amount = Uint128::from(100u128);
+        let sender = "sender";
+        let local_asset_info = AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        };
+        let mapping_denom = format!("wasm.cosmos2contract/{}/{}", local_channel_id, native_denom);
+
+        let result =
+            handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount).unwrap_err();
+        assert_eq!(
+            result.to_string(),
+            "cw_ics20::state::MappingMetadata not found"
+        );
+
+        // update mapping pair so that we can get refunded
+        // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
+        // add a pair mapping so we can test the happy case evm based happy case
+        let update = UpdatePairMsg {
+            local_channel_id: local_channel_id.to_string(),
+            denom: native_denom.to_string(),
+            local_asset_info: local_asset_info.clone(),
+            remote_decimals: 6,
+            local_asset_info_decimals: 6,
+        };
+
+        let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+
+        let info = mock_info("gov", &coins(1234567, "ucosm"));
+        execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+
+        // now we handle packet failure. should get sub msg
+        let result =
+            handle_packet_refund(deps.as_mut().storage, sender, &mapping_denom, amount).unwrap();
+        assert_eq!(
+            result,
+            SubMsg::reply_on_error(
+                CosmosMsg::Bank(BankMsg::Send {
+                    to_address: sender.to_string(),
+                    amount: coins(amount.u128(), "orai")
+                }),
+                REFUND_FAILURE_ID
+            )
+        );
     }
 }

@@ -20,10 +20,9 @@ use oraiswap::router::{RouterController, SwapOperation};
 use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, IbcSingleStepData,
-    MappingMetadata, Ratio, ReplyArgs, SingleStepReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG,
-    RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
-    TOKEN_FEE_ACCUMULATOR,
+    undo_reduce_channel_balance, ChannelInfo, MappingMetadata, Ratio, ReplyArgs, ALLOW_LIST,
+    CHANNEL_INFO, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
+    TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
@@ -97,33 +96,56 @@ pub fn ack_fail(err: String) -> Binary {
 
 // pub const RECEIVE_ID: u64 = 1337;
 pub const NATIVE_RECEIVE_ID: u64 = 1338;
-pub const FOLLOW_UP_ERROR_ID: u64 = 1339;
-pub const IBC_TRANSFER_NATIVE_ERROR_ID: u64 = 1341;
+pub const FOLLOW_UP_IBC_SEND_FAILURE_ID: u64 = 1339;
 pub const REFUND_FAILURE_ID: u64 = 1340;
+pub const IBC_TRANSFER_NATIVE_ERROR_ID: u64 = 1341;
+pub const SWAP_OPS_FAILURE_ID: u64 = 1342;
 pub const ACK_FAILURE_ID: u64 = 64023;
 
 #[entry_point]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
     match reply.id {
+        // happens only when send cw20 amount to recipient failed. Wont refund because this case is unlikely to happen
         NATIVE_RECEIVE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
+            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+            // so no undo increase
+            SubMsgResult::Err(err) => Ok(Response::new()
+                .set_data(ack_success())
+                .add_attribute("action", "native_receive_id")
+                .add_attribute("error_transferring_ibc_tokens_to_cw20", err)),
+        },
+        // happens when swap failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
+        SWAP_OPS_FAILURE_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+            // so no undo increase
             SubMsgResult::Err(err) => {
-                // Important design note:  with ibcv2 and wasmd 0.22 we can implement this all much easier.
-                // No reply needed... the receive function and submessage should return error on failure and all
-                // state gets reverted with a proper app-level message auto-generated
-
-                // Since we need compatibility with Juno (Jan 2022), we need to ensure that optimisitic
-                // state updates in ibc_packet_receive get reverted in the (unlikely) chance of an
-                // error while sending the token
-
-                // However, this requires passing some state between the ibc_packet_receive function and
-                // the reply handler. We do this with a singleton, with is "okay" for IBC as there is no
-                // reentrancy on these functions (cannot be called by another contract). This pattern
-                // should not be used for ExecuteMsg handlers
                 let reply_args = REPLY_ARGS.load(deps.storage)?;
-                // after getting args, we should always clear old data just in case
                 REPLY_ARGS.remove(deps.storage);
-                undo_increase_channel_balance(
+                let sub_msg = handle_packet_refund(
+                    deps.storage,
+                    &reply_args.local_receiver,
+                    &reply_args.denom,
+                    reply_args.amount,
+                )?;
+
+                Ok(Response::new()
+                    .set_data(ack_success())
+                    .add_submessage(sub_msg)
+                    .add_attribute("action", "swap_ops_failure_id")
+                    .add_attribute("error_swap_ops", err))
+            }
+        },
+        // happens when failed to ibc send the packet to another chain after receiving the packet from the first remote chain.
+        // also when swap is successful. Will refund similarly to swap ops
+        // only time where we undo reduce chann balance because this message is sent from Oraichain. Tokens will stay inside the contract then we refund
+        FOLLOW_UP_IBC_SEND_FAILURE_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            SubMsgResult::Err(err) => {
+                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
+                SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
+                undo_reduce_channel_balance(
                     deps.storage,
                     &reply_args.channel,
                     &reply_args.denom,
@@ -131,39 +153,39 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     false,
                 )?;
 
+                let sub_msg = handle_packet_refund(
+                    deps.storage,
+                    &reply_args.local_receiver,
+                    &reply_args.denom,
+                    reply_args.amount,
+                )?;
                 Ok(Response::new()
                     .set_data(ack_fail(err.clone()))
-                    .add_attribute("error_transferring_ibc_tokens_to_cw20", err)
+                    .add_submessage(sub_msg)
                     .add_attributes(vec![
-                        attr("undo_increase_channel", reply_args.channel),
-                        attr("undo_increase_channel_ibc_denom", reply_args.denom),
-                        attr("undo_increase_channel_amount", reply_args.amount),
+                        attr("action", "follow_up_failure_id"),
+                        attr("undo_reduce_channel", reply_args.channel),
+                        attr("undo_reduce_channel_ibc_denom", reply_args.denom),
+                        attr("undo_reduce_channel_balance", reply_args.amount),
+                        attr("refund_recipient", reply_args.local_receiver),
                     ]))
             }
         },
-        FOLLOW_UP_ERROR_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => {
-                let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
-                SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
-                // only refund, not undo reduce balance
-                handle_follow_up_failure(deps.storage, reply_args, err)
-            }
-        },
-        ACK_FAILURE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => Ok(Response::new().set_data(ack_fail(err))),
-        },
+        // fallback case when refund fails. Wont retry => will refund manually
         REFUND_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new()
                 .set_data(ack_fail(err.clone()))
+                .add_attribute("action", "refund_failure_id")
                 .add_attribute("error_trying_to_refund_single_step", err)),
         },
+        // fallback case when we dont have a mapping and have to do IBC transfer and it also failed. Wont refund because it is a rare case as we dont use IBC transfer as much
+        // this means that we are sending to a normal ibc transfer channel, not ibc wasm.
         IBC_TRANSFER_NATIVE_ERROR_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => Ok(Response::new()
                 .set_data(ack_fail(err.clone()))
+                .add_attribute("action", "ibc_transfer_native_error_id")
                 .add_attribute("error_trying_to_transfer_ibc_native_with_error", err)),
         },
         _ => Err(ContractError::UnknownReplyId { id: reply.id }),
@@ -338,33 +360,6 @@ fn do_ibc_packet_receive(
         );
     }
 
-    // // make sure we have enough balance for this
-    // reduce_channel_balance(deps.storage, &channel, denom.0, msg.amount, true)?;
-
-    // // we need to save the data to update the balances in reply
-    // let reply_args = ReplyArgs {
-    //     channel,
-    //     denom: denom.0.to_string(),
-    //     amount: msg.amount,
-    // };
-    // REPLY_ARGS.save(deps.storage, &reply_args)?;
-
-    // let to_send = Amount::from_parts(denom.0.to_string(), msg.amount);
-    // let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-    // let send = send_amount(to_send, msg.receiver.clone(), None);
-    // let mut submsg = SubMsg::reply_on_error(send, RECEIVE_ID);
-    // submsg.gas_limit = gas_limit;
-
-    // let res = IbcReceiveResponse::new()
-    //     .set_ack(ack_success())
-    //     .add_submessage(submsg)
-    //     .add_attribute("action", "receive")
-    //     .add_attribute("sender", msg.sender)
-    //     .add_attribute("receiver", msg.receiver)
-    //     .add_attribute("denom", denom.0)
-    //     .add_attribute("amount", msg.amount)
-    //     .add_attribute("success", "true");
-
     Err(ContractError::Std(StdError::generic_err("Not suppported")))
 }
 
@@ -406,6 +401,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         channel: packet.dest.channel_id.clone(),
         denom: ibc_denom.clone(),
         amount: msg.amount,
+        local_receiver: msg.receiver.clone(),
     };
     REPLY_ARGS.save(storage, &reply_args)?;
 
@@ -544,7 +540,7 @@ pub fn get_follow_up_msgs(
         &mut sub_msgs,
         swap_operations,
     )?;
-    // fallback case. If there's no cosmos messages or ibc error msg is not empty then we return send amount
+    // fallback case. If there's no cosmos message then we return send amount
     if sub_msgs.is_empty() {
         return Ok((vec![send_only_sub_msg], ibc_error_msg));
     }
@@ -603,6 +599,14 @@ pub fn build_swap_msgs(
     if operations.len() == 0 {
         return Ok(());
     }
+    // double check. We cannot let swap ops with Some(to) aka swap to someone else, not this contract and then transfer ibc => would be double spending
+    if to.is_some() && sub_msgs.len() > 0 {
+        // forbidden case. Pop all sub messages and return empty
+        while sub_msgs.pop().is_some() {
+            sub_msgs.pop();
+        }
+        return Ok(());
+    }
     sub_msgs.insert(
         0,
         SubMsg::reply_on_error(
@@ -613,7 +617,7 @@ pub fn build_swap_msgs(
                 Some(minimum_receive),
                 to,
             )?,
-            NATIVE_RECEIVE_ID,
+            SWAP_OPS_FAILURE_ID,
         ),
     );
 
@@ -638,13 +642,6 @@ pub fn build_ibc_msg(
         ));
     }
     let timeout = env.block.time.plus_seconds(default_timeout);
-    let reply_args = SingleStepReplyArgs {
-        channel: destination.destination_channel.clone(),
-        refund_asset_info: receiver_asset_info.clone(),
-        ibc_data: None,
-        receiver: local_receiver.to_string(),
-        local_amount: amount,
-    };
     let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
         .idx
         .asset_info
@@ -674,13 +671,13 @@ pub fn build_ibc_msg(
             storage,
             mapping,
             receiver_asset_info,
+            local_receiver,
             local_channel_id,
             env.contract.address.as_str(),
             remote_address, // use sender from ICS20Packet as receiver when transferring back because we have the actual receiver in memo for evm cases
             Some(destination.receiver.clone()),
             amount,
             timeout,
-            reply_args,
         );
     }
     // 2nd case, where destination network is not evm, but it is still supported on our channel (eg: cw20 ATOM mapped with native ATOM on Cosmos), then we call
@@ -698,13 +695,13 @@ pub fn build_ibc_msg(
                 storage,
                 mapping,
                 receiver_asset_info,
+                local_receiver,
                 &destination.destination_channel,
                 env.contract.address.as_str(),
                 &destination.receiver, // now we use dest receiver since cosmos based universal swap wont be sent to oraibridge, so the receiver is the correct receive addr
                 None, // no need memo because it is not used in the remote cosmos based chain
                 amount,
                 timeout,
-                reply_args,
             );
         }
 
@@ -734,13 +731,13 @@ pub fn process_ibc_msg(
     storage: &mut dyn Storage,
     pair_mapping: (String, MappingMetadata),
     receiver_asset_info: AssetInfo,
+    local_receiver: &str,
     src_channel: &str,
     ibc_msg_sender: &str,
     ibc_msg_receiver: &str,
     memo: Option<String>,
     amount: Uint128,
     timeout: Timestamp,
-    mut reply_args: SingleStepReplyArgs,
 ) -> StdResult<SubMsg> {
     let (new_deducted_amount, _) = deduct_token_fee(
         storage,
@@ -776,56 +773,18 @@ pub fn process_ibc_msg(
     )?
     .into();
 
-    reply_args.channel = src_channel.to_string();
-    reply_args.ibc_data = Some(IbcSingleStepData {
-        ibc_denom: pair_mapping.0.to_string(),
-        remote_amount,
-    });
-    // keep track of the reply. We need to keep a seperate value because if using REPLY, it could be overriden by the channel increase later on in reply
-    SINGLE_STEP_REPLY_ARGS.save(storage, &reply_args)?;
-    Ok(SubMsg::reply_on_error(msg, FOLLOW_UP_ERROR_ID))
-}
-
-pub fn handle_follow_up_failure(
-    storage: &mut dyn Storage,
-    reply_args: SingleStepReplyArgs,
-    _err: String,
-) -> Result<Response, ContractError> {
-    // if there's an error but no ibc msg aka no channel balance reduce => wont undo reduce
-    let mut response: Response = Response::new();
-    if let Some(ibc_data) = reply_args.ibc_data {
-        undo_reduce_channel_balance(
-            storage,
-            &reply_args.channel,
-            &ibc_data.ibc_denom,
-            ibc_data.remote_amount,
-            false,
-        )?;
-        response = response.add_attributes(vec![
-            attr("undo_reduce_channel", reply_args.channel),
-            attr("undo_reduce_channel_ibc_denom", ibc_data.ibc_denom),
-            attr("undo_reduce_channel_balance", ibc_data.remote_amount),
-        ]);
-    }
-    // remove refunding because there can be unexpected risks. Will refund manually if this happens
-    // let refund_amount = Amount::from_parts(
-    //     parse_asset_info_denom(reply_args.refund_asset_info.clone()),
-    //     reply_args.local_amount,
-    // );
-    // // we send refund to the local receiver of the single-step tx because the funds are currently in this contract
-    // let send = refund_amount.send_amount(reply_args.receiver, None);
-    // response = response
-    //     .add_submessage(SubMsg::reply_on_error(send, REFUND_FAILURE_ID))
-    //     .set_data(ack_fail(err.clone()))
-    //     .add_attributes(vec![
-    //         attr("error_follow_up_msgs", err),
-    //         attr(
-    //             "attempt_refund_denom",
-    //             reply_args.refund_asset_info.to_string(),
-    //         ),
-    //         attr("attempt_refund_amount", reply_args.local_amount),
-    //     ]);
-    Ok(response)
+    // keep track of the single-step reply since we need ibc data to undo reducing channel balance and local data for refunding.
+    // we use a different item to not override REPLY_ARGS
+    SINGLE_STEP_REPLY_ARGS.save(
+        storage,
+        &ReplyArgs {
+            channel: src_channel.to_string(),
+            denom: pair_mapping.0.to_string(),
+            amount: remote_amount,
+            local_receiver: local_receiver.to_string(),
+        },
+    )?;
+    Ok(SubMsg::reply_on_error(msg, FOLLOW_UP_IBC_SEND_FAILURE_ID))
 }
 
 pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
@@ -925,7 +884,7 @@ pub fn deduct_token_fee(
 
 pub fn deduct_relayer_fee(
     storage: &mut dyn Storage,
-    api: &dyn Api,
+    _api: &dyn Api,
     remote_address: &str,
     remote_token_denom: &str,
     amount: Uint128,         // local amount
@@ -1023,6 +982,7 @@ pub fn collect_fee_msgs(
 
 #[entry_point]
 /// check if success or failure and update balance, or return funds
+/// This entrypoint is called when we receive an acknowledgement packet from a remote chain
 pub fn ibc_packet_ack(
     deps: DepsMut,
     _env: Env,
@@ -1070,6 +1030,10 @@ fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicRespon
 }
 
 // return the tokens to sender
+// only gets called when we receive an acknowledgement packet from the remote chain
+// it means that the ibc packet we sent must be successful, but there's something wrong with the remote chain that they cannot receive a successful acknowledgement
+// will refund because this case is different from the FOLLOW_UP_IBC_SEND_FAILURE_ID
+// FOLLOW_UP_IBC_SEND_FAILURE_ID failed to send ibc packet. This one has successfully sent
 fn on_packet_failure(
     deps: DepsMut,
     packet: IbcPacket,
@@ -1079,35 +1043,10 @@ fn on_packet_failure(
 
     // in case that the denom is not in the mapping list, meaning that it is not transferred back, but transfer originally from this local chain
     if ics20_denoms().may_load(deps.storage, &msg.denom)?.is_none() {
-        // // undo the balance update on failure (as we pre-emptively added it on send)
-        // reduce_channel_balance(
-        //     deps.storage,
-        //     &packet.src.channel_id,
-        //     &msg.denom,
-        //     msg.amount,
-        //     true,
-        // )?;
-
-        // let to_send = Amount::from_parts(msg.denom.clone(), msg.amount);
-        // let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-        // let send = send_amount(to_send, msg.sender.clone(), None);
-        // let mut submsg = SubMsg::reply_on_error(send, ACK_FAILURE_ID);
-        // submsg.gas_limit = gas_limit;
-
-        // // similar event messages like ibctransfer module
-        // let res = IbcBasicResponse::new()
-        //     .add_submessage(submsg)
-        //     .add_attribute("action", "acknowledge")
-        //     .add_attribute("sender", msg.sender)
-        //     .add_attribute("receiver", msg.receiver)
-        //     .add_attribute("denom", msg.denom)
-        //     .add_attribute("amount", msg.amount.to_string())
-        //     .add_attribute("success", "false")
-        //     .add_attribute("error", err);
-
         return Ok(IbcBasicResponse::new());
     }
 
+    let sub_msg = handle_packet_refund(deps.storage, &msg.sender, &msg.denom, msg.amount)?;
     // since we reduce the channel's balance optimistically when transferring back, we undo reduce it again when receiving failed ack
     undo_reduce_channel_balance(
         deps.storage,
@@ -1117,23 +1056,8 @@ fn on_packet_failure(
         false,
     )?;
 
-    // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
-    let pair_mapping = ics20_denoms().load(deps.storage, &msg.denom)?;
-    let to_send = Amount::from_parts(
-        parse_asset_info_denom(pair_mapping.asset_info),
-        convert_remote_to_local(
-            msg.amount,
-            pair_mapping.remote_decimals,
-            pair_mapping.asset_info_decimals,
-        )?,
-    );
-    let cosmos_msg = to_send.send_amount(msg.sender.clone(), None);
-    // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
-    // similar event messages like ibctransfer module
-    let submsg = SubMsg::reply_on_error(cosmos_msg, ACK_FAILURE_ID);
-
     let res = IbcBasicResponse::new()
-        .add_submessage(submsg)
+        .add_submessage(sub_msg)
         .add_attribute("action", "acknowledge")
         .add_attribute("sender", msg.sender)
         .add_attribute("receiver", msg.receiver)
@@ -1145,6 +1069,29 @@ fn on_packet_failure(
     Ok(res)
 
     // send ack fail to custom contract for refund
+}
+
+pub fn handle_packet_refund(
+    storage: &mut dyn Storage,
+    packet_sender: &str,
+    packet_denom: &str,
+    packet_amount: Uint128,
+) -> Result<SubMsg, ContractError> {
+    // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
+    let pair_mapping = ics20_denoms().load(storage, &packet_denom)?;
+    let to_send = Amount::from_parts(
+        parse_asset_info_denom(pair_mapping.asset_info),
+        convert_remote_to_local(
+            packet_amount,
+            pair_mapping.remote_decimals,
+            pair_mapping.asset_info_decimals,
+        )?,
+    );
+    let cosmos_msg = to_send.send_amount(packet_sender.to_string(), None);
+
+    // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
+    // similar event messages like ibctransfer module
+    Ok(SubMsg::reply_on_error(cosmos_msg, REFUND_FAILURE_ID))
 }
 
 pub fn build_ibc_send_packet(
