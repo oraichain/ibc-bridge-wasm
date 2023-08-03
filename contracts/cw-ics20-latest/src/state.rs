@@ -212,27 +212,6 @@ pub fn undo_reduce_channel_balance(
     Ok(())
 }
 
-// this is like decrease, but it only "un-add" (= adds) outstanding, not total_sent
-// calling `increase_channel_balance` and then `undo_increase_channel_balance` should leave state unchanged.
-pub fn undo_increase_channel_balance(
-    storage: &mut dyn Storage,
-    channel: &str,
-    denom: &str,
-    amount: Uint128,
-    forward: bool,
-) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
-    state.update(storage, (channel, denom), |orig| -> StdResult<_> {
-        let mut state = orig.unwrap_or_default();
-        state.outstanding -= amount;
-        Ok(state)
-    })?;
-    Ok(())
-}
-
 pub fn get_key_ics20_ibc_denom(port_id: &str, channel_id: &str, denom: &str) -> String {
     format!("{}/{}/{}", port_id, channel_id, denom)
 }

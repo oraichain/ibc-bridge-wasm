@@ -20,9 +20,9 @@ use oraiswap::router::{RouterController, SwapOperation};
 use crate::error::{ContractError, Never};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    undo_increase_channel_balance, undo_reduce_channel_balance, ChannelInfo, MappingMetadata,
-    Ratio, ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
-    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    undo_reduce_channel_balance, ChannelInfo, MappingMetadata, Ratio, ReplyArgs, ALLOW_LIST,
+    CHANNEL_INFO, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS,
+    TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
@@ -108,44 +108,21 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
         // happens only when send cw20 amount to recipient failed. Wont refund because this case is unlikely to happen
         NATIVE_RECEIVE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => {
-                let reply_args = REPLY_ARGS.load(deps.storage)?;
-                // after getting args, we should always clear old data just in case
-                REPLY_ARGS.remove(deps.storage);
-                undo_increase_channel_balance(
-                    deps.storage,
-                    &reply_args.channel,
-                    &reply_args.denom,
-                    reply_args.amount,
-                    false,
-                )?;
-
-                Ok(Response::new()
-                    .set_data(ack_fail(err.clone()))
-                    .add_attribute("action", "native_receive_id")
-                    .add_attribute("error_transferring_ibc_tokens_to_cw20", err)
-                    .add_attributes(vec![
-                        attr("undo_increase_channel", reply_args.channel),
-                        attr("undo_increase_channel_ibc_denom", reply_args.denom),
-                        attr("undo_increase_channel_amount", reply_args.amount),
-                    ]))
-            }
+            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+            // so no undo increase
+            SubMsgResult::Err(err) => Ok(Response::new()
+                .set_data(ack_success())
+                .add_attribute("action", "native_receive_id")
+                .add_attribute("error_transferring_ibc_tokens_to_cw20", err)),
         },
         // happens when swap failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
         SWAP_OPS_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
+            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+            // so no undo increase
             SubMsgResult::Err(err) => {
                 let reply_args = REPLY_ARGS.load(deps.storage)?;
-                // after getting args, we should always clear old data just in case
-                // this ID shares the REPLY_ARGS because it does not override the previous one
                 REPLY_ARGS.remove(deps.storage);
-                undo_increase_channel_balance(
-                    deps.storage,
-                    &reply_args.channel,
-                    &reply_args.denom,
-                    reply_args.amount,
-                    false,
-                )?;
                 let sub_msg = handle_packet_refund(
                     deps.storage,
                     &reply_args.local_receiver,
@@ -154,25 +131,20 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                 )?;
 
                 Ok(Response::new()
-                    .set_data(ack_fail(err.clone()))
+                    .set_data(ack_success())
                     .add_submessage(sub_msg)
                     .add_attribute("action", "swap_ops_failure_id")
-                    .add_attribute("error_swap_ops", err)
-                    .add_attributes(vec![
-                        attr("undo_increase_channel", reply_args.channel),
-                        attr("undo_increase_channel_ibc_denom", reply_args.denom),
-                        attr("undo_increase_channel_amount", reply_args.amount),
-                    ]))
+                    .add_attribute("error_swap_ops", err))
             }
         },
         // happens when failed to ibc send the packet to another chain after receiving the packet from the first remote chain.
         // also when swap is successful. Will refund similarly to swap ops
+        // only time where we undo reduce chann balance because this message is sent from Oraichain. Tokens will stay inside the contract then we refund
         FOLLOW_UP_IBC_SEND_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
                 let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
                 SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
-                // only refund, not undo reduce balance
                 undo_reduce_channel_balance(
                     deps.storage,
                     &reply_args.channel,
@@ -387,33 +359,6 @@ fn do_ibc_packet_receive(
             &msg,
         );
     }
-
-    // // make sure we have enough balance for this
-    // reduce_channel_balance(deps.storage, &channel, denom.0, msg.amount, true)?;
-
-    // // we need to save the data to update the balances in reply
-    // let reply_args = ReplyArgs {
-    //     channel,
-    //     denom: denom.0.to_string(),
-    //     amount: msg.amount,
-    // };
-    // REPLY_ARGS.save(deps.storage, &reply_args)?;
-
-    // let to_send = Amount::from_parts(denom.0.to_string(), msg.amount);
-    // let gas_limit = check_gas_limit(deps.as_ref(), &to_send)?;
-    // let send = send_amount(to_send, msg.receiver.clone(), None);
-    // let mut submsg = SubMsg::reply_on_error(send, RECEIVE_ID);
-    // submsg.gas_limit = gas_limit;
-
-    // let res = IbcReceiveResponse::new()
-    //     .set_ack(ack_success())
-    //     .add_submessage(submsg)
-    //     .add_attribute("action", "receive")
-    //     .add_attribute("sender", msg.sender)
-    //     .add_attribute("receiver", msg.receiver)
-    //     .add_attribute("denom", denom.0)
-    //     .add_attribute("amount", msg.amount)
-    //     .add_attribute("success", "true");
 
     Err(ContractError::Std(StdError::generic_err("Not suppported")))
 }
