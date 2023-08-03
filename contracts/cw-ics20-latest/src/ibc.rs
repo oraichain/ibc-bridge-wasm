@@ -945,7 +945,7 @@ pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
         return Uint128::from(0u64);
     }
     amount.mul(Decimal::from_ratio(
-        token_fee.numerator,
+        token_fee.nominator,
         token_fee.denominator,
     ))
 }

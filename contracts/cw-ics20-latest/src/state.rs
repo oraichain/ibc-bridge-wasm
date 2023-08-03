@@ -117,7 +117,7 @@ pub struct RelayerFee {
 
 #[cw_serde]
 pub struct Ratio {
-    pub numerator: u64,
+    pub nominator: u64,
     pub denominator: u64,
 }
 
