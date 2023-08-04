@@ -755,7 +755,7 @@ pub fn deduct_token_fee(
 
 pub fn deduct_relayer_fee(
     storage: &mut dyn Storage,
-    api: &dyn Api,
+    _api: &dyn Api,
     remote_address: &str,
     remote_token_denom: &str,
     amount: Uint128,         // local amount
