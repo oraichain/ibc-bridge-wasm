@@ -273,11 +273,14 @@ pub fn ibc_packet_receive(
 
     do_ibc_packet_receive(deps, env, &packet).or_else(|err| {
         Ok(IbcReceiveResponse::new()
-            .set_ack(ack_fail(err.to_string()))
+            .set_ack(ack_success())
             .add_attributes(vec![
                 attr("action", "receive"),
                 attr("success", "false"),
                 attr("error", err.to_string()),
+                attr("src_channel_id", packet.src.channel_id),
+                attr("dst_channel_id", packet.dest.channel_id),
+                attr("packet_data", packet.data.to_base64()),
             ]))
     })
 }
