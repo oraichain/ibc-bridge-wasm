@@ -60,6 +60,19 @@ pub enum ExecuteMsg {
         fee_receiver: Option<String>,
         relayer_fee_receiver: Option<String>,
     },
+    // self-call msgs to deal with on_ibc_receive reentrancy error
+    IncreaseChannelBalanceIbcReceive {
+        dest_channel_id: String,
+        ibc_denom: String,
+        amount: Uint128,
+        local_receiver: String,
+    },
+    ReduceChannelBalanceIbcReceive {
+        src_channel_id: String,
+        ibc_denom: String,
+        amount: Uint128,
+        local_receiver: String,
+    },
 }
 
 #[cw_serde]

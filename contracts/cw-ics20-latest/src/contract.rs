@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcQuery,
-    MessageInfo, Order, PortIdResponse, Response, StdResult, Storage,
+    MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -22,9 +22,10 @@ use crate::msg::{
     UpdatePairMsg,
 };
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
-    MappingMetadata, RelayerFee, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE,
-    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
+    AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee, ADMIN, ALLOW_LIST,
+    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS,
+    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -108,7 +109,108 @@ pub fn execute(
             relayer_fee_receiver,
             relayer_fee,
         ),
+        // self-called msgs for ibc_packet_receive
+        ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        } => handle_increase_channel_balance_ibc_receive(
+            deps,
+            info.sender,
+            env.contract.address,
+            dest_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        ),
+        ExecuteMsg::ReduceChannelBalanceIbcReceive {
+            src_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        } => handle_reduce_channel_balance_ibc_receive(
+            deps.storage,
+            info.sender,
+            env.contract.address,
+            src_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        ),
     }
+}
+
+pub fn is_caller_contract(caller: Addr, contract_addr: Addr) -> StdResult<()> {
+    if caller.ne(&contract_addr) {
+        return Err(cosmwasm_std::StdError::generic_err(
+            "Caller is not the contract itself!",
+        ));
+    }
+    Ok(())
+}
+
+pub fn handle_increase_channel_balance_ibc_receive(
+    deps: DepsMut,
+    caller: Addr,
+    contract_addr: Addr,
+    dst_channel_id: String,
+    ibc_denom: String,
+    amount: Uint128,
+    local_receiver: String,
+) -> Result<Response, ContractError> {
+    is_caller_contract(caller, contract_addr)?;
+    // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
+    increase_channel_balance(
+        deps.storage,
+        &dst_channel_id,
+        &ibc_denom,
+        amount.clone(),
+        false,
+    )?;
+    // we need to save the data to update the balances in reply
+    let reply_args = ReplyArgs {
+        channel: dst_channel_id.clone(),
+        denom: ibc_denom.clone(),
+        amount: amount.clone(),
+        local_receiver: local_receiver.clone(),
+    };
+    REPLY_ARGS.save(deps.storage, &reply_args)?;
+    Ok(Response::default().add_attribute("action", "increase_channel_balance_ibc_receive"))
+}
+
+pub fn handle_reduce_channel_balance_ibc_receive(
+    storage: &mut dyn Storage,
+    caller: Addr,
+    contract_addr: Addr,
+    src_channel_id: String,
+    ibc_denom: String,
+    remote_amount: Uint128,
+    local_receiver: String,
+) -> Result<Response, ContractError> {
+    is_caller_contract(caller, contract_addr)?;
+    // because we are transferring back, we reduce the channel's balance
+    reduce_channel_balance(
+        storage,
+        src_channel_id.as_str(),
+        &ibc_denom,
+        remote_amount,
+        false,
+    )
+    .map_err(|err| StdError::generic_err(err.to_string()))?;
+
+    // keep track of the single-step reply since we need ibc data to undo reducing channel balance and local data for refunding.
+    // we use a different item to not override REPLY_ARGS
+    SINGLE_STEP_REPLY_ARGS.save(
+        storage,
+        &ReplyArgs {
+            channel: src_channel_id.to_string(),
+            denom: ibc_denom,
+            amount: remote_amount,
+            local_receiver: local_receiver.to_string(),
+        },
+    )?;
+    Ok(Response::default().add_attribute("action", "reduce_channel_balance_ibc_receive"))
 }
 
 pub fn update_config(
@@ -1230,6 +1332,7 @@ mod test {
         };
         let cw20_raw_denom = token_addr.as_str();
         let local_channel = "channel-1234";
+        let ibc_denom = get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom);
         let ratio = Ratio {
             nominator: 1,
             denominator: 10,
@@ -1275,7 +1378,6 @@ mod test {
         // insufficient funds case because we need to receive from remote chain first
         let info = mock_info(cw20_raw_denom, &[]);
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone());
-        println!("res: {:?}", res);
         assert_eq!(
             res.unwrap_err(),
             ContractError::NoSuchChannelState {
@@ -1300,6 +1402,19 @@ mod test {
         // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
         let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
+        // need to trigger increase channel balance because it is executed through submsg
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &[]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel.to_string(),
+                ibc_denom: ibc_denom.clone(),
+                amount: Uint128::from(amount),
+                local_receiver: custom_addr.to_string(),
+            },
+        )
+        .unwrap();
 
         // error cases
         // revert transfer state to correct state
@@ -1419,6 +1534,7 @@ mod test {
         };
         let cw20_raw_denom = original_sender;
         let local_channel = "channel-1234";
+        let ibc_denom = get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom);
         let ratio = Ratio {
             nominator: 1,
             denominator: 10,
@@ -1464,7 +1580,7 @@ mod test {
             res.unwrap_err(),
             ContractError::NoSuchChannelState {
                 id: local_channel.to_string(),
-                denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
+                denom: ibc_denom.clone()
             }
         );
 
@@ -1484,6 +1600,19 @@ mod test {
         // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
         let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone());
         ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
+        // need to trigger increase channel balance because it is executed through submsg
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &[]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel.to_string(),
+                ibc_denom: ibc_denom.clone(),
+                amount: Uint128::from(amount),
+                local_receiver: custom_addr.to_string(),
+            },
+        )
+        .unwrap();
 
         // error cases
         // revert transfer state to correct state
