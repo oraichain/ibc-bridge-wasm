@@ -23,8 +23,8 @@ mod test {
     use crate::error::ContractError;
     use crate::state::{
         get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, MappingMetadata, Ratio,
-        ReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
-        SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+        CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE,
+        TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -1259,25 +1259,21 @@ mod test {
         )
         .unwrap();
 
-        // assert
-        // channel balance should reduce to 0
         assert_eq!(
-            CHANNEL_REVERSE_STATE
-                .load(storage, (local_channel_id, ibc_denom))
-                .unwrap()
-                .outstanding,
-            Uint128::from(0u64)
+            result[0],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: mock_env().contract.address.into_string(),
+                msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                    src_channel_id: local_channel_id.to_string(),
+                    ibc_denom: ibc_denom.to_string(),
+                    amount: remote_amount,
+                    local_receiver: local_receiver.to_string()
+                })
+                .unwrap(),
+                funds: vec![]
+            }))
         );
-        // reply args should have ibc data now
-        assert_eq!(
-            SINGLE_STEP_REPLY_ARGS.load(storage).unwrap(),
-            ReplyArgs {
-                channel: local_channel_id.to_string(),
-                denom: ibc_denom.to_string(),
-                local_receiver: local_receiver.to_string(),
-                amount: remote_amount.clone(),
-            }
-        );
+
         assert_eq!(
             result[1],
             SubMsg::reply_on_error(

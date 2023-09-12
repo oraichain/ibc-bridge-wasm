@@ -1833,4 +1833,112 @@ mod test {
             )
         );
     }
+
+    #[test]
+    fn test_increase_channel_balance_ibc_receive() {
+        let local_channel_id = "channel-0";
+        let amount = Uint128::from(10u128);
+        let ibc_denom = "foobar";
+        let local_receiver = "receiver";
+        let mut deps = setup(&[local_channel_id], &[]);
+
+        assert_eq!(
+            execute(
+                deps.as_mut(),
+                mock_env(),
+                mock_info("attacker", &vec![]),
+                ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                    dest_channel_id: local_channel_id.to_string(),
+                    ibc_denom: ibc_denom.to_string(),
+                    amount: amount.clone(),
+                    local_receiver: local_receiver.to_string(),
+                },
+            )
+            .unwrap_err(),
+            ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+        );
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &vec![]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap();
+        let channel_state = CHANNEL_REVERSE_STATE
+            .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+            .unwrap();
+        assert_eq!(channel_state.outstanding, amount.clone());
+        assert_eq!(channel_state.total_sent, amount.clone());
+        let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+        assert_eq!(reply_args.amount, amount.clone());
+        assert_eq!(reply_args.channel, local_channel_id.clone());
+        assert_eq!(reply_args.denom, ibc_denom.to_string());
+        assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+    }
+
+    #[test]
+    fn test_reduce_channel_balance_ibc_receive() {
+        let local_channel_id = "channel-0";
+        let amount = Uint128::from(10u128);
+        let ibc_denom = "foobar";
+        let local_receiver = "receiver";
+        let mut deps = setup(&[local_channel_id], &[]);
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &vec![]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            execute(
+                deps.as_mut(),
+                mock_env(),
+                mock_info("attacker", &vec![]),
+                ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                    src_channel_id: local_channel_id.to_string(),
+                    ibc_denom: ibc_denom.to_string(),
+                    amount: amount.clone(),
+                    local_receiver: local_receiver.to_string(),
+                },
+            )
+            .unwrap_err(),
+            ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+        );
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &vec![]),
+            ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                src_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap();
+        let channel_state = CHANNEL_REVERSE_STATE
+            .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+            .unwrap();
+        assert_eq!(channel_state.outstanding, Uint128::zero());
+        assert_eq!(channel_state.total_sent, Uint128::from(10u128));
+        let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+        assert_eq!(reply_args.amount, amount.clone());
+        assert_eq!(reply_args.channel, local_channel_id.clone());
+        assert_eq!(reply_args.denom, ibc_denom.to_string());
+        assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+    }
 }

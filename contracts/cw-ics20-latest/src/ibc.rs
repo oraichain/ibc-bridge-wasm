@@ -20,9 +20,9 @@ use oraiswap::router::{RouterController, SwapOperation};
 use crate::error::{ContractError, Never};
 use crate::msg::ExecuteMsg;
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, undo_reduce_channel_balance,
-    ChannelInfo, MappingMetadata, Ratio, ReplyArgs, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE,
-    RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ChannelInfo,
+    MappingMetadata, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
+    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
@@ -778,27 +778,6 @@ pub fn process_ibc_msg(
         funds: vec![],
     }));
 
-    // because we are transferring back, we reduce the channel's balance
-    reduce_channel_balance(
-        storage,
-        src_channel.clone(),
-        &pair_mapping.0.clone(),
-        remote_amount,
-        false,
-    )
-    .map_err(|err| StdError::generic_err(err.to_string()))?;
-
-    // keep track of the single-step reply since we need ibc data to undo reducing channel balance and local data for refunding.
-    // we use a different item to not override REPLY_ARGS
-    SINGLE_STEP_REPLY_ARGS.save(
-        storage,
-        &ReplyArgs {
-            channel: src_channel.to_string(),
-            denom: pair_mapping.0.to_string(),
-            amount: remote_amount,
-            local_receiver: local_receiver.to_string(),
-        },
-    )?;
     Ok(vec![
         reduce_balance_msg,
         SubMsg::reply_on_error(msg, FOLLOW_UP_IBC_SEND_FAILURE_ID),
