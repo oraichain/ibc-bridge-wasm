@@ -276,7 +276,9 @@ pub fn ibc_packet_receive(
         TOKEN_FEE_ACCUMULATOR.clear(deps.storage);
         RELAYER_FEE_ACCUMULATOR.clear(deps.storage);
         Ok(IbcReceiveResponse::new()
-            .set_ack(ack_success())
+            // trade-off between reentrancy & refunding. If error, then it should be a serious error => refund to oraibridge
+            // that's better than trying to update balance & let it stay in this contract and expose to reentrancy
+            .set_ack(ack_fail(err.to_string()))
             .add_attributes(vec![
                 attr("action", "receive"),
                 attr("success", "false"),
