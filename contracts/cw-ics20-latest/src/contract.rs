@@ -1,3 +1,5 @@
+use std::vec;
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
@@ -156,7 +158,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
     contract_addr: Addr,
     dst_channel_id: String,
     ibc_denom: String,
-    amount: Uint128,
+    remote_amount: Uint128,
     local_receiver: String,
 ) -> Result<Response, ContractError> {
     is_caller_contract(caller, contract_addr)?;
@@ -165,18 +167,24 @@ pub fn handle_increase_channel_balance_ibc_receive(
         deps.storage,
         &dst_channel_id,
         &ibc_denom,
-        amount.clone(),
+        remote_amount.clone(),
         false,
     )?;
     // we need to save the data to update the balances in reply
     let reply_args = ReplyArgs {
         channel: dst_channel_id.clone(),
         denom: ibc_denom.clone(),
-        amount: amount.clone(),
+        amount: remote_amount.clone(),
         local_receiver: local_receiver.clone(),
     };
     REPLY_ARGS.save(deps.storage, &reply_args)?;
-    Ok(Response::default().add_attribute("action", "increase_channel_balance_ibc_receive"))
+    Ok(Response::default().add_attributes(vec![
+        ("action", "increase_channel_balance_ibc_receive"),
+        ("channel_id", dst_channel_id.as_str()),
+        ("ibc_denom", ibc_denom.as_str()),
+        ("amount", remote_amount.to_string().as_str()),
+        ("local_receiver", local_receiver.as_str()),
+    ]))
 }
 
 pub fn handle_reduce_channel_balance_ibc_receive(
@@ -205,12 +213,18 @@ pub fn handle_reduce_channel_balance_ibc_receive(
         storage,
         &ReplyArgs {
             channel: src_channel_id.to_string(),
-            denom: ibc_denom,
+            denom: ibc_denom.clone(),
             amount: remote_amount,
             local_receiver: local_receiver.to_string(),
         },
     )?;
-    Ok(Response::default().add_attribute("action", "reduce_channel_balance_ibc_receive"))
+    Ok(Response::default().add_attributes(vec![
+        ("action", "reduce_channel_balance_ibc_receive"),
+        ("channel_id", src_channel_id.as_str()),
+        ("ibc_denom", ibc_denom.as_str()),
+        ("amount", remote_amount.to_string().as_str()),
+        ("local_receiver", local_receiver.as_str()),
+    ]))
 }
 
 pub fn update_config(
