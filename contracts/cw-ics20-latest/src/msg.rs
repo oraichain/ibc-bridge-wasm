@@ -73,6 +73,12 @@ pub enum ExecuteMsg {
         amount: Uint128,
         local_receiver: String,
     },
+    OverrideChannelBalance {
+        channel_id: String,
+        ibc_denom: String,
+        outstanding: Uint128,
+        total_sent: Option<Uint128>,
+    },
 }
 
 #[cw_serde]
@@ -148,6 +154,9 @@ pub enum QueryMsg {
     /// Returns the details of the name channel, error if not created.
     #[returns(ChannelResponse)]
     Channel { id: String, forward: Option<bool> },
+    /// Returns the details of the name channel, error if not created.
+    #[returns(ChannelWithKeyResponse)]
+    ChannelWithKey { channel_id: String, denom: String },
     /// Show the Config.
     #[returns(ConfigResponse)]
     Config {},
@@ -192,6 +201,17 @@ pub struct ChannelResponse {
     /// The total number of tokens that have been sent over this channel
     /// (even if many have been returned, so balance is low)
     pub total_sent: Vec<Amount>,
+}
+
+#[cw_serde]
+pub struct ChannelWithKeyResponse {
+    /// Information on the channel's connection
+    pub info: ChannelInfo,
+    /// How many tokens we currently have pending over this channel
+    pub balance: Amount,
+    /// The total number of tokens that have been sent over this channel
+    /// (even if many have been returned, so balance is low)
+    pub total_sent: Amount,
 }
 
 #[cw_serde]

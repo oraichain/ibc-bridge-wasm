@@ -18,16 +18,16 @@ use crate::ibc::{
     build_ibc_send_packet, collect_fee_msgs, parse_voucher_denom, process_deduct_fee,
 };
 use crate::msg::{
-    AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
-    ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, ListMappingResponse,
-    MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse, TransferBackMsg,
-    UpdatePairMsg,
+    AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse,
+    ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
+    ListMappingResponse, MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse,
+    TransferBackMsg, UpdatePairMsg,
 };
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, reduce_channel_balance,
-    AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee, ADMIN, ALLOW_LIST,
-    CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
+    reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
+    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
+    RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -140,6 +140,19 @@ pub fn execute(
             amount,
             local_receiver,
         ),
+        ExecuteMsg::OverrideChannelBalance {
+            channel_id,
+            ibc_denom,
+            outstanding,
+            total_sent,
+        } => handle_override_channel_balance(
+            deps,
+            info,
+            channel_id,
+            ibc_denom,
+            outstanding,
+            total_sent,
+        ),
     }
 }
 
@@ -150,6 +163,31 @@ pub fn is_caller_contract(caller: Addr, contract_addr: Addr) -> StdResult<()> {
         ));
     }
     Ok(())
+}
+
+pub fn handle_override_channel_balance(
+    deps: DepsMut,
+    info: MessageInfo,
+    channel_id: String,
+    ibc_denom: String,
+    outstanding: Uint128,
+    total_sent: Option<Uint128>,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+    override_channel_balance(
+        deps.storage,
+        &channel_id,
+        &ibc_denom,
+        outstanding,
+        total_sent,
+    )?;
+    Ok(Response::new().add_attributes(vec![
+        ("action", "override_channel_balance"),
+        ("channel_id", &channel_id),
+        ("ibc_denom", &ibc_denom),
+        ("new_outstanding", &outstanding.to_string()),
+        ("total_sent", &total_sent.unwrap_or_default().to_string()),
+    ]))
 }
 
 pub fn handle_increase_channel_balance_ibc_receive(
@@ -635,7 +673,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Port {} => to_binary(&query_port(deps)?),
         QueryMsg::ListChannels {} => to_binary(&query_list(deps)?),
-        QueryMsg::Channel { id, forward } => to_binary(&query_channel(deps, id, forward)?),
+        QueryMsg::Channel { id, forward } => to_binary(&query_channel(deps, id)?),
+        QueryMsg::ChannelWithKey { channel_id, denom } => {
+            to_binary(&query_channel_with_key(deps, channel_id, denom)?)
+        }
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Allowed { contract } => to_binary(&query_allowed(deps, contract)?),
         QueryMsg::ListAllowed {
@@ -674,7 +715,7 @@ fn query_list(deps: Deps) -> StdResult<ListChannelsResponse> {
 }
 
 // make public for ibc tests
-pub fn query_channel(deps: Deps, id: String, _forward: Option<bool>) -> StdResult<ChannelResponse> {
+pub fn query_channel(deps: Deps, id: String) -> StdResult<ChannelResponse> {
     let info = CHANNEL_INFO.load(deps.storage, &id)?;
     // this returns Vec<(outstanding, total)>
     let channel_state = CHANNEL_REVERSE_STATE;
@@ -696,6 +737,28 @@ pub fn query_channel(deps: Deps, id: String, _forward: Option<bool>) -> StdResul
     Ok(ChannelResponse {
         info,
         balances,
+        total_sent,
+    })
+}
+
+pub fn query_channel_with_key(
+    deps: Deps,
+    channel_id: String,
+    denom: String,
+) -> StdResult<ChannelWithKeyResponse> {
+    let info = CHANNEL_INFO.load(deps.storage, &channel_id)?;
+    // this returns Vec<(outstanding, total)>
+    let (balance, total_sent) = CHANNEL_REVERSE_STATE
+        .load(deps.storage, (&channel_id, &denom))
+        .map(|channel_state| {
+            let outstanding = Amount::from_parts(denom.clone(), channel_state.outstanding);
+            let total = Amount::from_parts(denom, channel_state.total_sent);
+            (outstanding, total)
+        })?;
+
+    Ok(ChannelWithKeyResponse {
+        info,
+        balance,
         total_sent,
     })
 }
@@ -1489,7 +1552,7 @@ mod test {
         }
 
         // check new channel state after reducing balance
-        let chan = query_channel(deps.as_ref(), local_channel.into(), None).unwrap();
+        let chan = query_channel(deps.as_ref(), local_channel.into()).unwrap();
         assert_eq!(
             chan.balances,
             vec![Amount::native(
@@ -1675,7 +1738,7 @@ mod test {
         }
 
         // check new channel state after reducing balance
-        let chan = query_channel(deps.as_ref(), local_channel.into(), None).unwrap();
+        let chan = query_channel(deps.as_ref(), local_channel.into()).unwrap();
         assert_eq!(
             chan.balances,
             vec![Amount::native(
@@ -1954,5 +2017,88 @@ mod test {
         assert_eq!(reply_args.channel, local_channel_id.clone());
         assert_eq!(reply_args.denom, ibc_denom.to_string());
         assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+    }
+
+    #[test]
+    fn test_query_channel_balance_with_key() {
+        // fixture
+        let channel = "foo-channel";
+        let ibc_denom = "port/channel/denom";
+        let amount = Uint128::from(10u128);
+        let reduce_amount = Uint128::from(1u128);
+        let mut deps = setup(&[channel], &[]);
+        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount, false).unwrap();
+        reduce_channel_balance(
+            deps.as_mut().storage,
+            channel,
+            ibc_denom,
+            Uint128::from(1u128),
+            false,
+        )
+        .unwrap();
+
+        let result =
+            query_channel_with_key(deps.as_ref(), channel.to_string(), ibc_denom.to_string())
+                .unwrap();
+        assert_eq!(
+            result.balance,
+            Amount::from_parts(
+                ibc_denom.to_string(),
+                amount.checked_sub(reduce_amount).unwrap()
+            )
+        );
+        assert_eq!(
+            result.total_sent,
+            Amount::from_parts(ibc_denom.to_string(), amount)
+        );
+    }
+
+    #[test]
+    fn test_handle_override_channel_balance() {
+        // fixture
+        let channel = "foo-channel";
+        let ibc_denom = "port/channel/denom";
+        let amount = Uint128::from(10u128);
+        let override_amount = Uint128::from(100u128);
+        let total_sent_override = Uint128::from(1000u128);
+        let mut deps = setup(&[channel], &[]);
+        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount, false).unwrap();
+
+        // unauthorized case
+        let unauthorized = handle_override_channel_balance(
+            deps.as_mut(),
+            mock_info("attacker", &vec![]),
+            channel.to_string(),
+            ibc_denom.to_string(),
+            amount,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(unauthorized, ContractError::Admin(AdminError::NotAdmin {}));
+
+        // execution, valid case
+        handle_override_channel_balance(
+            deps.as_mut(),
+            mock_info("gov", &vec![]),
+            channel.to_string(),
+            ibc_denom.to_string(),
+            override_amount,
+            Some(total_sent_override),
+        )
+        .unwrap();
+
+        // we query to validate the result after overriding
+
+        let result =
+            query_channel_with_key(deps.as_ref(), channel.to_string(), ibc_denom.to_string())
+                .unwrap();
+        assert_eq!(
+            result.balance,
+            Amount::from_parts(ibc_denom.to_string(), override_amount)
+        );
+        assert_eq!(
+            result.total_sent,
+            Amount::from_parts(ibc_denom.to_string(), total_sent_override)
+        );
     }
 }
