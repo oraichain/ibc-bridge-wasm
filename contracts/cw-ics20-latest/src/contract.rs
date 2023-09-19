@@ -1,8 +1,10 @@
+use std::vec;
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcQuery,
-    MessageInfo, Order, PortIdResponse, Response, StdResult, Storage,
+    MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -16,15 +18,16 @@ use crate::ibc::{
     build_ibc_send_packet, collect_fee_msgs, parse_voucher_denom, process_deduct_fee,
 };
 use crate::msg::{
-    AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ConfigResponse, DeletePairMsg,
-    ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse, ListMappingResponse,
-    MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse, TransferBackMsg,
-    UpdatePairMsg,
+    AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse,
+    ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
+    ListMappingResponse, MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse,
+    TransferBackMsg, UpdatePairMsg,
 };
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, reduce_channel_balance, AllowInfo, Config,
-    MappingMetadata, RelayerFee, TokenFee, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE,
-    CONFIG, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
+    reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
+    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
+    RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -108,7 +111,151 @@ pub fn execute(
             relayer_fee_receiver,
             relayer_fee,
         ),
+        // self-called msgs for ibc_packet_receive
+        ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        } => handle_increase_channel_balance_ibc_receive(
+            deps,
+            info.sender,
+            env.contract.address,
+            dest_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        ),
+        ExecuteMsg::ReduceChannelBalanceIbcReceive {
+            src_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        } => handle_reduce_channel_balance_ibc_receive(
+            deps.storage,
+            info.sender,
+            env.contract.address,
+            src_channel_id,
+            ibc_denom,
+            amount,
+            local_receiver,
+        ),
+        ExecuteMsg::OverrideChannelBalance {
+            channel_id,
+            ibc_denom,
+            outstanding,
+            total_sent,
+        } => handle_override_channel_balance(
+            deps,
+            info,
+            channel_id,
+            ibc_denom,
+            outstanding,
+            total_sent,
+        ),
     }
+}
+
+pub fn is_caller_contract(caller: Addr, contract_addr: Addr) -> StdResult<()> {
+    if caller.ne(&contract_addr) {
+        return Err(cosmwasm_std::StdError::generic_err(
+            "Caller is not the contract itself!",
+        ));
+    }
+    Ok(())
+}
+
+pub fn handle_override_channel_balance(
+    deps: DepsMut,
+    info: MessageInfo,
+    channel_id: String,
+    ibc_denom: String,
+    outstanding: Uint128,
+    total_sent: Option<Uint128>,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+    override_channel_balance(
+        deps.storage,
+        &channel_id,
+        &ibc_denom,
+        outstanding,
+        total_sent,
+    )?;
+    Ok(Response::new().add_attributes(vec![
+        ("action", "override_channel_balance"),
+        ("channel_id", &channel_id),
+        ("ibc_denom", &ibc_denom),
+        ("new_outstanding", &outstanding.to_string()),
+        ("total_sent", &total_sent.unwrap_or_default().to_string()),
+    ]))
+}
+
+pub fn handle_increase_channel_balance_ibc_receive(
+    deps: DepsMut,
+    caller: Addr,
+    contract_addr: Addr,
+    dst_channel_id: String,
+    ibc_denom: String,
+    remote_amount: Uint128,
+    local_receiver: String,
+) -> Result<Response, ContractError> {
+    is_caller_contract(caller, contract_addr)?;
+    // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
+    increase_channel_balance(
+        deps.storage,
+        &dst_channel_id,
+        &ibc_denom,
+        remote_amount.clone(),
+    )?;
+    // we need to save the data to update the balances in reply
+    let reply_args = ReplyArgs {
+        channel: dst_channel_id.clone(),
+        denom: ibc_denom.clone(),
+        amount: remote_amount.clone(),
+        local_receiver: local_receiver.clone(),
+    };
+    REPLY_ARGS.save(deps.storage, &reply_args)?;
+    Ok(Response::default().add_attributes(vec![
+        ("action", "increase_channel_balance_ibc_receive"),
+        ("channel_id", dst_channel_id.as_str()),
+        ("ibc_denom", ibc_denom.as_str()),
+        ("amount", remote_amount.to_string().as_str()),
+        ("local_receiver", local_receiver.as_str()),
+    ]))
+}
+
+pub fn handle_reduce_channel_balance_ibc_receive(
+    storage: &mut dyn Storage,
+    caller: Addr,
+    contract_addr: Addr,
+    src_channel_id: String,
+    ibc_denom: String,
+    remote_amount: Uint128,
+    local_receiver: String,
+) -> Result<Response, ContractError> {
+    is_caller_contract(caller, contract_addr)?;
+    // because we are transferring back, we reduce the channel's balance
+    reduce_channel_balance(storage, src_channel_id.as_str(), &ibc_denom, remote_amount)
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
+
+    // keep track of the single-step reply since we need ibc data to undo reducing channel balance and local data for refunding.
+    // we use a different item to not override REPLY_ARGS
+    SINGLE_STEP_REPLY_ARGS.save(
+        storage,
+        &ReplyArgs {
+            channel: src_channel_id.to_string(),
+            denom: ibc_denom.clone(),
+            amount: remote_amount,
+            local_receiver: local_receiver.to_string(),
+        },
+    )?;
+    Ok(Response::default().add_attributes(vec![
+        ("action", "reduce_channel_balance_ibc_receive"),
+        ("channel_id", src_channel_id.as_str()),
+        ("ibc_denom", ibc_denom.as_str()),
+        ("amount", remote_amount.to_string().as_str()),
+        ("local_receiver", local_receiver.as_str()),
+    ]))
 }
 
 pub fn update_config(
@@ -351,7 +498,6 @@ pub fn execute_transfer_back_to_remote_chain(
         &msg.local_channel_id,
         &ibc_denom,
         amount_remote,
-        false,
     )?;
 
     // prepare ibc message
@@ -519,7 +665,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Port {} => to_binary(&query_port(deps)?),
         QueryMsg::ListChannels {} => to_binary(&query_list(deps)?),
-        QueryMsg::Channel { id, forward } => to_binary(&query_channel(deps, id, forward)?),
+        QueryMsg::Channel { id } => to_binary(&query_channel(deps, id)?),
+        QueryMsg::ChannelWithKey { channel_id, denom } => {
+            to_binary(&query_channel_with_key(deps, channel_id, denom)?)
+        }
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Allowed { contract } => to_binary(&query_allowed(deps, contract)?),
         QueryMsg::ListAllowed {
@@ -558,7 +707,7 @@ fn query_list(deps: Deps) -> StdResult<ListChannelsResponse> {
 }
 
 // make public for ibc tests
-pub fn query_channel(deps: Deps, id: String, _forward: Option<bool>) -> StdResult<ChannelResponse> {
+pub fn query_channel(deps: Deps, id: String) -> StdResult<ChannelResponse> {
     let info = CHANNEL_INFO.load(deps.storage, &id)?;
     // this returns Vec<(outstanding, total)>
     let channel_state = CHANNEL_REVERSE_STATE;
@@ -580,6 +729,28 @@ pub fn query_channel(deps: Deps, id: String, _forward: Option<bool>) -> StdResul
     Ok(ChannelResponse {
         info,
         balances,
+        total_sent,
+    })
+}
+
+pub fn query_channel_with_key(
+    deps: Deps,
+    channel_id: String,
+    denom: String,
+) -> StdResult<ChannelWithKeyResponse> {
+    let info = CHANNEL_INFO.load(deps.storage, &channel_id)?;
+    // this returns Vec<(outstanding, total)>
+    let (balance, total_sent) = CHANNEL_REVERSE_STATE
+        .load(deps.storage, (&channel_id, &denom))
+        .map(|channel_state| {
+            let outstanding = Amount::from_parts(denom.clone(), channel_state.outstanding);
+            let total = Amount::from_parts(denom, channel_state.total_sent);
+            (outstanding, total)
+        })?;
+
+    Ok(ChannelWithKeyResponse {
+        info,
+        balance,
         total_sent,
     })
 }
@@ -770,7 +941,6 @@ mod test {
             mock_env(),
             QueryMsg::Channel {
                 id: "channel-3".to_string(),
-                forward: Some(true),
             },
         )
         .unwrap();
@@ -784,7 +954,6 @@ mod test {
             mock_env(),
             QueryMsg::Channel {
                 id: "channel-10".to_string(),
-                forward: Some(true),
             },
         )
         .unwrap_err();
@@ -1218,6 +1387,7 @@ mod test {
     #[test]
     fn proper_checks_on_execute_native_transfer_back_to_remote() {
         // arrange
+        let relayer = Addr::unchecked("relayer");
         let remote_channel = "channel-5";
         let remote_address = "cosmos1603j3e4juddh7cuhfquxspl0p0nsun046us7n0";
         let custom_addr = "custom-addr";
@@ -1230,6 +1400,7 @@ mod test {
         };
         let cw20_raw_denom = token_addr.as_str();
         let local_channel = "channel-1234";
+        let ibc_denom = get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom);
         let ratio = Ratio {
             nominator: 1,
             denominator: 10,
@@ -1275,7 +1446,6 @@ mod test {
         // insufficient funds case because we need to receive from remote chain first
         let info = mock_info(cw20_raw_denom, &[]);
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone());
-        println!("res: {:?}", res);
         assert_eq!(
             res.unwrap_err(),
             ContractError::NoSuchChannelState {
@@ -1298,8 +1468,21 @@ mod test {
             mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
 
         // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
-        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
+        // need to trigger increase channel balance because it is executed through submsg
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &[]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel.to_string(),
+                ibc_denom: ibc_denom.clone(),
+                amount: Uint128::from(amount),
+                local_receiver: custom_addr.to_string(),
+            },
+        )
+        .unwrap();
 
         // error cases
         // revert transfer state to correct state
@@ -1360,7 +1543,7 @@ mod test {
         }
 
         // check new channel state after reducing balance
-        let chan = query_channel(deps.as_ref(), local_channel.into(), None).unwrap();
+        let chan = query_channel(deps.as_ref(), local_channel.into()).unwrap();
         assert_eq!(
             chan.balances,
             vec![Amount::native(
@@ -1408,6 +1591,7 @@ mod test {
     #[test]
     fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         // arrange
+        let relayer = Addr::unchecked("relayer");
         let remote_channel = "channel-5";
         let remote_address = "cosmos1603j3e4juddh7cuhfquxspl0p0nsun046us7n0";
         let custom_addr = "custom-addr";
@@ -1419,6 +1603,7 @@ mod test {
         };
         let cw20_raw_denom = original_sender;
         let local_channel = "channel-1234";
+        let ibc_denom = get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom);
         let ratio = Ratio {
             nominator: 1,
             denominator: 10,
@@ -1464,7 +1649,7 @@ mod test {
             res.unwrap_err(),
             ContractError::NoSuchChannelState {
                 id: local_channel.to_string(),
-                denom: get_key_ics20_ibc_denom("wasm.cosmos2contract", local_channel, denom)
+                denom: ibc_denom.clone()
             }
         );
 
@@ -1482,8 +1667,21 @@ mod test {
             mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
 
         // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
-        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
+        // need to trigger increase channel balance because it is executed through submsg
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &[]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel.to_string(),
+                ibc_denom: ibc_denom.clone(),
+                amount: Uint128::from(amount),
+                local_receiver: custom_addr.to_string(),
+            },
+        )
+        .unwrap();
 
         // error cases
         // revert transfer state to correct state
@@ -1532,7 +1730,7 @@ mod test {
         }
 
         // check new channel state after reducing balance
-        let chan = query_channel(deps.as_ref(), local_channel.into(), None).unwrap();
+        let chan = query_channel(deps.as_ref(), local_channel.into()).unwrap();
         assert_eq!(
             chan.balances,
             vec![Amount::native(
@@ -1702,6 +1900,196 @@ mod test {
                 }),
                 REFUND_FAILURE_ID
             )
+        );
+    }
+
+    #[test]
+    fn test_increase_channel_balance_ibc_receive() {
+        let local_channel_id = "channel-0";
+        let amount = Uint128::from(10u128);
+        let ibc_denom = "foobar";
+        let local_receiver = "receiver";
+        let mut deps = setup(&[local_channel_id], &[]);
+
+        assert_eq!(
+            execute(
+                deps.as_mut(),
+                mock_env(),
+                mock_info("attacker", &vec![]),
+                ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                    dest_channel_id: local_channel_id.to_string(),
+                    ibc_denom: ibc_denom.to_string(),
+                    amount: amount.clone(),
+                    local_receiver: local_receiver.to_string(),
+                },
+            )
+            .unwrap_err(),
+            ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+        );
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &vec![]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap();
+        let channel_state = CHANNEL_REVERSE_STATE
+            .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+            .unwrap();
+        assert_eq!(channel_state.outstanding, amount.clone());
+        assert_eq!(channel_state.total_sent, amount.clone());
+        let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+        assert_eq!(reply_args.amount, amount.clone());
+        assert_eq!(reply_args.channel, local_channel_id.clone());
+        assert_eq!(reply_args.denom, ibc_denom.to_string());
+        assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+    }
+
+    #[test]
+    fn test_reduce_channel_balance_ibc_receive() {
+        let local_channel_id = "channel-0";
+        let amount = Uint128::from(10u128);
+        let ibc_denom = "foobar";
+        let local_receiver = "receiver";
+        let mut deps = setup(&[local_channel_id], &[]);
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &vec![]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            execute(
+                deps.as_mut(),
+                mock_env(),
+                mock_info("attacker", &vec![]),
+                ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                    src_channel_id: local_channel_id.to_string(),
+                    ibc_denom: ibc_denom.to_string(),
+                    amount: amount.clone(),
+                    local_receiver: local_receiver.to_string(),
+                },
+            )
+            .unwrap_err(),
+            ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+        );
+
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(mock_env().contract.address.as_str(), &vec![]),
+            ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                src_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap();
+        let channel_state = CHANNEL_REVERSE_STATE
+            .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+            .unwrap();
+        assert_eq!(channel_state.outstanding, Uint128::zero());
+        assert_eq!(channel_state.total_sent, Uint128::from(10u128));
+        let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+        assert_eq!(reply_args.amount, amount.clone());
+        assert_eq!(reply_args.channel, local_channel_id.clone());
+        assert_eq!(reply_args.denom, ibc_denom.to_string());
+        assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+    }
+
+    #[test]
+    fn test_query_channel_balance_with_key() {
+        // fixture
+        let channel = "foo-channel";
+        let ibc_denom = "port/channel/denom";
+        let amount = Uint128::from(10u128);
+        let reduce_amount = Uint128::from(1u128);
+        let mut deps = setup(&[channel], &[]);
+        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount).unwrap();
+        reduce_channel_balance(
+            deps.as_mut().storage,
+            channel,
+            ibc_denom,
+            Uint128::from(1u128),
+        )
+        .unwrap();
+
+        let result =
+            query_channel_with_key(deps.as_ref(), channel.to_string(), ibc_denom.to_string())
+                .unwrap();
+        assert_eq!(
+            result.balance,
+            Amount::from_parts(
+                ibc_denom.to_string(),
+                amount.checked_sub(reduce_amount).unwrap()
+            )
+        );
+        assert_eq!(
+            result.total_sent,
+            Amount::from_parts(ibc_denom.to_string(), amount)
+        );
+    }
+
+    #[test]
+    fn test_handle_override_channel_balance() {
+        // fixture
+        let channel = "foo-channel";
+        let ibc_denom = "port/channel/denom";
+        let amount = Uint128::from(10u128);
+        let override_amount = Uint128::from(100u128);
+        let total_sent_override = Uint128::from(1000u128);
+        let mut deps = setup(&[channel], &[]);
+        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount).unwrap();
+
+        // unauthorized case
+        let unauthorized = handle_override_channel_balance(
+            deps.as_mut(),
+            mock_info("attacker", &vec![]),
+            channel.to_string(),
+            ibc_denom.to_string(),
+            amount,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(unauthorized, ContractError::Admin(AdminError::NotAdmin {}));
+
+        // execution, valid case
+        handle_override_channel_balance(
+            deps.as_mut(),
+            mock_info("gov", &vec![]),
+            channel.to_string(),
+            ibc_denom.to_string(),
+            override_amount,
+            Some(total_sent_override),
+        )
+        .unwrap();
+
+        // we query to validate the result after overriding
+
+        let result =
+            query_channel_with_key(deps.as_ref(), channel.to_string(), ibc_denom.to_string())
+                .unwrap();
+        assert_eq!(
+            result.balance,
+            Amount::from_parts(ibc_denom.to_string(), override_amount)
+        );
+        assert_eq!(
+            result.total_sent,
+            Amount::from_parts(ibc_denom.to_string(), total_sent_override)
         );
     }
 }

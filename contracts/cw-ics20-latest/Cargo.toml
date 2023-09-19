@@ -1,6 +1,6 @@
 [package]
 name = "cw-ics20"
-version = "1.0.2"
+version = "1.0.8"
 authors = ["Ethan Frey <ethanfrey@users.noreply.github.com>, Oraichain Labs"]
 edition = "2021"
 description = "IBC Enabled contracts that receives CW20 tokens and sends them over ICS20 to a remote chain"
@@ -24,7 +24,7 @@ cw2 = "1.0.1"
 cw20 = "1.0.1"
 cw20-ics20-msg = { path = "../../packages/cw20-ics20-msg" }
 oraiswap = "1.0.1"
-cosmwasm-std = { version = "1.1.0", features = ["stargate"] }
+cosmwasm-std = { version = "1.1.9", features = ["stargate", "ibc3"] }
 cw-storage-plus = "1.0.1"
 cw-controllers = "1.0.1"
 schemars = "0.8.1"

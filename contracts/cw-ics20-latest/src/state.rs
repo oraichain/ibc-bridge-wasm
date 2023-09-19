@@ -140,15 +140,10 @@ pub struct ReplyArgs {
 pub fn increase_channel_balance(
     storage: &mut dyn Storage,
     channel: &str,
-    denom: &str,
+    denom: &str, // should be ibc denom
     amount: Uint128,
-    forward: bool,
 ) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
-
+    let state = CHANNEL_REVERSE_STATE;
     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding += amount;
@@ -161,14 +156,10 @@ pub fn increase_channel_balance(
 pub fn reduce_channel_balance(
     storage: &mut dyn Storage,
     channel: &str,
-    denom: &str,
+    denom: &str, // should be ibc denom
     amount: Uint128,
-    forward: bool,
 ) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
+    let state = CHANNEL_REVERSE_STATE;
     state.update(
         storage,
         (channel, denom),
@@ -188,6 +179,26 @@ pub fn reduce_channel_balance(
             Ok(cur)
         },
     )?;
+    Ok(())
+}
+
+// only used for admin of the contract
+pub fn override_channel_balance(
+    storage: &mut dyn Storage,
+    channel: &str,
+    denom: &str, // should be ibc denom
+    outstanding: Uint128,
+    total_sent: Option<Uint128>,
+) -> Result<(), ContractError> {
+    let state = CHANNEL_REVERSE_STATE;
+    state.update(storage, (channel, denom), |orig| -> StdResult<_> {
+        let mut state = orig.unwrap_or_default();
+        state.outstanding = outstanding;
+        if let Some(total_sent) = total_sent {
+            state.total_sent = total_sent;
+        }
+        Ok(state)
+    })?;
     Ok(())
 }
 

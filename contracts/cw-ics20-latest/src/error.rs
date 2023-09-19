@@ -63,9 +63,6 @@ pub enum ContractError {
     #[error("You cannot lower the gas limit for a contract on the allow list")]
     CannotLowerGas,
 
-    #[error("Only the governance contract can do this")]
-    Unauthorized,
-
     #[error("You can only send tokens that have been explicitly allowed by governance")]
     NotOnAllowList,
 

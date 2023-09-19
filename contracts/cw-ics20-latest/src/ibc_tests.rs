@@ -23,13 +23,13 @@ mod test {
     use crate::error::ContractError;
     use crate::state::{
         get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, MappingMetadata, Ratio,
-        ReplyArgs, CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR,
-        SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+        CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE,
+        TOKEN_FEE_ACCUMULATOR,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 
-    use crate::contract::{execute, migrate, query_channel};
+    use crate::contract::{execute, migrate};
     use crate::msg::{ExecuteMsg, MigrateMsg, UpdatePairMsg};
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{coins, to_vec};
@@ -200,6 +200,7 @@ mod test {
 
     #[test]
     fn send_native_from_remote_mapping_not_found() {
+        let relayer = Addr::unchecked("relayer");
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
@@ -220,17 +221,22 @@ mod test {
         );
 
         // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         // assert_eq!(res, StdError)
         assert_eq!(
-            res.attributes.last().unwrap().value,
+            res.attributes
+                .into_iter()
+                .find(|attr| attr.key.eq("error"))
+                .unwrap()
+                .value,
             "You can only send native tokens that has a map to the corresponding asset info"
         );
     }
 
     #[test]
     fn send_from_remote_to_local_receive_happy_path() {
+        let relayer = Addr::unchecked("relayer");
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
@@ -281,11 +287,11 @@ mod test {
         );
 
         // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         println!("res: {:?}", res);
         // TODO: fix test cases. Possibly because we are adding two add_submessages?
-        assert_eq!(res.messages.len(), 2); // 2 messages because we also have deduct fee msg
+        assert_eq!(res.messages.len(), 3); // 3 messages because we also have deduct fee msg and increase channel balance msg
         match res.messages[0].msg.clone() {
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr,
@@ -308,21 +314,26 @@ mod test {
         assert!(matches!(ack, Ics20Ack::Result(_)));
 
         // query channel state|_|
-        let state = query_channel(deps.as_ref(), send_channel.to_string(), None).unwrap();
-        assert_eq!(
-            state.balances,
-            vec![Amount::native(
-                876543210,
-                &get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom)
-            )]
-        );
-        assert_eq!(
-            state.total_sent,
-            vec![Amount::native(
-                876543210,
-                &get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom)
-            )]
-        );
+        match res.messages[1].msg.clone() {
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr,
+                msg,
+                funds: _,
+            }) => {
+                assert_eq!(contract_addr, "cosmos2contract".to_string()); // self-call msg
+                assert_eq!(
+                    msg,
+                    to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                        dest_channel_id: send_channel.to_string(),
+                        ibc_denom: get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom),
+                        amount: Uint128::from(876543210u64),
+                        local_receiver: custom_addr.to_string(),
+                    })
+                    .unwrap()
+                );
+            }
+            _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+        }
     }
 
     #[test]
@@ -602,7 +613,6 @@ mod test {
             receive_channel,
             pair_mapping_key.as_str(),
             remote_amount.clone(),
-            false,
         )
         .unwrap();
         destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
@@ -621,7 +631,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            result,
+            result[1],
             SubMsg::reply_on_error(
                 CosmosMsg::Ibc(IbcMsg::SendPacket {
                     channel_id: receive_channel.to_string(),
@@ -638,11 +648,20 @@ mod test {
                 FOLLOW_UP_IBC_SEND_FAILURE_ID
             )
         );
-        let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.as_mut().storage).unwrap();
-        assert_eq!(reply_args.amount, remote_amount);
-        assert_eq!(reply_args.channel, receive_channel);
-        assert_eq!(reply_args.denom, pair_mapping_key);
-        assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+        assert_eq!(
+            result[0],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: env.contract.address.into_string(),
+                msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                    src_channel_id: receive_channel.to_string(),
+                    ibc_denom: pair_mapping_key,
+                    amount: remote_amount,
+                    local_receiver: local_receiver.to_string()
+                })
+                .unwrap(),
+                funds: vec![]
+            }))
+        );
     }
 
     #[test]
@@ -712,7 +731,7 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            result,
+            result[0],
             SubMsg::reply_on_error(
                 CosmosMsg::Ibc(IbcMsg::Transfer {
                     channel_id: send_channel.to_string(),
@@ -765,7 +784,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            result,
+            result[1],
             SubMsg::reply_on_error(
                 CosmosMsg::Ibc(IbcMsg::SendPacket {
                     channel_id: send_channel.to_string(),
@@ -781,6 +800,20 @@ mod test {
                 }),
                 FOLLOW_UP_IBC_SEND_FAILURE_ID
             )
+        );
+        assert_eq!(
+            result[0],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: env.contract.address.into_string(),
+                msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                    src_channel_id: send_channel.to_string(),
+                    ibc_denom: pair_mapping_key,
+                    amount: remote_amount,
+                    local_receiver: local_receiver.to_string()
+                })
+                .unwrap(),
+                funds: vec![]
+            }))
         );
     }
 
@@ -1215,6 +1248,7 @@ mod test {
         let result = process_ibc_msg(
             storage,
             pair_mapping,
+            mock_env().contract.address.into_string(),
             receiver_asset_info,
             local_receiver,
             local_channel_id,
@@ -1226,27 +1260,23 @@ mod test {
         )
         .unwrap();
 
-        // assert
-        // channel balance should reduce to 0
         assert_eq!(
-            CHANNEL_REVERSE_STATE
-                .load(storage, (local_channel_id, ibc_denom))
-                .unwrap()
-                .outstanding,
-            Uint128::from(0u64)
+            result[0],
+            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: mock_env().contract.address.into_string(),
+                msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                    src_channel_id: local_channel_id.to_string(),
+                    ibc_denom: ibc_denom.to_string(),
+                    amount: remote_amount,
+                    local_receiver: local_receiver.to_string()
+                })
+                .unwrap(),
+                funds: vec![]
+            }))
         );
-        // reply args should have ibc data now
+
         assert_eq!(
-            SINGLE_STEP_REPLY_ARGS.load(storage).unwrap(),
-            ReplyArgs {
-                channel: local_channel_id.to_string(),
-                denom: ibc_denom.to_string(),
-                local_receiver: local_receiver.to_string(),
-                amount: remote_amount.clone(),
-            }
-        );
-        assert_eq!(
-            result,
+            result[1],
             SubMsg::reply_on_error(
                 IbcMsg::SendPacket {
                     channel_id: local_channel_id.to_string(),
