@@ -206,7 +206,6 @@ pub fn handle_increase_channel_balance_ibc_receive(
         &dst_channel_id,
         &ibc_denom,
         remote_amount.clone(),
-        false,
     )?;
     // we need to save the data to update the balances in reply
     let reply_args = ReplyArgs {
@@ -236,14 +235,8 @@ pub fn handle_reduce_channel_balance_ibc_receive(
 ) -> Result<Response, ContractError> {
     is_caller_contract(caller, contract_addr)?;
     // because we are transferring back, we reduce the channel's balance
-    reduce_channel_balance(
-        storage,
-        src_channel_id.as_str(),
-        &ibc_denom,
-        remote_amount,
-        false,
-    )
-    .map_err(|err| StdError::generic_err(err.to_string()))?;
+    reduce_channel_balance(storage, src_channel_id.as_str(), &ibc_denom, remote_amount)
+        .map_err(|err| StdError::generic_err(err.to_string()))?;
 
     // keep track of the single-step reply since we need ibc data to undo reducing channel balance and local data for refunding.
     // we use a different item to not override REPLY_ARGS
@@ -505,7 +498,6 @@ pub fn execute_transfer_back_to_remote_chain(
         &msg.local_channel_id,
         &ibc_denom,
         amount_remote,
-        false,
     )?;
 
     // prepare ibc message
@@ -673,7 +665,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Port {} => to_binary(&query_port(deps)?),
         QueryMsg::ListChannels {} => to_binary(&query_list(deps)?),
-        QueryMsg::Channel { id, forward } => to_binary(&query_channel(deps, id)?),
+        QueryMsg::Channel { id } => to_binary(&query_channel(deps, id)?),
         QueryMsg::ChannelWithKey { channel_id, denom } => {
             to_binary(&query_channel_with_key(deps, channel_id, denom)?)
         }
@@ -949,7 +941,6 @@ mod test {
             mock_env(),
             QueryMsg::Channel {
                 id: "channel-3".to_string(),
-                forward: Some(true),
             },
         )
         .unwrap();
@@ -963,7 +954,6 @@ mod test {
             mock_env(),
             QueryMsg::Channel {
                 id: "channel-10".to_string(),
-                forward: Some(true),
             },
         )
         .unwrap_err();
@@ -2027,13 +2017,12 @@ mod test {
         let amount = Uint128::from(10u128);
         let reduce_amount = Uint128::from(1u128);
         let mut deps = setup(&[channel], &[]);
-        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount, false).unwrap();
+        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount).unwrap();
         reduce_channel_balance(
             deps.as_mut().storage,
             channel,
             ibc_denom,
             Uint128::from(1u128),
-            false,
         )
         .unwrap();
 
@@ -2062,7 +2051,7 @@ mod test {
         let override_amount = Uint128::from(100u128);
         let total_sent_override = Uint128::from(1000u128);
         let mut deps = setup(&[channel], &[]);
-        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount, false).unwrap();
+        increase_channel_balance(deps.as_mut().storage, channel, ibc_denom, amount).unwrap();
 
         // unauthorized case
         let unauthorized = handle_override_channel_balance(

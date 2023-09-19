@@ -142,13 +142,8 @@ pub fn increase_channel_balance(
     channel: &str,
     denom: &str, // should be ibc denom
     amount: Uint128,
-    _forward: bool,
 ) -> Result<(), ContractError> {
     let state = CHANNEL_REVERSE_STATE;
-    // if forward {
-    //     state = CHANNEL_FORWARD_STATE;
-    // }
-
     state.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding += amount;
@@ -163,12 +158,8 @@ pub fn reduce_channel_balance(
     channel: &str,
     denom: &str, // should be ibc denom
     amount: Uint128,
-    _forward: bool,
 ) -> Result<(), ContractError> {
     let state = CHANNEL_REVERSE_STATE;
-    // if forward {
-    //     state = CHANNEL_FORWARD_STATE;
-    // }
     state.update(
         storage,
         (channel, denom),

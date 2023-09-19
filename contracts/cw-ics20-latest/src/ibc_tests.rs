@@ -611,7 +611,6 @@ mod test {
             receive_channel,
             pair_mapping_key.as_str(),
             remote_amount.clone(),
-            false,
         )
         .unwrap();
         destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();

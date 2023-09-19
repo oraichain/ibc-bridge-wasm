@@ -153,7 +153,7 @@ pub enum QueryMsg {
     ListChannels {},
     /// Returns the details of the name channel, error if not created.
     #[returns(ChannelResponse)]
-    Channel { id: String, forward: Option<bool> },
+    Channel { id: String },
     /// Returns the details of the name channel, error if not created.
     #[returns(ChannelWithKeyResponse)]
     ChannelWithKey { channel_id: String, denom: String },
