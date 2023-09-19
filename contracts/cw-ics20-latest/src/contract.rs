@@ -1387,6 +1387,7 @@ mod test {
     #[test]
     fn proper_checks_on_execute_native_transfer_back_to_remote() {
         // arrange
+        let relayer = Addr::unchecked("relayer");
         let remote_channel = "channel-5";
         let remote_address = "cosmos1603j3e4juddh7cuhfquxspl0p0nsun046us7n0";
         let custom_addr = "custom-addr";
@@ -1467,7 +1468,7 @@ mod test {
             mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
 
         // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
-        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
         // need to trigger increase channel balance because it is executed through submsg
         execute(
@@ -1590,6 +1591,7 @@ mod test {
     #[test]
     fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         // arrange
+        let relayer = Addr::unchecked("relayer");
         let remote_channel = "channel-5";
         let remote_address = "cosmos1603j3e4juddh7cuhfquxspl0p0nsun046us7n0";
         let custom_addr = "custom-addr";
@@ -1665,7 +1667,7 @@ mod test {
             mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
 
         // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
-        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         ibc_packet_receive(deps.as_mut(), mock_env(), ibc_msg).unwrap();
         // need to trigger increase channel balance because it is executed through submsg
         execute(

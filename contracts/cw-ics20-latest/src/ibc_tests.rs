@@ -200,6 +200,7 @@ mod test {
 
     #[test]
     fn send_native_from_remote_mapping_not_found() {
+        let relayer = Addr::unchecked("relayer");
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
@@ -220,7 +221,7 @@ mod test {
         );
 
         // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         // assert_eq!(res, StdError)
         assert_eq!(
@@ -235,6 +236,7 @@ mod test {
 
     #[test]
     fn send_from_remote_to_local_receive_happy_path() {
+        let relayer = Addr::unchecked("relayer");
         let send_channel = "channel-9";
         let cw20_addr = "token-addr";
         let custom_addr = "custom-addr";
@@ -285,7 +287,7 @@ mod test {
         );
 
         // we can receive this denom, channel balance should increase
-        let msg = IbcPacketReceiveMsg::new(recv_packet.clone());
+        let msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
         let res = ibc_packet_receive(deps.as_mut(), mock_env(), msg).unwrap();
         println!("res: {:?}", res);
         // TODO: fix test cases. Possibly because we are adding two add_submessages?

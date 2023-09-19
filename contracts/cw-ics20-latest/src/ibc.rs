@@ -3,11 +3,11 @@ use std::ops::Mul;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     attr, coin, entry_point, from_binary, to_binary, Addr, Api, Binary, CosmosMsg, Decimal, Deps,
-    DepsMut, Env, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg, IbcChannelConnectMsg,
-    IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout, Order,
-    QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult, Timestamp,
-    Uint128,
+    DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
+    IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
+    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
+    Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
+    Timestamp, Uint128,
 };
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
@@ -202,9 +202,9 @@ pub fn ibc_channel_open(
     _deps: DepsMut,
     _env: Env,
     msg: IbcChannelOpenMsg,
-) -> Result<(), ContractError> {
+) -> Result<Option<Ibc3ChannelOpenResponse>, ContractError> {
     enforce_order_and_version(msg.channel(), msg.counterparty_version())?;
-    Ok(())
+    Ok(None)
 }
 
 #[entry_point]
@@ -271,7 +271,15 @@ pub fn ibc_packet_receive(
 ) -> Result<IbcReceiveResponse, Never> {
     let packet = msg.packet;
 
-    do_ibc_packet_receive(deps.storage, deps.api, &deps.querier, env, &packet).or_else(|err| {
+    do_ibc_packet_receive(
+        deps.storage,
+        deps.api,
+        &deps.querier,
+        env,
+        &packet,
+        &msg.relayer.into_string(),
+    )
+    .or_else(|err| {
         // reset relayer & token fees to prevent re-entrancy when failing
         TOKEN_FEE_ACCUMULATOR.clear(deps.storage);
         RELAYER_FEE_ACCUMULATOR.clear(deps.storage);
@@ -353,6 +361,7 @@ fn do_ibc_packet_receive(
     querier: &QuerierWrapper,
     env: Env,
     packet: &IbcPacket,
+    relayer: &str,
 ) -> Result<IbcReceiveResponse, ContractError> {
     let msg: Ics20Packet = from_binary(&packet.data)?;
     // let channel = packet.dest.channel_id.clone();
@@ -364,7 +373,7 @@ fn do_ibc_packet_receive(
     // if denom is native, we handle it the native way
     if denom.1 {
         return handle_ibc_packet_receive_native_remote_chain(
-            storage, api, &querier, env, &denom.0, &packet, &msg,
+            storage, api, &querier, env, &denom.0, &packet, &msg, relayer,
         );
     }
 
@@ -379,6 +388,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     denom: &str,
     packet: &IbcPacket,
     msg: &Ics20Packet,
+    relayer: &str,
 ) -> Result<IbcReceiveResponse, ContractError> {
     let config = CONFIG.load(storage)?;
 
@@ -430,7 +440,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     )?;
     cosmos_msgs.append(&mut collect_fee_msgs(
         storage,
-        config.relayer_fee_receiver.to_string(),
+        relayer.to_string(),
         RELAYER_FEE_ACCUMULATOR,
     )?);
     // increase channel balance submsg. We increase it first before doing other tasks
@@ -448,14 +458,17 @@ fn handle_ibc_packet_receive_native_remote_chain(
         .set_ack(ack_success())
         .add_messages(cosmos_msgs)
         .add_submessages(submsgs)
-        .add_attribute("action", "receive_native")
-        .add_attribute("sender", msg.sender.clone())
-        .add_attribute("receiver", msg.receiver.clone())
-        .add_attribute("denom", denom)
-        .add_attribute("amount", msg.amount.to_string())
-        .add_attribute("success", "true")
-        .add_attribute("token_fee", token_fee)
-        .add_attribute("relayer_fee", relayer_fee);
+        .add_attributes(vec![
+            ("action", "receive_native"),
+            ("sender", &msg.sender),
+            ("receiver", &msg.receiver),
+            ("denom", denom),
+            ("amount", &msg.amount.to_string()),
+            ("success", "true"),
+            ("token_fee", &token_fee.to_string()),
+            ("relayer_fee", &relayer_fee.to_string()),
+            ("relayer", relayer),
+        ]);
     if !ibc_error_msg.is_empty() {
         res = res.add_attribute("ibc_error_msg", ibc_error_msg);
     }
