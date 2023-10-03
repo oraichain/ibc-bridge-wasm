@@ -27,8 +27,8 @@ pub const CHANNEL_REVERSE_STATE: Map<(&str, &str), ChannelState> =
     Map::new("channel_reverse_state");
 
 /// Reverse channel state is used when LOCAL chain initiates ibc transfer to remote chain
-pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
-    Map::new("channel_forward_state");
+// pub const CHANNEL_FORWARD_STATE: Map<(&str, &str), ChannelState> =
+// Map::new("channel_forward_state");
 
 /// Every cw20 contract we allow to be sent is stored here, possibly with a gas_limit
 pub const ALLOW_LIST: Map<&Addr, AllowInfo> = Map::new("allow_list");
@@ -143,8 +143,7 @@ pub fn increase_channel_balance(
     denom: &str, // should be ibc denom
     amount: Uint128,
 ) -> Result<(), ContractError> {
-    let state = CHANNEL_REVERSE_STATE;
-    state.update(storage, (channel, denom), |orig| -> StdResult<_> {
+    CHANNEL_REVERSE_STATE.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding += amount;
         state.total_sent += amount;
@@ -159,8 +158,7 @@ pub fn reduce_channel_balance(
     denom: &str, // should be ibc denom
     amount: Uint128,
 ) -> Result<(), ContractError> {
-    let state = CHANNEL_REVERSE_STATE;
-    state.update(
+    CHANNEL_REVERSE_STATE.update(
         storage,
         (channel, denom),
         |orig| -> Result<_, ContractError> {
@@ -190,8 +188,7 @@ pub fn override_channel_balance(
     outstanding: Uint128,
     total_sent: Option<Uint128>,
 ) -> Result<(), ContractError> {
-    let state = CHANNEL_REVERSE_STATE;
-    state.update(storage, (channel, denom), |orig| -> StdResult<_> {
+    CHANNEL_REVERSE_STATE.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding = outstanding;
         if let Some(total_sent) = total_sent {
@@ -209,13 +206,8 @@ pub fn undo_reduce_channel_balance(
     channel: &str,
     denom: &str,
     amount: Uint128,
-    forward: bool,
 ) -> Result<(), ContractError> {
-    let mut state = CHANNEL_REVERSE_STATE;
-    if forward {
-        state = CHANNEL_FORWARD_STATE;
-    }
-    state.update(storage, (channel, denom), |orig| -> StdResult<_> {
+    CHANNEL_REVERSE_STATE.update(storage, (channel, denom), |orig| -> StdResult<_> {
         let mut state = orig.unwrap_or_default();
         state.outstanding += amount;
         Ok(state)

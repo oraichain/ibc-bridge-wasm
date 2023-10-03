@@ -150,7 +150,6 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     &reply_args.channel,
                     &reply_args.denom,
                     reply_args.amount,
-                    false,
                 )?;
 
                 let sub_msg = handle_packet_refund(
@@ -1066,13 +1065,7 @@ fn on_packet_failure(
 
     let sub_msg = handle_packet_refund(deps.storage, &msg.sender, &msg.denom, msg.amount)?;
     // since we reduce the channel's balance optimistically when transferring back, we undo reduce it again when receiving failed ack
-    undo_reduce_channel_balance(
-        deps.storage,
-        &packet.src.channel_id,
-        &msg.denom,
-        msg.amount,
-        false,
-    )?;
+    undo_reduce_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
 
     let res = IbcBasicResponse::new()
         .add_submessage(sub_msg)
