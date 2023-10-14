@@ -526,8 +526,7 @@ pub fn execute_transfer_back_to_remote_chain(
     // send response
     let res = Response::new()
         .add_messages(cosmos_msgs)
-        .add_attribute("action", "transfer")
-        .add_attribute("type", "transfer_back_to_remote_chain")
+        .add_attribute("action", "transfer_back_to_remote_chain")
         .add_attribute("sender", sender.as_str())
         .add_attribute("receiver", &msg.remote_address)
         .add_attribute("denom", &ibc_denom)
