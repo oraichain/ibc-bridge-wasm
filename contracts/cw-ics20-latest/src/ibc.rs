@@ -950,6 +950,12 @@ pub fn get_token_price(
     swap_router_contract: &RouterController,
     offer_asset_info: AssetInfo,
 ) -> Uint128 {
+    let orai_asset_info = AssetInfo::NativeToken {
+        denom: "orai".to_string(),
+    };
+    if offer_asset_info.eq(&orai_asset_info) {
+        return simulate_amount;
+    }
     let token_price = swap_router_contract
         .simulate_swap(
             querier,
@@ -957,9 +963,7 @@ pub fn get_token_price(
             vec![SwapOperation::OraiSwap {
                 offer_asset_info,
                 // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
-                ask_asset_info: AssetInfo::NativeToken {
-                    denom: "orai".to_string(),
-                },
+                ask_asset_info: orai_asset_info,
             }],
         )
         .map(|data| data.amount)

@@ -3,11 +3,11 @@ mod test {
     use cosmwasm_std::{coin, Addr, CosmosMsg, IbcTimeout, StdError};
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
-    use oraiswap::router::SwapOperation;
+    use oraiswap::router::{RouterController, SwapOperation};
 
     use crate::ibc::{
         build_ibc_msg, build_swap_msgs, check_gas_limit, convert_remote_denom_to_evm_prefix,
-        deduct_fee, deduct_relayer_fee, deduct_token_fee, ibc_packet_receive,
+        deduct_fee, deduct_relayer_fee, deduct_token_fee, get_token_price, ibc_packet_receive,
         is_follow_up_msgs_only_send_amount, parse_ibc_channel_without_sanity_checks,
         parse_ibc_denom_without_sanity_checks, parse_voucher_denom, process_ibc_msg, Ics20Ack,
         Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID, IBC_TRANSFER_NATIVE_ERROR_ID,
@@ -1293,5 +1293,20 @@ mod test {
                 FOLLOW_UP_IBC_SEND_FAILURE_ID
             )
         )
+    }
+
+    #[test]
+    fn test_get_token_price_orai_case() {
+        let deps = mock_dependencies();
+        let simulate_amount = Uint128::from(10u128);
+        let result = get_token_price(
+            &deps.as_ref().querier,
+            simulate_amount,
+            &RouterController("foo".to_string()),
+            AssetInfo::NativeToken {
+                denom: "orai".to_string(),
+            },
+        );
+        assert_eq!(result, simulate_amount)
     }
 }
