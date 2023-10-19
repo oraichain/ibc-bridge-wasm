@@ -47,6 +47,16 @@ mod test {
     }
 
     #[test]
+    fn test_sub_negative() {
+        assert_eq!(
+            Uint128::from(10u128)
+                .checked_sub(Uint128::from(11u128))
+                .unwrap_or_default(),
+            Uint128::from(0u128)
+        )
+    }
+
+    #[test]
     fn check_packet_json() {
         let packet = Ics20Packet::new(
             Uint128::new(12345),
