@@ -121,8 +121,11 @@ fn initialize_basic_data_for_testings() -> (
         remote_decimals,
         local_asset_info_decimals: asset_info_decimals,
     });
-    wasm.execute(&cw20_ics20_contract, &update_allow_msg, &[], admin)
+    let res = wasm
+        .execute(&cw20_ics20_contract, &update_allow_msg, &[], admin)
         .unwrap();
+
+    println!("res :{:?}", res.gas_info);
 
     (
         router,

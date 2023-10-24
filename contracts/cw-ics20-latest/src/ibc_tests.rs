@@ -895,7 +895,7 @@ mod test {
             }),
             initial_asset_info.clone(),
             "foobar",
-            receiver.clone(),
+            receiver,
             "",
             local_channel,
         )
