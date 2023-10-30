@@ -3,8 +3,8 @@ use std::vec;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcQuery,
-    MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
+    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
+    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
@@ -14,9 +14,7 @@ use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
-use crate::ibc::{
-    build_ibc_send_packet, collect_fee_msgs, parse_voucher_denom, process_deduct_fee,
-};
+use crate::ibc::{build_ibc_send_packet, parse_voucher_denom, process_deduct_fee};
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse,
     ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
@@ -26,8 +24,8 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
     reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
-    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE,
-    RELAYER_FEE_ACCUMULATOR, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE, TOKEN_FEE_ACCUMULATOR,
+    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS,
+    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -458,7 +456,7 @@ pub fn execute_transfer_back_to_remote_chain(
         .ok_or(ContractError::MappingPairNotFound {})?;
 
     // if found mapping, then deduct fee based on mapping
-    let (new_deducted_amount, token_fee, relayer_fee) = process_deduct_fee(
+    let fee_data = process_deduct_fee(
         deps.storage,
         &deps.querier,
         deps.api,
@@ -468,6 +466,40 @@ pub fn execute_transfer_back_to_remote_chain(
         mapping.pair_mapping.asset_info_decimals,
         &config.swap_router_contract,
     )?;
+
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+    if !fee_data.token_fee.is_empty() {
+        cosmos_msgs.push(
+            fee_data
+                .token_fee
+                .send_amount(config.token_fee_receiver.into_string(), None),
+        )
+    }
+    if !fee_data.relayer_fee.is_empty() {
+        cosmos_msgs.push(
+            fee_data
+                .relayer_fee
+                .send_amount(config.relayer_fee_receiver.into_string(), None),
+        )
+    }
+
+    // send response
+    let token_fee_str = fee_data.token_fee.amount().to_string();
+    let relayer_fee_str = fee_data.relayer_fee.amount().to_string();
+    let attributes = vec![
+        ("action", "transfer_back_to_remote_chain"),
+        ("sender", sender.as_str()),
+        ("receiver", &msg.remote_address),
+        ("token_fee", &token_fee_str),
+        ("relayer_fee", &relayer_fee_str),
+    ];
+
+    // if our fees have drained the initial amount entirely, then we just get all the fees and that's it
+    if fee_data.deducted_amount.is_zero() {
+        return Ok(Response::new()
+            .add_messages(cosmos_msgs)
+            .add_attributes(attributes));
+    }
 
     let ibc_denom = mapping.key;
     // ensure the requested channel is registered
@@ -486,7 +518,7 @@ pub fn execute_transfer_back_to_remote_chain(
     let timeout = env.block.time.plus_seconds(timeout_delta);
     // need to convert decimal of cw20 to remote decimal before transferring
     let amount_remote = convert_local_to_remote(
-        new_deducted_amount,
+        fee_data.deducted_amount,
         mapping.pair_mapping.remote_decimals,
         mapping.pair_mapping.asset_info_decimals,
     )?;
@@ -510,30 +542,14 @@ pub fn execute_transfer_back_to_remote_chain(
         &msg.local_channel_id,
         timeout.into(),
     )?;
-
-    let mut cosmos_msgs = collect_fee_msgs(
-        deps.storage,
-        config.token_fee_receiver.into_string(),
-        TOKEN_FEE_ACCUMULATOR,
-    )?;
-    cosmos_msgs.push(ibc_msg.into());
-    cosmos_msgs.append(&mut collect_fee_msgs(
-        deps.storage,
-        config.relayer_fee_receiver.into_string(),
-        RELAYER_FEE_ACCUMULATOR,
-    )?);
-
-    // send response
-    let res = Response::new()
+    Ok(Response::new()
         .add_messages(cosmos_msgs)
-        .add_attribute("action", "transfer_back_to_remote_chain")
-        .add_attribute("sender", sender.as_str())
-        .add_attribute("receiver", &msg.remote_address)
-        .add_attribute("denom", &ibc_denom)
-        .add_attribute("amount", &amount_remote.to_string())
-        .add_attribute("token_fee", token_fee)
-        .add_attribute("relayer_fee", relayer_fee);
-    Ok(res)
+        .add_message(ibc_msg)
+        .add_attributes(attributes)
+        .add_attributes(vec![
+            ("denom", &ibc_denom),
+            ("amount", &amount_remote.to_string()),
+        ]))
 }
 
 /// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
@@ -903,7 +919,7 @@ mod test {
 
     use super::*;
     use crate::ibc::{handle_packet_refund, ibc_packet_receive, Ics20Packet, REFUND_FAILURE_ID};
-    use crate::state::{Ratio, TOKEN_FEE_ACCUMULATOR};
+    use crate::state::Ratio;
     use crate::test_helpers::*;
 
     use cosmwasm_std::testing::{mock_env, mock_info};
@@ -1453,15 +1469,6 @@ mod test {
             }
         );
 
-        // we need to reset fee accumulator because when execute returns error, the test state is still applied
-        TOKEN_FEE_ACCUMULATOR
-            .save(
-                deps.as_mut().storage,
-                "cw20:token-addr",
-                &Uint128::from(0u64),
-            )
-            .unwrap();
-
         // prepare some mock packets
         let recv_packet =
             mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
@@ -1497,7 +1504,7 @@ mod test {
 
         assert_eq!(res.messages[0].gas_limit, None);
         println!("res messages: {:?}", res.messages);
-        assert_eq!(2, res.messages.len()); // 2 because it also has deduct fee msg
+        assert_eq!(res.messages.len(), 2); // 2 because it also has deduct fee msg
         match res.messages[1].msg.clone() {
             CosmosMsg::Ibc(IbcMsg::SendPacket {
                 channel_id,
@@ -1651,15 +1658,6 @@ mod test {
                 denom: ibc_denom.clone()
             }
         );
-
-        // we need to reset fee accumulator because when execute returns error, the test state is still applied
-        TOKEN_FEE_ACCUMULATOR
-            .save(
-                deps.as_mut().storage,
-                "cw20:token-addr",
-                &Uint128::from(0u64),
-            )
-            .unwrap();
 
         // prepare some mock packets
         let recv_packet =

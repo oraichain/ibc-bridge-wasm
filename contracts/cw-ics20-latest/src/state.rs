@@ -39,11 +39,11 @@ pub const TOKEN_FEE: Map<&str, Ratio> = Map::new("token_fee");
 // decimals of relayer fee should always be 10^6 because we use ORAI as relayer fee
 pub const RELAYER_FEE: Map<&str, Uint128> = Map::new("relayer_fee");
 
-// accumulated token fee
-pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
+// // accumulated token fee
+// pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
 
-// accumulated relayer fee
-pub const RELAYER_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("relayer_fee_accumulator");
+// // accumulated relayer fee
+// pub const RELAYER_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("relayer_fee_accumulator");
 
 // MappingMetadataIndexex structs keeps a list of indexers
 pub struct MappingMetadataIndexex<'a> {

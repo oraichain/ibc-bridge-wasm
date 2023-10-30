@@ -8,10 +8,9 @@ mod test {
     use crate::ibc::{
         build_ibc_msg, build_swap_msgs, check_gas_limit, convert_remote_denom_to_evm_prefix,
         deduct_fee, deduct_relayer_fee, deduct_token_fee, get_token_price, ibc_packet_receive,
-        is_follow_up_msgs_only_send_amount, parse_ibc_channel_without_sanity_checks,
-        parse_ibc_denom_without_sanity_checks, parse_voucher_denom, process_ibc_msg, Ics20Ack,
-        Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID, IBC_TRANSFER_NATIVE_ERROR_ID,
-        NATIVE_RECEIVE_ID, SWAP_OPS_FAILURE_ID,
+        parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
+        parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID,
+        IBC_TRANSFER_NATIVE_ERROR_ID, NATIVE_RECEIVE_ID, SWAP_OPS_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -23,8 +22,7 @@ mod test {
     use crate::error::ContractError;
     use crate::state::{
         get_key_ics20_ibc_denom, increase_channel_balance, ChannelState, MappingMetadata, Ratio,
-        CHANNEL_REVERSE_STATE, RELAYER_FEE, RELAYER_FEE_ACCUMULATOR, TOKEN_FEE,
-        TOKEN_FEE_ACCUMULATOR,
+        CHANNEL_REVERSE_STATE, RELAYER_FEE, TOKEN_FEE,
     };
     use cw20::{Cw20Coin, Cw20ExecuteMsg};
     use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
@@ -313,7 +311,7 @@ mod test {
                     msg,
                     to_binary(&Cw20ExecuteMsg::Transfer {
                         recipient: "gov".to_string(),
-                        amount: Uint128::from(87654321u64)
+                        amount: Uint128::from(87654321u64) // send amount / token fee
                     })
                     .unwrap()
                 );
@@ -336,7 +334,7 @@ mod test {
                     to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
                         dest_channel_id: send_channel.to_string(),
                         ibc_denom: get_key_ics20_ibc_denom(CONTRACT_PORT, send_channel, denom),
-                        amount: Uint128::from(876543210u64),
+                        amount: send_amount,
                         local_receiver: custom_addr.to_string(),
                     })
                     .unwrap()
@@ -894,15 +892,18 @@ mod test {
                 amount: amount.clone(),
             }),
             initial_asset_info.clone(),
+            AssetInfo::NativeToken {
+                denom: "".to_string(),
+            },
             "foobar",
             receiver.clone(),
-            "",
+            &DestinationInfo::from_str(""),
             local_channel,
         )
         .unwrap();
 
         assert_eq!(
-            result.0,
+            result.sub_msgs,
             vec![SubMsg::reply_on_error(
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: env.contract.address.to_string(),
@@ -929,15 +930,18 @@ mod test {
                 amount,
             }),
             initial_asset_info.clone(),
+            AssetInfo::NativeToken {
+                denom: "cosmosabcd".to_string(),
+            },
             "foobar",
             "foobar",
-            memo,
+            &DestinationInfo::from_str(memo),
             local_channel,
         )
         .unwrap();
 
         assert_eq!(
-            result.0,
+            result.sub_msgs,
             vec![SubMsg::reply_on_error(
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: env.contract.address.to_string(),
@@ -966,15 +970,18 @@ mod test {
             AssetInfo::NativeToken {
                 denom: "orai".to_string(),
             },
+            AssetInfo::NativeToken {
+                denom: "orai".to_string(),
+            },
             "foobar",
             "foobar",
-            memo,
+            &DestinationInfo::from_str(memo),
             local_channel,
         )
         .unwrap();
 
         assert_eq!(
-            result.0,
+            result.sub_msgs,
             vec![SubMsg::reply_on_error(
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: env.contract.address.to_string(),
@@ -987,16 +994,6 @@ mod test {
                 }),
                 NATIVE_RECEIVE_ID
             )]
-        );
-    }
-
-    #[test]
-    fn test_is_follow_up_msgs_only_send_amount() {
-        assert_eq!(is_follow_up_msgs_only_send_amount("", "dest denom"), true);
-        assert_eq!(is_follow_up_msgs_only_send_amount("memo", ""), true);
-        assert_eq!(
-            is_follow_up_msgs_only_send_amount("memo", "dest denom"),
-            false
         );
     }
 
@@ -1077,7 +1074,7 @@ mod test {
         let token_fee_denom = "foo0x";
         // should return amount because we have not set relayer fee yet
         assert_eq!(
-            deduct_token_fee(storage, "foo", amount, "foo").unwrap().0,
+            deduct_token_fee(storage, "foo", amount).unwrap().0,
             amount.clone()
         );
         TOKEN_FEE
@@ -1091,21 +1088,16 @@ mod test {
             )
             .unwrap();
         assert_eq!(
-            deduct_token_fee(storage, token_fee_denom, amount, "foo")
+            deduct_token_fee(storage, token_fee_denom, amount)
                 .unwrap()
                 .0,
             Uint128::from(990u64)
-        );
-        assert_eq!(
-            TOKEN_FEE_ACCUMULATOR.load(storage, "foo").unwrap(),
-            Uint128::from(10u64)
         );
     }
 
     #[test]
     fn test_deduct_relayer_fee() {
         let mut deps = mock_dependencies();
-        let amount = Uint128::from(1000u64);
         let deps_mut = deps.as_mut();
         let token_fee_denom = "cosmos";
         let remote_address = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n";
@@ -1117,13 +1109,11 @@ mod test {
             deps_mut.api,
             remote_address,
             token_fee_denom,
-            amount,
             offer_amount.clone(),
-            "local_token_denom",
             Uint128::from(0u64),
         )
         .unwrap();
-        assert_eq!(result.1, Uint128::from(0u64));
+        assert_eq!(result, Uint128::from(0u64));
 
         // remote address is wrong (dont follow bech32 form)
         assert_eq!(
@@ -1132,13 +1122,11 @@ mod test {
                 deps_mut.api,
                 "foobar",
                 token_fee_denom,
-                amount,
                 offer_amount.clone(),
-                "local_token_denom",
                 token_price,
             )
-            .unwrap_err(),
-            StdError::generic_err("Cannot decode remote sender: foobar")
+            .unwrap(),
+            Uint128::from(0u128)
         );
 
         // no relayer fee case
@@ -1148,13 +1136,10 @@ mod test {
                 deps_mut.api,
                 remote_address,
                 token_fee_denom,
-                amount,
                 offer_amount.clone(),
-                "local_token_denom",
                 token_price,
             )
-            .unwrap()
-            .1,
+            .unwrap(),
             Uint128::from(0u64)
         );
 
@@ -1173,20 +1158,10 @@ mod test {
                 deps_mut.api,
                 "oraib1603j3e4juddh7cuhfquxspl0p0nsun047wz3rl",
                 "foo0x",
-                amount,
                 offer_amount.clone(),
-                "local_token_denom",
                 token_price,
             )
-            .unwrap()
-            .1,
-            Uint128::from(100u64)
-        );
-
-        assert_eq!(
-            RELAYER_FEE_ACCUMULATOR
-                .load(deps_mut.storage, "local_token_denom")
-                .unwrap(),
+            .unwrap(),
             Uint128::from(100u64)
         );
 
@@ -1197,21 +1172,11 @@ mod test {
                 deps_mut.api,
                 remote_address,
                 token_fee_denom,
-                amount,
                 offer_amount.clone(),
-                "local_token_denom",
                 token_price,
             )
-            .unwrap()
-            .1,
+            .unwrap(),
             Uint128::from(10u64)
-        );
-
-        assert_eq!(
-            RELAYER_FEE_ACCUMULATOR
-                .load(deps_mut.storage, "local_token_denom")
-                .unwrap(),
-            Uint128::from(110u64)
         );
     }
 
@@ -1232,9 +1197,6 @@ mod test {
                 asset_info_decimals: 6,
             },
         );
-        let receiver_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("usdt"),
-        };
         let local_channel_id = "channel";
         let ibc_msg_sender = "sender";
         let ibc_msg_receiver = "receiver";
@@ -1256,10 +1218,8 @@ mod test {
 
         // action
         let result = process_ibc_msg(
-            storage,
             pair_mapping,
             mock_env().contract.address.into_string(),
-            receiver_asset_info,
             local_receiver,
             local_channel_id,
             ibc_msg_sender,

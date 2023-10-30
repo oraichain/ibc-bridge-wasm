@@ -2,7 +2,7 @@ use std::num::TryFromIntError;
 use std::string::FromUtf8Error;
 use thiserror::Error;
 
-use cosmwasm_std::StdError;
+use cosmwasm_std::{OverflowError, StdError};
 use cw_controllers::AdminError;
 use cw_utils::PaymentError;
 
@@ -14,6 +14,9 @@ pub enum Never {}
 pub enum ContractError {
     #[error("{0}")]
     Std(#[from] StdError),
+
+    #[error("{0}")]
+    Overflow(#[from] OverflowError),
 
     #[error("{0}")]
     Payment(#[from] PaymentError),

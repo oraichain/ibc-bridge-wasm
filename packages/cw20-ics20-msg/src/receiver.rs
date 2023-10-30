@@ -132,6 +132,11 @@ fn test_destination_info_from_str() {
     assert_eq!(d1.destination_channel, "foo");
     assert_eq!(d1.receiver, "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(d1.destination_denom, "bar");
+
+    let d1 = DestinationInfo::from_str("");
+    assert_eq!(d1.destination_channel, "");
+    assert_eq!(d1.receiver, "");
+    assert_eq!(d1.destination_denom, "");
 }
 
 #[test]
