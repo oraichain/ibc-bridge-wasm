@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Binary, IbcEndpoint, Uint128};
+use cosmwasm_std::{Addr, Binary, IbcEndpoint, SubMsg, Uint128};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
@@ -29,12 +29,12 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
-    pub default_timeout: u64,
-    pub default_gas_limit: Option<u64>,
-    pub fee_denom: String,
-    pub swap_router_contract: String,
-    pub token_fee_receiver: String,
-    pub relayer_fee_receiver: String,
+    // pub default_timeout: u64,
+    // pub default_gas_limit: Option<u64>,
+    // pub fee_denom: String,
+    // pub swap_router_contract: String,
+    // pub token_fee_receiver: String,
+    // pub relayer_fee_receiver: String,
 }
 
 #[cw_serde]
@@ -264,4 +264,19 @@ pub struct PairQuery {
 pub struct AllowedInfo {
     pub contract: String,
     pub gas_limit: Option<u64>,
+}
+
+#[cw_serde]
+pub struct FeeData {
+    pub deducted_amount: Uint128,
+    pub token_fee: Amount,
+    pub relayer_fee: Amount,
+    pub token_simulate_amount: Uint128,
+    pub token_exchange_rate_with_orai: Uint128,
+}
+
+#[cw_serde]
+pub struct FollowUpMsgsData {
+    pub sub_msgs: Vec<SubMsg>,
+    pub follow_up_msg: String,
 }
