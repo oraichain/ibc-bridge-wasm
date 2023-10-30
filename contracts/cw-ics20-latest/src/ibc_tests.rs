@@ -565,15 +565,14 @@ mod test {
         destination.destination_channel = "".to_string();
 
         let err = build_ibc_msg(
-            deps.as_mut().storage,
             env.clone(),
-            receiver_asset_info.clone(),
             local_receiver,
             receive_channel,
             amount,
             remote_address,
             &destination,
             timeout,
+            None,
         )
         .unwrap_err();
         assert_eq!(
@@ -585,15 +584,14 @@ mod test {
         destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
         destination.destination_channel = send_channel.to_string();
         let err = build_ibc_msg(
-            deps.as_mut().storage,
             env.clone(),
-            receiver_asset_info.clone(),
             local_receiver,
             receive_channel,
             amount,
             remote_address,
             &destination,
             timeout,
+            None,
         )
         .unwrap_err();
         assert_eq!(err, StdError::generic_err("cannot find pair mappings"));
@@ -626,15 +624,21 @@ mod test {
         destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
         destination.destination_channel = update.local_channel_id;
         let result = build_ibc_msg(
-            deps.as_mut().storage,
             env.clone(),
-            receiver_asset_info.clone(),
             local_receiver,
             receive_channel,
             amount,
             remote_address,
             &destination,
             timeout,
+            Some((
+                pair_mapping_key.clone(),
+                MappingMetadata {
+                    asset_info: receiver_asset_info.clone(),
+                    remote_decimals,
+                    asset_info_decimals: asset_info_decimals.clone(),
+                },
+            )),
         )
         .unwrap();
 
@@ -727,15 +731,14 @@ mod test {
 
         // cosmos based case but no mapping found. should be successful & cosmos msg is ibc transfer
         let result = build_ibc_msg(
-            deps.as_mut().storage,
             env.clone(),
-            receiver_asset_info.clone(),
             local_receiver,
             local_channel_id,
             amount,
             remote_address,
             &destination,
             timeout,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -779,15 +782,21 @@ mod test {
 
         // now we get ibc msg
         let result = build_ibc_msg(
-            deps.as_mut().storage,
             env.clone(),
-            receiver_asset_info.clone(),
             local_receiver,
             local_channel_id,
             amount,
             remote_address,
             &destination,
             timeout,
+            Some((
+                pair_mapping_key.clone(),
+                MappingMetadata {
+                    asset_info: receiver_asset_info.clone(),
+                    remote_decimals,
+                    asset_info_decimals,
+                },
+            )),
         )
         .unwrap();
 
@@ -828,14 +837,7 @@ mod test {
     #[test]
     fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
         // setup
-        let send_channel = "channel-9";
-        let allowed = "foobar";
-        let allowed_gas = 777666;
-        let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
         let amount = Uint128::from(1000u64);
-        let receiver_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("usdt"),
-        };
         let local_channel_id = "channel";
         let local_receiver = "receiver";
         let timeout = 10u64;
@@ -848,15 +850,14 @@ mod test {
         let remote_address = "foobar";
         // cosmos based case but no mapping found. should be successful & cosmos msg is ibc transfer
         let result = build_ibc_msg(
-            deps.as_mut().storage,
             env.clone(),
-            receiver_asset_info.clone(),
             local_receiver,
             local_channel_id,
             amount,
             remote_address,
             &destination,
             timeout,
+            None,
         )
         .unwrap_err();
         assert_eq!(
@@ -899,6 +900,7 @@ mod test {
             receiver.clone(),
             &DestinationInfo::from_str(""),
             local_channel,
+            None,
         )
         .unwrap();
 
@@ -937,6 +939,7 @@ mod test {
             "foobar",
             &DestinationInfo::from_str(memo),
             local_channel,
+            None,
         )
         .unwrap();
 
@@ -977,6 +980,7 @@ mod test {
             "foobar",
             &DestinationInfo::from_str(memo),
             local_channel,
+            None,
         )
         .unwrap();
 

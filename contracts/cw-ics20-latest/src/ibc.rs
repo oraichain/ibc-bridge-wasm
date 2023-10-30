@@ -424,10 +424,12 @@ fn handle_ibc_packet_receive_native_remote_chain(
         pair_mapping.asset_info_decimals,
         &config.swap_router_contract,
     )?;
+
     let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
     let destination_asset_info_on_orai =
         denom_to_asset_info(querier, api, &destination.destination_denom)?;
-    let mut final_destination_denom: String = "".to_string();
+    let mut remote_destination_denom: String = "".to_string();
+    let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
     // if there's a round trip in the destination then we charge additional token and relayer fees
     if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {
         let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
@@ -438,39 +440,53 @@ fn handle_ibc_packet_receive_native_remote_chain(
             .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
         let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
         if is_evm_based {
-            let mapping = pair_mappings.into_iter().find(|(key, _)| {
+            destination_pair_mapping = pair_mappings.clone().into_iter().find(|(key, _)| {
                 find_evm_pair_mapping(&key, &evm_prefix, &destination.destination_channel)
             });
-            if let Some(mapping) = mapping {
-                final_destination_denom =
-                    parse_ibc_denom_without_sanity_checks(&mapping.0)?.to_string();
-            }
         }
-        // if there's a round trip to a different network, we double the token fee for the round trip
+        let is_cosmos_based = destination.is_receiver_cosmos_based();
+        if is_cosmos_based {
+            destination_pair_mapping = pair_mappings.into_iter().find(|(key, _)| {
+                parse_ibc_channel_without_sanity_checks(key)
+                    .unwrap_or_default()
+                    .eq(&destination.destination_channel)
+            });
+        }
+        if let Some(mapping) = destination_pair_mapping.clone() {
+            remote_destination_denom =
+                parse_ibc_denom_without_sanity_checks(&mapping.0)?.to_string();
+        }
+        // if there's a round trip to a different network, we deduct the token fee based on the remote destination denom
         // for relayer fee, we need to deduct using the destination network
-        let current_token_fee = fee_data.token_fee.amount();
-        let current_relayer_fee = fee_data.relayer_fee.amount();
+        let (_, additional_token_fee) =
+            deduct_token_fee(storage, &remote_destination_denom, to_send.amount())?;
         fee_data.token_fee = Amount::from_parts(
             fee_data.token_fee.denom(),
-            current_token_fee.checked_mul(Uint128::from(2u128))?,
+            fee_data
+                .token_fee
+                .amount()
+                .checked_add(additional_token_fee)?,
         );
         let additional_relayer_fee = deduct_relayer_fee(
             storage,
             api,
             &destination.receiver,
-            &final_destination_denom,
+            &remote_destination_denom,
             fee_data.token_simulate_amount,
             fee_data.token_exchange_rate_with_orai,
         )?;
 
         fee_data.relayer_fee = Amount::from_parts(
             fee_data.relayer_fee.denom(),
-            current_relayer_fee.checked_add(additional_relayer_fee)?,
+            fee_data
+                .relayer_fee
+                .amount()
+                .checked_add(additional_relayer_fee)?,
         );
 
         fee_data.deducted_amount = fee_data
             .deducted_amount
-            .checked_sub(current_token_fee.checked_add(additional_relayer_fee)?)
+            .checked_sub(additional_token_fee.checked_add(additional_relayer_fee)?)
             .unwrap_or_default();
     }
 
@@ -509,6 +525,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &msg.receiver,
         &destination,
         packet.dest.channel_id.as_str(),
+        destination_pair_mapping,
     )?;
 
     // increase channel balance submsg. We increase it first before doing other tasks
@@ -549,7 +566,8 @@ pub fn get_follow_up_msgs(
     sender: &str,
     receiver: &str,
     destination: &DestinationInfo,
-    initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain
+    initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain,
+    destination_pair_mapping: Option<(String, MappingMetadata)>,
 ) -> Result<FollowUpMsgsData, ContractError> {
     let config = CONFIG.load(storage)?;
     let mut sub_msgs: Vec<SubMsg> = vec![];
@@ -589,15 +607,14 @@ pub fn get_follow_up_msgs(
     }
 
     let mut build_ibc_msg_result = build_ibc_msg(
-        storage,
         env,
-        destination_asset_info_on_orai,
         receiver,
         initial_dest_channel_id,
         minimum_receive.clone(),
         &sender,
         &destination,
         config.default_timeout,
+        destination_pair_mapping,
     );
 
     // by default, the receiver is the original address sent in ics20packet
@@ -694,15 +711,14 @@ pub fn build_swap_msgs(
 }
 
 pub fn build_ibc_msg(
-    storage: &mut dyn Storage,
     env: Env,
-    receiver_asset_info: AssetInfo,
     local_receiver: &str,
     local_channel_id: &str,
     amount: Uint128,
     remote_address: &str,
     destination: &DestinationInfo,
     default_timeout: u64,
+    pair_mapping: Option<(String, MappingMetadata)>,
 ) -> StdResult<Vec<SubMsg>> {
     // if there's no dest channel then we stop, no need to transfer ibc
     if destination.destination_channel.is_empty() {
@@ -711,44 +727,34 @@ pub fn build_ibc_msg(
         ));
     }
     let timeout = env.block.time.plus_seconds(default_timeout);
-    let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
-        .idx
-        .asset_info
-        .prefix(receiver_asset_info.to_string())
-        .range(storage, None, None, Order::Ascending)
-        .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
+    // let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
+    //     .idx
+    //     .asset_info
+    //     .prefix(receiver_asset_info.to_string())
+    //     .range(storage, None, None, Order::Ascending)
+    //     .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
 
-    let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
+    let (is_evm_based, _) = destination.is_receiver_evm_based();
     if is_evm_based {
-        let mapping = pair_mappings
-            .into_iter()
-            .find(|(key, _)| {
-                find_evm_pair_mapping(&key, &evm_prefix, &destination.destination_channel)
-            })
-            .ok_or(StdError::generic_err("cannot find pair mappings"))?;
-        return Ok(process_ibc_msg(
-            mapping,
-            env.contract.address.to_string(),
-            local_receiver,
-            local_channel_id,
-            env.contract.address.as_str(),
-            remote_address, // use sender from ICS20Packet as receiver when transferring back because we have the actual receiver in memo for evm cases
-            Some(destination.receiver.clone()),
-            amount,
-            timeout,
-        )?);
+        if let Some(mapping) = pair_mapping {
+            return Ok(process_ibc_msg(
+                mapping,
+                env.contract.address.to_string(),
+                local_receiver,
+                local_channel_id,
+                env.contract.address.as_str(),
+                remote_address, // use sender from ICS20Packet as receiver when transferring back because we have the actual receiver in memo for evm cases
+                Some(destination.receiver.clone()),
+                amount,
+                timeout,
+            )?);
+        }
+        return Err(StdError::generic_err("cannot find pair mappings"));
     }
     // 2nd case, where destination network is not evm, but it is still supported on our channel (eg: cw20 ATOM mapped with native ATOM on Cosmos), then we call
     let is_cosmos_based = destination.is_receiver_cosmos_based();
     if is_cosmos_based {
-        // eg: wasm.orai195269awwnt5m6c843q6w7hp8rt0k7syfu9de4h0wz384slshuzps8y7ccm/channel-124/uatom
-        // for cosmos-based networks, each will have its own channel id => we filter using channel id, no need to check for denom
-        let mapping = pair_mappings.into_iter().find(|(key, _)| {
-            parse_ibc_channel_without_sanity_checks(key)
-                .unwrap_or_default()
-                .eq(&destination.destination_channel)
-        });
-        if let Some(mapping) = mapping {
+        if let Some(mapping) = pair_mapping {
             return Ok(process_ibc_msg(
                 mapping,
                 env.contract.address.to_string(),
