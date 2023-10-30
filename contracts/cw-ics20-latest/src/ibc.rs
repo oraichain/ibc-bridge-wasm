@@ -425,14 +425,15 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &config.swap_router_contract,
     )?;
     let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
-    let destination_asset_info = denom_to_asset_info(querier, api, &destination.destination_denom)?;
+    let destination_asset_info_on_orai =
+        denom_to_asset_info(querier, api, &destination.destination_denom)?;
     let mut final_destination_denom: String = "".to_string();
     // if there's a round trip in the destination then we charge additional token and relayer fees
     if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {
         let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
             .idx
             .asset_info
-            .prefix(destination_asset_info.to_string())
+            .prefix(destination_asset_info_on_orai.to_string())
             .range(storage, None, None, Order::Ascending)
             .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
         let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
@@ -503,7 +504,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         env.clone(),
         new_deducted_to_send,
         pair_mapping.asset_info,
-        destination_asset_info,
+        destination_asset_info_on_orai,
         &msg.sender,
         &msg.receiver,
         &destination,
@@ -544,7 +545,7 @@ pub fn get_follow_up_msgs(
     env: Env,
     to_send: Amount,
     initial_receive_asset_info: AssetInfo,
-    destination_asset_info: AssetInfo,
+    destination_asset_info_on_orai: AssetInfo,
     sender: &str,
     receiver: &str,
     destination: &DestinationInfo,
@@ -565,7 +566,7 @@ pub fn get_follow_up_msgs(
     }
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
     let swap_operations = build_swap_operations(
-        destination_asset_info.clone(),
+        destination_asset_info_on_orai.clone(),
         initial_receive_asset_info.clone(),
         config.fee_denom.as_str(),
     );
@@ -590,7 +591,7 @@ pub fn get_follow_up_msgs(
     let mut build_ibc_msg_result = build_ibc_msg(
         storage,
         env,
-        destination_asset_info,
+        destination_asset_info_on_orai,
         receiver,
         initial_dest_channel_id,
         minimum_receive.clone(),
@@ -627,7 +628,7 @@ pub fn get_follow_up_msgs(
 }
 
 pub fn build_swap_operations(
-    destination_asset_info: AssetInfo,
+    destination_asset_info_on_orai: AssetInfo,
     initial_receive_asset_info: AssetInfo,
     fee_denom: &str,
 ) -> Vec<SwapOperation> {
@@ -636,7 +637,7 @@ pub fn build_swap_operations(
         denom: fee_denom.to_string(),
     };
     let mut swap_operations = vec![];
-    if destination_asset_info.eq(&initial_receive_asset_info) {
+    if destination_asset_info_on_orai.eq(&initial_receive_asset_info) {
         return vec![];
     }
     if initial_receive_asset_info.ne(&fee_denom_asset_info) {
@@ -645,10 +646,10 @@ pub fn build_swap_operations(
             ask_asset_info: fee_denom_asset_info.clone(),
         })
     }
-    if destination_asset_info.to_string().ne(fee_denom) {
+    if destination_asset_info_on_orai.to_string().ne(fee_denom) {
         swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: fee_denom_asset_info.clone(),
-            ask_asset_info: destination_asset_info,
+            ask_asset_info: destination_asset_info_on_orai,
         });
     }
     swap_operations
