@@ -2,12 +2,12 @@ use std::ops::Mul;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, coin, entry_point, from_binary, to_binary, Addr, Api, Binary, CosmosMsg, Decimal, Deps,
-    DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
-    IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
-    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
-    Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
-    Timestamp, Uint128,
+    attr, coin, entry_point, from_binary, to_binary, Addr, Api, Attribute, Binary, CosmosMsg,
+    Decimal, Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel,
+    IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder,
+    IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse,
+    IbcTimeout, Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg,
+    SubMsgResult, Timestamp, Uint128,
 };
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
@@ -401,6 +401,180 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     // key in form transfer/channel-0/foo
     let ibc_denom = get_key_ics20_ibc_denom(&packet.dest.port_id, &packet.dest.channel_id, denom);
+    // let pair_mapping = ics20_denoms()
+    //     .load(storage, &ibc_denom)
+    //     .map_err(|_| ContractError::NotOnMappingList {})?;
+
+    // let to_send = Amount::from_parts(
+    //     parse_asset_info_denom(pair_mapping.asset_info.clone()),
+    //     convert_remote_to_local(
+    //         msg.amount,
+    //         pair_mapping.remote_decimals,
+    //         pair_mapping.asset_info_decimals,
+    //     )?,
+    // );
+
+    // let mut fee_data = process_deduct_fee(
+    //     storage,
+    //     querier,
+    //     api,
+    //     &msg.sender,
+    //     &msg.denom,
+    //     to_send.clone(),
+    //     pair_mapping.asset_info_decimals,
+    //     &config.swap_router_contract,
+    // )?;
+
+    // let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
+    // let destination_asset_info_on_orai =
+    //     denom_to_asset_info(querier, api, &destination.destination_denom)?;
+    // let mut remote_destination_denom: String = "".to_string();
+    // let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
+    // // if there's a round trip in the destination then we charge additional token and relayer fees
+    // if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {
+    //     let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
+    //         .idx
+    //         .asset_info
+    //         .prefix(destination_asset_info_on_orai.to_string())
+    //         .range(storage, None, None, Order::Ascending)
+    //         .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
+    //     let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
+    //     if is_evm_based {
+    //         destination_pair_mapping = pair_mappings.clone().into_iter().find(|(key, _)| {
+    //             find_evm_pair_mapping(&key, &evm_prefix, &destination.destination_channel)
+    //         });
+    //     }
+    //     let is_cosmos_based = destination.is_receiver_cosmos_based();
+    //     if is_cosmos_based {
+    //         destination_pair_mapping = pair_mappings.into_iter().find(|(key, _)| {
+    //             parse_ibc_channel_without_sanity_checks(key)
+    //                 .unwrap_or_default()
+    //                 .eq(&destination.destination_channel)
+    //         });
+    //     }
+    //     if let Some(mapping) = destination_pair_mapping.clone() {
+    //         remote_destination_denom =
+    //             parse_ibc_denom_without_sanity_checks(&mapping.0)?.to_string();
+    //     }
+    //     // if there's a round trip to a different network, we deduct the token fee based on the remote destination denom
+    //     // for relayer fee, we need to deduct using the destination network
+    //     let (_, additional_token_fee) =
+    //         deduct_token_fee(storage, &remote_destination_denom, to_send.amount())?;
+    //     fee_data.token_fee = Amount::from_parts(
+    //         fee_data.token_fee.denom(),
+    //         fee_data
+    //             .token_fee
+    //             .amount()
+    //             .checked_add(additional_token_fee)?,
+    //     );
+    //     let additional_relayer_fee = deduct_relayer_fee(
+    //         storage,
+    //         api,
+    //         &destination.receiver,
+    //         &remote_destination_denom,
+    //         fee_data.token_simulate_amount,
+    //         fee_data.token_exchange_rate_with_orai,
+    //     )?;
+
+    //     fee_data.relayer_fee = Amount::from_parts(
+    //         fee_data.relayer_fee.denom(),
+    //         fee_data
+    //             .relayer_fee
+    //             .amount()
+    //             .checked_add(additional_relayer_fee)?,
+    //     );
+
+    //     fee_data.deducted_amount = fee_data
+    //         .deducted_amount
+    //         .checked_sub(additional_token_fee.checked_add(additional_relayer_fee)?)
+    //         .unwrap_or_default();
+    // }
+
+    // // if the fees have consumed all user funds, we send all the fees to our token fee receiver
+    // if fee_data.deducted_amount.is_zero() {
+    //     return Ok(IbcReceiveResponse::new()
+    //         .set_ack(ack_success())
+    //         .add_message(to_send.send_amount(config.token_fee_receiver.into_string(), None))
+    //         .add_attributes(attributes)
+    //         .add_attributes(vec![
+    //             ("token_fee", &fee_data.token_fee.amount().to_string()),
+    //             ("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
+    //         ]));
+    // }
+    // if !fee_data.token_fee.is_empty() {
+    //     cosmos_msgs.push(
+    //         fee_data
+    //             .token_fee
+    //             .send_amount(config.token_fee_receiver.into_string(), None),
+    //     )
+    // }
+    // if !fee_data.relayer_fee.is_empty() {
+    //     cosmos_msgs.push(fee_data.relayer_fee.send_amount(relayer.to_string(), None))
+    // }
+
+    // let new_deducted_to_send = Amount::from_parts(to_send.denom(), fee_data.deducted_amount);
+    // let follow_up_msg_data = get_follow_up_msgs(
+    //     storage,
+    //     api,
+    //     querier,
+    //     env.clone(),
+    //     new_deducted_to_send,
+    //     pair_mapping.asset_info,
+    //     destination_asset_info_on_orai,
+    //     &msg.sender,
+    //     &msg.receiver,
+    //     &destination,
+    //     packet.dest.channel_id.as_str(),
+    //     destination_pair_mapping,
+    // )?;
+    let (mut cosmos_msgs, follow_up_msg_data, attrs) = process_bridging(
+        storage,
+        api,
+        querier,
+        env.clone(),
+        ibc_denom.clone(),
+        msg,
+        relayer,
+        packet.dest.channel_id.as_str(),
+    )?;
+
+    // increase channel balance submsg. We increase it first before doing other tasks
+    cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
+        contract_addr: env.contract.address.to_string(),
+        msg: to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id: packet.dest.channel_id.clone(),
+            ibc_denom,
+            amount: msg.amount,
+            local_receiver: msg.receiver.clone(),
+        })?,
+        funds: vec![],
+    }));
+
+    let mut res = IbcReceiveResponse::new()
+        .set_ack(ack_success())
+        .add_messages(cosmos_msgs)
+        .add_submessages(follow_up_msg_data.sub_msgs)
+        .add_attributes(attributes)
+        .add_attributes(attrs);
+    if !follow_up_msg_data.follow_up_msg.is_empty() {
+        res = res.add_attribute("ibc_error_msg", follow_up_msg_data.follow_up_msg);
+    }
+
+    Ok(res)
+}
+
+pub fn process_bridging(
+    storage: &mut dyn Storage,
+    api: &dyn Api,
+    querier: &QuerierWrapper,
+    env: Env,
+    ibc_denom: String,
+    msg: &Ics20Packet,
+    relayer: &str,
+    local_channel_id: &str,
+) -> Result<(Vec<CosmosMsg>, FollowUpMsgsData, Vec<Attribute>), ContractError> {
+    let config = CONFIG.load(storage)?;
+
     let pair_mapping = ics20_denoms()
         .load(storage, &ibc_denom)
         .map_err(|_| ContractError::NotOnMappingList {})?;
@@ -492,15 +666,21 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     // if the fees have consumed all user funds, we send all the fees to our token fee receiver
     if fee_data.deducted_amount.is_zero() {
-        return Ok(IbcReceiveResponse::new()
-            .set_ack(ack_success())
-            .add_message(to_send.send_amount(config.token_fee_receiver.into_string(), None))
-            .add_attributes(attributes)
-            .add_attributes(vec![
-                ("token_fee", &fee_data.token_fee.amount().to_string()),
-                ("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
-            ]));
+        return Ok((
+            vec![to_send.send_amount(config.token_fee_receiver.into_string(), None)],
+            FollowUpMsgsData {
+                sub_msgs: vec![],
+                follow_up_msg: String::default(),
+            },
+            vec![
+                attr("token_fee", &fee_data.token_fee.amount().to_string()),
+                attr("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
+            ],
+        ));
     }
+
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+
     if !fee_data.token_fee.is_empty() {
         cosmos_msgs.push(
             fee_data
@@ -524,35 +704,21 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &msg.sender,
         &msg.receiver,
         &destination,
-        packet.dest.channel_id.as_str(),
+        local_channel_id,
         destination_pair_mapping,
     )?;
 
-    // increase channel balance submsg. We increase it first before doing other tasks
-    cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
-        contract_addr: env.contract.address.to_string(),
-        msg: to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
-            dest_channel_id: packet.dest.channel_id.clone(),
-            ibc_denom,
-            amount: msg.amount,
-            local_receiver: msg.receiver.clone(),
-        })?,
-        funds: vec![],
-    }));
-    let mut res = IbcReceiveResponse::new()
-        .set_ack(ack_success())
-        .add_messages(cosmos_msgs)
-        .add_submessages(follow_up_msg_data.sub_msgs)
-        .add_attributes(attributes)
-        .add_attributes(vec![
-            ("token_fee", &fee_data.token_fee.amount().to_string()),
-            ("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
-        ]);
+    let mut attrs: Vec<Attribute> = vec![
+        attr("token_fee", &fee_data.token_fee.amount().to_string()),
+        attr("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
+    ];
     if !follow_up_msg_data.follow_up_msg.is_empty() {
-        res = res.add_attribute("ibc_error_msg", follow_up_msg_data.follow_up_msg);
+        attrs.push(attr(
+            "ibc_error_msg",
+            follow_up_msg_data.follow_up_msg.clone(),
+        ));
     }
-
-    Ok(res)
+    Ok((cosmos_msgs, follow_up_msg_data, vec![]))
 }
 
 pub fn get_follow_up_msgs(
