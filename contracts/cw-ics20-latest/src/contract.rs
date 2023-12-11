@@ -784,21 +784,17 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         token_fees: TOKEN_FEE
             .range(deps.storage, None, None, Order::Ascending)
             .map(|data_result| {
-                data_result.map(|data| TokenFee {
-                    token_denom: data.0,
-                    ratio: data.1,
-                })
+                let (token_denom, ratio) = data_result?;
+                Ok(TokenFee { token_denom, ratio })
             })
-            .collect::<StdResult<Vec<TokenFee>>>()?,
+            .collect::<StdResult<_>>()?,
         relayer_fees: RELAYER_FEE
             .range(deps.storage, None, None, Order::Ascending)
             .map(|data_result| {
-                data_result.map(|data| RelayerFeeResponse {
-                    prefix: data.0,
-                    amount: data.1,
-                })
+                let (prefix, amount) = data_result?;
+                Ok(RelayerFeeResponse { prefix, amount })
             })
-            .collect::<StdResult<Vec<RelayerFeeResponse>>>()?,
+            .collect::<StdResult<_>>()?,
     };
     Ok(res)
 }
