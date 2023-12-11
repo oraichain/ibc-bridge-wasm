@@ -878,17 +878,19 @@ fn get_mappings_from_asset_info(
     storage: &dyn Storage,
     asset_info: AssetInfo,
 ) -> StdResult<Vec<PairQuery>> {
-    let pair_mapping_result: StdResult<Vec<(String, MappingMetadata)>> = ics20_denoms()
+    let pair_mapping_result: StdResult<Vec<_>> = ics20_denoms()
         .idx
         .asset_info
         .prefix(asset_info.to_string())
         .range(storage, None, None, Order::Ascending)
         .collect();
-    if pair_mapping_result.is_err() {
-        return Err(pair_mapping_result.unwrap_err());
-    }
-    let pair_mappings = pair_mapping_result.unwrap();
-    let pair_queries: Vec<PairQuery> = pair_mappings
+
+    let pair_mappings = match pair_mapping_result {
+        Ok(val) => val,
+        Err(error) => return Err(error),
+    };
+
+    let pair_queries = pair_mappings
         .into_iter()
         .map(|pair| PairQuery {
             key: pair.0,

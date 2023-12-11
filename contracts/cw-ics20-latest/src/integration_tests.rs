@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use crate::ibc::{reply, Ics20Packet};
 use crate::msg::{AllowMsg, InitMsg, UpdatePairMsg};
 use crate::test_helpers::{CONTRACT_PORT, DEFAULT_TIMEOUT, REMOTE_PORT};
