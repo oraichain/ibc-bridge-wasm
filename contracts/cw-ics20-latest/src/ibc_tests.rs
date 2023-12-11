@@ -1,4 +1,3 @@
-
 use cosmwasm_std::{coin, Addr, CosmosMsg, IbcTimeout, StdError};
 use cw20_ics20_msg::receiver::DestinationInfo;
 use oraiswap::asset::AssetInfo;
@@ -891,7 +890,7 @@ fn test_follow_up_msgs() {
             denom: "".to_string(),
         },
         "foobar",
-        receiver.clone(),
+        receiver,
         &DestinationInfo::from_str(""),
         local_channel,
         None,

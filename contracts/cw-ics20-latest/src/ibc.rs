@@ -426,6 +426,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     )?;
 
     let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
+
     let destination_asset_info_on_orai = denom_to_asset_info(api, &destination.destination_denom);
     let mut remote_destination_denom: String = "".to_string();
     let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
