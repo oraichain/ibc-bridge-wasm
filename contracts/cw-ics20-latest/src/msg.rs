@@ -3,7 +3,7 @@ use cosmwasm_std::{Addr, Binary, IbcEndpoint, SubMsg, Uint128};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
-use crate::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
+use crate::state::{ChannelInfo, MappingMetadata, RelayerFee, TokenFee};
 use cw20_ics20_msg::amount::Amount;
 
 #[cw_serde]
@@ -183,7 +183,7 @@ pub enum QueryMsg {
     PairMapping { key: String },
     #[returns(Vec<PairQuery>)]
     PairMappingsFromAssetInfo { asset_info: AssetInfo },
-    #[returns(Ratio)]
+    #[returns(crate::state::Ratio)]
     GetTransferTokenFee { remote_token_denom: String },
 }
 

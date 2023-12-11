@@ -426,8 +426,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     )?;
 
     let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
-    let destination_asset_info_on_orai =
-        denom_to_asset_info(querier, api, &destination.destination_denom)?;
+    let destination_asset_info_on_orai = denom_to_asset_info(api, &destination.destination_denom);
     let mut remote_destination_denom: String = "".to_string();
     let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
     // if there's a round trip in the destination then we charge additional token and relayer fees
@@ -868,7 +867,7 @@ pub fn process_deduct_fee(
     let (deducted_amount, token_fee) =
         deduct_token_fee(storage, remote_token_denom, local_amount.amount())?;
     // simulate for relayer fee
-    let offer_asset_info = denom_to_asset_info(querier, api, &local_amount.raw_denom())?;
+    let offer_asset_info = denom_to_asset_info(api, &local_amount.raw_denom());
     let simulate_amount = Uint128::from(10u64.pow((decimals + 1) as u32) as u64); // +1 to make sure the offer amount is large enough to swap successfully
     let exchange_rate_with_orai = get_token_price(
         querier,

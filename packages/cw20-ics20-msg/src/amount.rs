@@ -84,17 +84,19 @@ impl Amount {
             }
             .into(),
             Amount::Cw20(coin) => {
-                let mut msg_cw20 = Cw20ExecuteMsg::Transfer {
-                    recipient: recipient.clone(),
-                    amount: coin.amount,
-                };
-                if let Some(msg) = msg {
-                    msg_cw20 = Cw20ExecuteMsg::Send {
+                let msg_cw20 = if let Some(msg) = msg {
+                    Cw20ExecuteMsg::Send {
                         contract: recipient,
                         amount: coin.amount,
                         msg,
                     };
-                }
+                } else {
+                    Cw20ExecuteMsg::Transfer {
+                        recipient: recipient.clone(),
+                        amount: coin.amount,
+                    };
+                };
+
                 WasmMsg::Execute {
                     contract_addr: coin.address,
                     msg: to_binary(&msg_cw20).unwrap(),
