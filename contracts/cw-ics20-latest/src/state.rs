@@ -1,5 +1,6 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
+use cw20_ics20_msg::converter::ConverterController;
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use oraiswap::{asset::AssetInfo, router::RouterController};
@@ -86,6 +87,7 @@ pub struct Config {
     pub swap_router_contract: RouterController,
     pub token_fee_receiver: Addr,
     pub relayer_fee_receiver: Addr,
+    pub converter_contract: ConverterController,
 }
 
 #[cw_serde]

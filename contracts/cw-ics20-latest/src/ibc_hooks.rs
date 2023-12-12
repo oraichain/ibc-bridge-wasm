@@ -49,7 +49,7 @@ pub fn ibc_hooks_receive(
     let mut index = 0;
     while index < args.len() {
         match args[index] {
-            // 0 : Convert
+            // 0 : ConvertToken
             0 => {
                 index += 1;
                 let (msg, return_amount) = process_convert(
@@ -84,7 +84,7 @@ pub fn ibc_hooks_receive(
             }
             _ => {
                 return Err(ContractError::Std(StdError::generic_err(
-                    "Invalid ibc-hooks params",
+                    "Invalid ibc-hooks methods",
                 )))
             }
         }

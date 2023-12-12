@@ -84,6 +84,7 @@ fn initialize_basic_data_for_testings() -> (App, Addr, Addr, IbcEndpoint, String
         gov_contract: gov_cw20_ics20.to_string(),
         allowlist,
         swap_router_contract: "router".to_string(),
+        converter_contract: "converter".to_string(),
     };
 
     let cw20_ics20_contract = router

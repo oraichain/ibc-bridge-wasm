@@ -19,6 +19,8 @@ pub struct InitMsg {
     pub default_gas_limit: Option<u64>,
     /// router contract for fee swap
     pub swap_router_contract: String,
+    /// converter contract for convert token
+    pub converter_contract: String,
 }
 
 #[cw_serde]
@@ -59,6 +61,7 @@ pub enum ExecuteMsg {
         relayer_fee: Option<Vec<RelayerFee>>,
         fee_receiver: Option<String>,
         relayer_fee_receiver: Option<String>,
+        converter_contract: Option<String>,
     },
     // self-call msgs to deal with on_ibc_receive reentrancy error
     IncreaseChannelBalanceIbcReceive {

@@ -8,6 +8,7 @@ use cosmwasm_std::{
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
+use cw20_ics20_msg::converter::ConverterController;
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
@@ -51,6 +52,7 @@ pub fn instantiate(
         swap_router_contract: RouterController(msg.swap_router_contract),
         token_fee_receiver: admin.clone(),
         relayer_fee_receiver: admin,
+        converter_contract: ConverterController(msg.converter_contract),
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -96,6 +98,7 @@ pub fn execute(
             fee_receiver,
             relayer_fee_receiver,
             relayer_fee,
+            converter_contract,
         } => update_config(
             deps,
             info,
@@ -108,6 +111,7 @@ pub fn execute(
             fee_receiver,
             relayer_fee_receiver,
             relayer_fee,
+            converter_contract,
         ),
         // self-called msgs for ibc_packet_receive
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
@@ -268,6 +272,7 @@ pub fn update_config(
     fee_receiver: Option<String>,
     relayer_fee_receiver: Option<String>,
     relayer_fee: Option<Vec<RelayerFee>>,
+    converter_contract: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
     if let Some(token_fee) = token_fee {
@@ -295,6 +300,9 @@ pub fn update_config(
         }
         if let Some(relayer_fee_receiver) = relayer_fee_receiver {
             config.relayer_fee_receiver = deps.api.addr_validate(&relayer_fee_receiver)?;
+        }
+        if let Some(converter_contract) = converter_contract {
+            config.converter_contract = ConverterController(converter_contract);
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -1800,6 +1808,7 @@ mod test {
             }]),
             fee_receiver: Some("token_fee_receiver".to_string()),
             relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),
+            converter_contract: Some("new_converter".to_string()),
         };
         // unauthorized case
         let unauthorized_info = mock_info(&String::from("somebody"), &[]);
