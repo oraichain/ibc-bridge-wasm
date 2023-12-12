@@ -1,6 +1,32 @@
 use cosmwasm_schema::cw_serde;
+use cosmwasm_std::{StdError, StdResult};
 
 use crate::helper::get_prefix_decode_bech32;
+
+#[cw_serde]
+pub struct BridgeInfo {
+    pub channel: String,
+    pub sender: String,
+    pub receiver: String,
+}
+
+impl BridgeInfo {
+    // bridge info format: <channel>/<sender>/<receiver>
+    pub fn from_str(value: &str) -> StdResult<Self> {
+        let parts: Vec<_> = value.split("/").collect();
+        if parts.len() != 3 {
+            return Err(StdError::generic_err(
+                "Invalid format, expect <channel>/<sender>/<receiver>",
+            ));
+        }
+
+        Ok(Self {
+            channel: parts[0].to_string(),
+            sender: parts[1].to_string(),
+            receiver: parts[2].to_string(),
+        })
+    }
+}
 
 #[cw_serde]
 pub struct DestinationInfo {
