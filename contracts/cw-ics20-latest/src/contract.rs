@@ -8,7 +8,7 @@ use cosmwasm_std::{
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
-use cw20_ics20_msg::converter::ConverterController;
+use cw20_ics20_msg::converter::{ConverterController, ConverterInfo};
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
@@ -25,8 +25,8 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
     reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
-    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, CONVERTER_INFO, RELAYER_FEE,
+    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -155,6 +155,8 @@ pub fn execute(
             outstanding,
             total_sent,
         ),
+        ExecuteMsg::UpdateConverterInfo(msg) => execute_update_converter_info(deps, info, msg),
+        ExecuteMsg::DeleteConverterInfo(msg) => execute_delete_converter_info(deps, info, msg),
     }
 }
 
@@ -662,6 +664,48 @@ pub fn execute_delete_mapping_pair(
         .add_attribute("action", "execute_delete_mapping_pair")
         .add_attribute("local_channel_id", mapping_pair_msg.local_channel_id)
         .add_attribute("original_denom", mapping_pair_msg.denom);
+    Ok(res)
+}
+
+pub fn execute_update_converter_info(
+    deps: DepsMut,
+    info: MessageInfo,
+    converter_info: ConverterInfo,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+    CONVERTER_INFO.save(
+        deps.storage,
+        &converter_info.from.to_vec(deps.api)?,
+        &converter_info,
+    )?;
+    CONVERTER_INFO.save(
+        deps.storage,
+        &converter_info.to.to_vec(deps.api)?,
+        &converter_info,
+    )?;
+
+    let res = Response::new()
+        .add_attribute("action", "update_converter_info")
+        .add_attribute("from_asset", converter_info.from.to_string())
+        .add_attribute("to_asset", converter_info.to.to_string());
+    Ok(res)
+}
+
+pub fn execute_delete_converter_info(
+    deps: DepsMut,
+    info: MessageInfo,
+    converter_info: ConverterInfo,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+    CONVERTER_INFO.remove(deps.storage, &converter_info.from.to_vec(deps.api)?);
+    CONVERTER_INFO.remove(deps.storage, &converter_info.to.to_vec(deps.api)?);
+
+    let res = Response::new()
+        .add_attribute("action", "remove_converter_info")
+        .add_attribute("from_asset", converter_info.from.to_string())
+        .add_attribute("to_asset", converter_info.to.to_string());
     Ok(res)
 }
 

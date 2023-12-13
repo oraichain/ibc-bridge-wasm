@@ -4,7 +4,7 @@ use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
 use crate::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
-use cw20_ics20_msg::amount::Amount;
+use cw20_ics20_msg::{amount::Amount, converter::ConverterInfo};
 
 #[cw_serde]
 pub struct InitMsg {
@@ -82,6 +82,8 @@ pub enum ExecuteMsg {
         outstanding: Uint128,
         total_sent: Option<Uint128>,
     },
+    UpdateConverterInfo(ConverterInfo),
+    DeleteConverterInfo(ConverterInfo),
 }
 
 #[cw_serde]

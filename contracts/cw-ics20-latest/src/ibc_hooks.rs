@@ -1,25 +1,22 @@
 use cosmwasm_std::{
-    attr, to_binary, Attribute, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
-    Response, StdError, StdResult, WasmMsg,
+    attr, Attribute, Binary, CosmosMsg, DepsMut, Env, MessageInfo, Order, Response, StdError,
+    StdResult,
 };
-use cw20::Cw20ExecuteMsg;
+
 use cw20_ics20_msg::{
     amount::Amount,
     helper::{denom_to_asset_info, parse_asset_info_denom},
     receiver::{BridgeInfo, DestinationInfo},
 };
 use cw_utils::one_coin;
-use oraiswap::{
-    asset::{Asset, AssetInfo},
-    converter::{self, ConvertInfoResponse},
-};
+use oraiswap::asset::{Asset, AssetInfo};
 
 use crate::{
     ibc::{
         find_evm_pair_mapping, get_follow_up_msgs, parse_ibc_channel_without_sanity_checks,
         process_deduct_fee,
     },
-    state::{ics20_denoms, MappingMetadata, CONFIG},
+    state::{ics20_denoms, MappingMetadata, CONFIG, CONVERTER_INFO},
     ContractError,
 };
 
@@ -52,14 +49,27 @@ pub fn ibc_hooks_receive(
             // 0 : ConvertToken
             0 => {
                 index += 1;
-                let (msg, return_amount) = process_convert(
-                    deps.as_ref(),
-                    Asset {
-                        info: AssetInfo::NativeToken {
-                            denom: source_coin.denom.clone(),
-                        },
-                        amount: source_coin.amount,
+                let from_asset = Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: source_coin.denom.clone(),
                     },
+                    amount: source_coin.amount,
+                };
+                let converter_info = match CONVERTER_INFO
+                    .may_load(deps.storage, &from_asset.info.to_vec(deps.api)?)?
+                {
+                    Some(info) => info,
+                    None => {
+                        return Err(ContractError::Std(StdError::generic_err(
+                            "Converter_info not found",
+                        )))
+                    }
+                };
+
+                let (msg, return_amount) = config.converter_contract.process_convert(
+                    deps.as_ref(),
+                    &from_asset,
+                    &converter_info,
                 )?;
 
                 msgs.push(msg);
@@ -82,11 +92,7 @@ pub fn ibc_hooks_receive(
                     String::from_utf8((&args[index..index + value_length]).to_vec())?;
                 index += value_length;
             }
-            _ => {
-                return Err(ContractError::Std(StdError::generic_err(
-                    "Invalid ibc-hooks methods",
-                )))
-            }
+            _ => return Err(ContractError::InvalidIbcHooksMethods),
         }
     }
 
@@ -98,7 +104,7 @@ pub fn ibc_hooks_receive(
 
     // there are 2 cases:
     // 1. Destination chain is Orai
-    // 2. Destination chain is other
+    // 2. Destination chain is others
     // always require destination.receiver
     if destination.receiver.is_empty() {
         return Err(ContractError::Std(StdError::generic_err(
@@ -128,6 +134,7 @@ pub fn ibc_hooks_receive(
             destination_pair_mapping,
         )?;
     } else {
+        // case 2
         // Bridge Info is require
         // if destination is evm, it will use to create IBC Packet send from Orai --> Orai Bridge
         // if destination is cosmos, it will use to handle refund
@@ -252,44 +259,6 @@ pub fn ibc_hooks_receive(
     );
 
     Ok(Response::new().add_attributes(attrs).add_messages(msgs))
-}
-
-fn process_convert(deps: Deps, from_asset: Asset) -> StdResult<(CosmosMsg, Asset)> {
-    let convert_info: ConvertInfoResponse = deps
-        .querier
-        .query_wasm_smart(
-            "converter_contract".to_string(),
-            &converter::QueryMsg::ConvertInfo {
-                asset_info: from_asset.info.clone(),
-            },
-        )
-        .unwrap();
-
-    let return_asset = Asset {
-        info: convert_info.token_ratio.info,
-        amount: from_asset.amount * convert_info.token_ratio.ratio,
-    };
-    let msg = match from_asset.info {
-        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: "converter_contract".to_string(),
-            msg: to_binary(&converter::ExecuteMsg::Convert {})?,
-            funds: vec![Coin {
-                denom,
-                amount: from_asset.amount,
-            }],
-        }),
-        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: contract_addr.to_string(),
-            msg: to_binary(&Cw20ExecuteMsg::Send {
-                contract: "converter_contract".to_string(),
-                amount: from_asset.amount,
-                msg: to_binary(&converter::Cw20HookMsg::Convert {})?,
-            })?,
-            funds: vec![],
-        }),
-    };
-
-    Ok((msg, return_asset))
 }
 
 // #[test]
