@@ -14,12 +14,11 @@ impl BridgeInfo {
     // bridge info format: <channel>/<sender>/<receiver>
     pub fn from_str(value: &str) -> StdResult<Self> {
         let parts: Vec<_> = value.split("/").collect();
-        if parts.len() != 3 {
+        if parts.len() != 3 || parts.iter().any(|item| item.is_empty()) {
             return Err(StdError::generic_err(
                 "Invalid format, expect <channel>/<sender>/<receiver>",
             ));
         }
-
         Ok(Self {
             channel: parts[0].to_string(),
             sender: parts[1].to_string(),
@@ -251,4 +250,53 @@ fn test_parse_destination_info() {
                 .to_string(),
         }
     )
+}
+
+#[test]
+fn test_parse_bridge_info() {
+    // test_invalid_input_incomplete_values
+    let d1 = BridgeInfo::from_str("channel-1");
+    assert_eq!(
+        d1.unwrap_err(),
+        StdError::generic_err("Invalid format, expect <channel>/<sender>/<receiver>")
+    );
+
+    // test_invalid_input_incomplete_values
+    let d2 = BridgeInfo::from_str("channel-1/orai-sender");
+    assert_eq!(
+        d2.unwrap_err(),
+        StdError::generic_err("Invalid format, expect <channel>/<sender>/<receiver>")
+    );
+
+    // test_invalid_input_extra_values
+    let d3 = BridgeInfo::from_str("channel-1/orai-sender/orai-receiver/etc");
+    assert_eq!(
+        d3.unwrap_err(),
+        StdError::generic_err("Invalid format, expect <channel>/<sender>/<receiver>")
+    );
+
+    // test_invalid_input_empty_values
+    let d4 = BridgeInfo::from_str("channel//receiver");
+    assert_eq!(
+        d4.unwrap_err(),
+        StdError::generic_err("Invalid format, expect <channel>/<sender>/<receiver>")
+    );
+
+    // test_invalid_input_missing_channel
+    let d5 = BridgeInfo::from_str("/sender/receiver");
+    assert_eq!(
+        d5.unwrap_err(),
+        StdError::generic_err("Invalid format, expect <channel>/<sender>/<receiver>")
+    );
+
+    // test_valid_input
+    let d6 = BridgeInfo::from_str("channel/sender/receiver").unwrap();
+    assert_eq!(
+        d6,
+        BridgeInfo {
+            channel: "channel".to_string(),
+            sender: "sender".to_string(),
+            receiver: "receiver".to_string()
+        }
+    );
 }
