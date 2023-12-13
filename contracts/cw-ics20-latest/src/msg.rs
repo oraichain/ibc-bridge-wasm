@@ -84,6 +84,9 @@ pub enum ExecuteMsg {
     },
     UpdateConverterInfo(ConverterInfo),
     DeleteConverterInfo(ConverterInfo),
+    IbcHooksReceive {
+        args: Binary,
+    },
 }
 
 #[cw_serde]

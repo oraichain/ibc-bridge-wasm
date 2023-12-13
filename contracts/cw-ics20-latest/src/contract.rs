@@ -16,6 +16,7 @@ use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{build_ibc_send_packet, parse_voucher_denom, process_deduct_fee};
+use crate::ibc_hooks::ibc_hooks_receive;
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse,
     ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
@@ -157,6 +158,7 @@ pub fn execute(
         ),
         ExecuteMsg::UpdateConverterInfo(msg) => execute_update_converter_info(deps, info, msg),
         ExecuteMsg::DeleteConverterInfo(msg) => execute_delete_converter_info(deps, info, msg),
+        ExecuteMsg::IbcHooksReceive { args } => ibc_hooks_receive(deps, env, info, args),
     }
 }
 
