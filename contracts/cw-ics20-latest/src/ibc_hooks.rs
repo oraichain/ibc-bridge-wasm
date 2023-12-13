@@ -43,9 +43,9 @@ pub fn ibc_hooks_receive(
         },
     };
 
-    let hook_methods = parse_hooks_msg(&args)?;
-    for method in hook_methods {
-        match method {
+    let hook_types = parse_hooks_msg(&args)?;
+    for hook_type in hook_types {
+        match hook_type {
             HookTypes::ConvertToken => {
                 let from_asset = Asset {
                     info: AssetInfo::NativeToken {
