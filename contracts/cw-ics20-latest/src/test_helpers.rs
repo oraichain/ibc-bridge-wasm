@@ -8,7 +8,8 @@ use cosmwasm_std::testing::{
     mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
 };
 use cosmwasm_std::{
-    DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, OwnedDeps,
+    Binary, DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, OwnedDeps,
+    StdResult, Uint128,
 };
 
 use crate::msg::{AllowMsg, InitMsg};
@@ -85,4 +86,31 @@ pub fn setup(
         add_channel(deps.as_mut(), channel);
     }
     deps
+}
+
+use anybuf::{Anybuf, Bufany};
+
+#[test]
+pub fn test_memo() {
+    let memo = Binary::from(
+        Anybuf::new()
+            .append_string(1, "channel-0")
+            .append_string(2, "transfer")
+            .append_bytes(3, Uint128::from(1_000_000_000u128).to_be_bytes())
+            .as_bytes(),
+    )
+    .to_base64();
+
+    println!("memo {}", memo);
+
+    let data = Binary::from_base64(&memo).unwrap();
+
+    let deserialized = Bufany::deserialize(&data).unwrap();
+
+    let channel = deserialized.string(1).unwrap();
+    let port = deserialized.string(2).unwrap();
+    let amount: Uint128 =
+        u128::from_be_bytes(deserialized.bytes(3).unwrap().try_into().unwrap()).into();
+
+    println!("{channel}/{port}/amount {:?}", amount);
 }

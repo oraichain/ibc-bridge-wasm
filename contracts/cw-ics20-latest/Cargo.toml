@@ -34,3 +34,4 @@ thiserror = { version = "1.0.23" }
 
 [dev-dependencies]
 cw-multi-test = "0.16.0"
+anybuf = "0.3.0"
