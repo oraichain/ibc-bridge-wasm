@@ -897,7 +897,7 @@ mod test {
                 denom: "".to_string(),
             },
             "foobar",
-            receiver.clone(),
+            receiver,
             &DestinationInfo::from_str(""),
             local_channel,
             None,

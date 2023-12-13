@@ -1659,7 +1659,7 @@ mod test {
         let denom = "uatom0x";
         let amount = 1234567u128;
         let asset_info = AssetInfo::NativeToken {
-            denom: denom.clone().into(),
+            denom: denom.into(),
         };
         let cw20_raw_denom = original_sender;
         let local_channel = "channel-1234";
@@ -1998,7 +1998,7 @@ mod test {
         assert_eq!(channel_state.total_sent, amount.clone());
         let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
         assert_eq!(reply_args.amount, amount.clone());
-        assert_eq!(reply_args.channel, local_channel_id.clone());
+        assert_eq!(reply_args.channel, local_channel_id);
         assert_eq!(reply_args.denom, ibc_denom.to_string());
         assert_eq!(reply_args.local_receiver, local_receiver.to_string());
     }
@@ -2058,7 +2058,7 @@ mod test {
         assert_eq!(channel_state.total_sent, Uint128::from(10u128));
         let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
         assert_eq!(reply_args.amount, amount.clone());
-        assert_eq!(reply_args.channel, local_channel_id.clone());
+        assert_eq!(reply_args.channel, local_channel_id);
         assert_eq!(reply_args.denom, ibc_denom.to_string());
         assert_eq!(reply_args.local_receiver, local_receiver.to_string());
     }

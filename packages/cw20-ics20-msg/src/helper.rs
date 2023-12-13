@@ -30,7 +30,7 @@ pub fn denom_to_asset_info(
     denom: &str,
 ) -> StdResult<AssetInfo> {
     let info = if querier
-        .query_wasm_smart::<TokenInfoResponse>(denom.clone(), &Cw20QueryMsg::TokenInfo {})
+        .query_wasm_smart::<TokenInfoResponse>(denom, &Cw20QueryMsg::TokenInfo {})
         .is_ok()
     {
         AssetInfo::Token {

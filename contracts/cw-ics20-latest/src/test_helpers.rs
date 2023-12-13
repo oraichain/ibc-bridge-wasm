@@ -9,7 +9,7 @@ use cosmwasm_std::testing::{
 };
 use cosmwasm_std::{
     Binary, DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, OwnedDeps,
-    StdResult, Uint128,
+    Uint128,
 };
 
 use crate::msg::{AllowMsg, InitMsg};
