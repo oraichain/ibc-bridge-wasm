@@ -6,6 +6,7 @@ use cosmwasm_std::{
 use cw20_ics20_msg::{
     amount::Amount,
     helper::{denom_to_asset_info, parse_asset_info_denom},
+    ibc_hooks::{parse_hooks_msg, HookTypes},
     receiver::{BridgeInfo, DestinationInfo},
 };
 use cw_utils::one_coin;
@@ -31,7 +32,7 @@ pub fn ibc_hooks_receive(
     let mut attrs: Vec<Attribute> = vec![attr("action", "receive_ibc_hooks")];
 
     let mut destination_memo = String::default();
-    let mut bridge_info_memo = String::default();
+    let mut bridge_info: Option<BridgeInfo> = None;
 
     // check exactly one coin was sent
     let source_coin = one_coin(&info)?;
@@ -42,13 +43,10 @@ pub fn ibc_hooks_receive(
         },
     };
 
-    // unmarshal args
-    let mut index = 0;
-    while index < args.len() {
-        match args[index] {
-            // 0 : ConvertToken
-            0 => {
-                index += 1;
+    let hook_methods = parse_hooks_msg(&args)?;
+    for method in hook_methods {
+        match method {
+            HookTypes::ConvertToken => {
                 let from_asset = Asset {
                     info: AssetInfo::NativeToken {
                         denom: source_coin.denom.clone(),
@@ -73,26 +71,12 @@ pub fn ibc_hooks_receive(
                 )?;
 
                 msgs.push(msg);
-                // to_send was
                 to_send = return_amount;
             }
-            // 1: Destination Info
-            1 => {
-                index += 1;
-                let value_length = args[index] as usize;
-                destination_memo =
-                    String::from_utf8((&args[index..index + value_length]).to_vec())?;
-                index += value_length;
+            HookTypes::DestinationMemo(memo) => {
+                destination_memo = memo;
             }
-            // 2: Orai Gravity Bridge Info
-            2 => {
-                index += 1;
-                let value_length = args[index] as usize;
-                bridge_info_memo =
-                    String::from_utf8((&args[index..index + value_length]).to_vec())?;
-                index += value_length;
-            }
-            _ => return Err(ContractError::InvalidIbcHooksMethods),
+            HookTypes::BridgeInfo(info) => bridge_info = Some(info),
         }
     }
 
@@ -138,12 +122,12 @@ pub fn ibc_hooks_receive(
         // Bridge Info is require
         // if destination is evm, it will use to create IBC Packet send from Orai --> Orai Bridge
         // if destination is cosmos, it will use to handle refund
-        if bridge_info_memo.is_empty() {
+        if bridge_info.is_none() {
             return Err(ContractError::Std(StdError::generic_err(
-                "Require OraiBridgeInfo receiver in memo",
+                "Require BridgeInfo receiver in memo",
             )));
         }
-        let bridge_info = BridgeInfo::from_str(&bridge_info_memo)?;
+        let bridge_info = bridge_info.unwrap();
 
         let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
             .idx
@@ -261,5 +245,4 @@ pub fn ibc_hooks_receive(
     Ok(Response::new().add_attributes(attrs).add_messages(msgs))
 }
 
-// #[test]
-// fn test_decode_ibc_hooks_receive() {}
+// fn parse_ibc_hook
