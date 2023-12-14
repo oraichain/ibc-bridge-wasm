@@ -3,13 +3,6 @@ use cosmwasm_schema::cw_serde;
 use crate::helper::get_prefix_decode_bech32;
 
 #[cw_serde]
-pub struct BridgeInfo {
-    pub channel: String,
-    pub sender: String,
-    pub receiver: String,
-}
-
-#[cw_serde]
 pub struct DestinationInfo {
     pub receiver: String,
     pub destination_channel: String,

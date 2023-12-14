@@ -1,66 +1,68 @@
-use cosmwasm_std::{Binary, StdError, StdResult};
+use crate::helper::to_orai_bridge_address;
+use anybuf::Bufany;
+use cosmwasm_schema::cw_serde;
+use cosmwasm_std::{Api, Binary, CanonicalAddr, StdResult};
 
-use crate::receiver::BridgeInfo;
-
-pub enum HookTypes {
-    ConvertToken,
-    BridgeInfo(BridgeInfo),
-    DestinationMemo(String),
+#[cw_serde]
+pub enum HookMethods {
+    UniversalSwap,
 }
 
-pub fn parse_hooks_msg(args: &Binary) -> StdResult<Vec<HookTypes>> {
-    let mut hooks = Vec::new();
+#[cw_serde]
+pub struct IbcHooksUniversalSwap {
+    pub receiver: String,             // receiver on Oraichain
+    pub destination_receiver: String, // destination  receiver
+    pub destination_channel: String,
+    pub destination_denom: String,
+    pub bridge_receiver: String, // used for case where destination is evm, this address will be the orai bridge address
+}
 
-    let mut index = 0;
-    while index < args.len() {
-        match args[index] {
-            // 0 : ConvertToken
-            0 => {
-                index += 1;
-                hooks.push(HookTypes::ConvertToken);
-                index += 1;
-            }
-            // 1: Bridge Info
-            1 => {
-                index += 1;
-
-                // get channel
-                let channel_len = args[index] as usize;
-                let channel =
-                    String::from_utf8((&args[index + 1..index + channel_len + 1]).to_vec())?;
-                index += channel_len + 1;
-
-                // get sender
-                let sender_len = args[index] as usize;
-                let sender =
-                    String::from_utf8((&args[index + 1..index + sender_len + 1]).to_vec())?;
-                index += sender_len + 1;
-
-                // get receiver
-                let receiver_len = args[index] as usize;
-                let receiver =
-                    String::from_utf8((&args[index + 1..index + receiver_len + 1]).to_vec())?;
-                index += receiver_len + 1;
-
-                hooks.push(HookTypes::BridgeInfo(BridgeInfo {
-                    channel,
-                    sender,
-                    receiver,
-                }));
-            }
-            // 2: Destination  Gravity Bridge Info
-            2 => {
-                index += 1;
-                let destination_length = args[index] as usize;
-                let destination_memo =
-                    String::from_utf8((&args[index + 1..index + destination_length + 1]).to_vec())?;
-                index += destination_length;
-
-                hooks.push(HookTypes::DestinationMemo(destination_memo))
-            }
-            _ => return Err(StdError::generic_err("Invalid hooks methods")),
-        }
+impl IbcHooksUniversalSwap {
+    pub fn from_binary(api: &dyn Api, value: &Binary) -> StdResult<Self> {
+        let deserialized = Bufany::deserialize(&value).unwrap();
+        let receiver = api
+            .addr_humanize(&CanonicalAddr::from(deserialized.bytes(1).unwrap()))
+            .unwrap()
+            .to_string();
+        let receiver = "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq".to_string();
+        Ok(Self {
+            receiver: receiver.clone(),
+            destination_receiver: deserialized.string(2).unwrap(),
+            destination_channel: deserialized.string(3).unwrap(),
+            destination_denom: deserialized.string(4).unwrap(),
+            bridge_receiver: to_orai_bridge_address(&receiver).unwrap(),
+        })
     }
+}
 
-    Ok(hooks)
+#[cfg(test)]
+mod test {
+
+    use cosmwasm_std::Binary;
+    use cosmwasm_testing_util::mock::MockApi;
+
+    use crate::ibc_hooks::IbcHooksUniversalSwap;
+
+    #[test]
+    fn test_parse_ibc_hools_universal_swap() {
+        let memo = String::from("ChTsBUd+mFGWclLECUb6spUV/eCArxI5dHJvbnRyeC1tYWlubmV0MHhiMmM1MWViZDk4NTc2YmYxMmJlZWNlMDZlMzhlNGQ0ODYxNDEwODYxGgpjaGFubmVsLTI5IitvcmFpMTJoemp4Zmg3N3dsNTcyZ2R6Y3QyZnh2MmFyeGN3aDZneWtjN3Fo");
+
+        let res = IbcHooksUniversalSwap::from_binary(
+            &MockApi::default(),
+            &Binary::from_base64(&memo).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            res,
+            IbcHooksUniversalSwap {
+                receiver: "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq".to_string(),
+                destination_receiver: "trontrx-mainnet0xb2c51ebd98576bf12beece06e38e4d4861410861"
+                    .to_string(),
+                destination_channel: "channel-29".to_string(),
+                destination_denom: "orai12hzjxfh77wl572gdzct2fxv2arxcwh6gykc7qh".to_string(),
+                bridge_receiver: "oraib1asz5wl5c2xt8y5kyp9r04v54zh77pq907kumrr".to_string()
+            }
+        )
+    }
 }

@@ -4,7 +4,7 @@ use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
 use crate::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
-use cw20_ics20_msg::{amount::Amount, converter::ConverterInfo};
+use cw20_ics20_msg::{amount::Amount, converter::ConverterInfo, ibc_hooks::HookMethods};
 
 #[cw_serde]
 pub struct InitMsg {
@@ -85,6 +85,7 @@ pub enum ExecuteMsg {
     UpdateConverterInfo(ConverterInfo),
     DeleteConverterInfo(ConverterInfo),
     IbcHooksReceive {
+        func: HookMethods,
         args: Binary,
     },
 }

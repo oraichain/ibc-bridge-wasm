@@ -7,10 +7,13 @@ use crate::state::ChannelInfo;
 use cosmwasm_std::testing::{
     mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
 };
+
 use cosmwasm_std::{
-    Binary, DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, OwnedDeps,
-    Uint128,
+    coins, Addr, Api, Binary, CanonicalAddr, DepsMut, IbcChannel, IbcChannelConnectMsg,
+    IbcChannelOpenMsg, IbcEndpoint, OwnedDeps,
 };
+use cosmwasm_testing_util::mock::MockContract;
+use cosmwasm_vm::testing::MockInstanceOptions;
 
 use crate::msg::{AllowMsg, InitMsg};
 
@@ -18,6 +21,10 @@ pub const DEFAULT_TIMEOUT: u64 = 3600; // 1 hour,
 pub const CONTRACT_PORT: &str = "wasm.cosmos2contract"; // wasm.MOCK_CONTRACT_ADDR
 pub const REMOTE_PORT: &str = "transfer";
 pub const CONNECTION_ID: &str = "connection-2";
+
+const WASM_BYTES: &[u8] = include_bytes!("../artifacts/cw-ics20-latest.wasm");
+const SENDER: &str = "orai1gkr56hlnx9vc7vncln2dkd896zfsqjn300kfq0";
+const CONTRACT: &str = "orai19p43y0tqnr5qlhfwnxft2u5unph5yn60y7tuvu";
 
 pub fn mock_channel(channel_id: &str) -> IbcChannel {
     IbcChannel::new(
@@ -92,11 +99,29 @@ use anybuf::{Anybuf, Bufany};
 
 #[test]
 pub fn test_memo() {
+    let mut contract_instance = MockContract::new(
+        WASM_BYTES,
+        Addr::unchecked(CONTRACT),
+        MockInstanceOptions {
+            balances: &[(SENDER, &coins(100_000_000_000, "orai"))],
+            gas_limit: 40_000_000_000_000_000,
+            ..MockInstanceOptions::default()
+        },
+    );
+    let address_raw = contract_instance
+        .api()
+        .addr_canonicalize("orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq")
+        .unwrap();
+
     let memo = Binary::from(
         Anybuf::new()
-            .append_string(1, "channel-0")
-            .append_string(2, "transfer")
-            .append_bytes(3, Uint128::from(1_000_000_000u128).to_be_bytes())
+            .append_bytes(1, address_raw.0.to_array::<20>().unwrap())
+            .append_string(
+                2,
+                "trontrx-mainnet0xb2c51ebd98576bf12beece06e38e4d4861410861",
+            )
+            .append_string(3, "channel-29")
+            .append_string(4, "orai12hzjxfh77wl572gdzct2fxv2arxcwh6gykc7qh")
             .as_bytes(),
     )
     .to_base64();
@@ -107,10 +132,17 @@ pub fn test_memo() {
 
     let deserialized = Bufany::deserialize(&data).unwrap();
 
-    let channel = deserialized.string(1).unwrap();
-    let port = deserialized.string(2).unwrap();
-    let amount: Uint128 =
-        u128::from_be_bytes(deserialized.bytes(3).unwrap().try_into().unwrap()).into();
+    let receiver = contract_instance
+        .api()
+        .addr_humanize(&CanonicalAddr::from(deserialized.bytes(1).unwrap()))
+        .unwrap();
+    let actual_receiver = deserialized.string(2).unwrap();
+    let destination_channel = deserialized.string(3).unwrap();
+    let destination_denom = deserialized.string(4).unwrap();
+    let bridge_receiver = deserialized.string(5).unwrap();
 
-    println!("{channel}/{port}/amount {:?}", amount);
+    println!(
+        "{}-{}-{}-{}-{}",
+        receiver, actual_receiver, destination_channel, destination_denom, bridge_receiver
+    );
 }

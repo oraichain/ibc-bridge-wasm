@@ -1,9 +1,5 @@
 #[cfg(test)]
 mod test {
-    use cosmwasm_std::{coin, Addr, CosmosMsg, IbcTimeout, StdError};
-    use cw20_ics20_msg::receiver::DestinationInfo;
-    use oraiswap::asset::AssetInfo;
-    use oraiswap::router::{RouterController, SwapOperation};
 
     use crate::ibc::{
         build_ibc_msg, build_swap_msgs, convert_remote_denom_to_evm_prefix, deduct_fee,
@@ -14,10 +10,15 @@ mod test {
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
+    use cosmwasm_std::{coin, Addr, CosmosMsg, IbcTimeout, StdError};
     use cosmwasm_std::{
         from_binary, to_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, SubMsg,
         Timestamp, Uint128, WasmMsg,
     };
+    use cosmwasm_vm::testing::MockInstanceOptions;
+    use cw20_ics20_msg::receiver::DestinationInfo;
+    use oraiswap::asset::AssetInfo;
+    use oraiswap::router::{RouterController, SwapOperation};
 
     use crate::error::ContractError;
     use crate::state::{
