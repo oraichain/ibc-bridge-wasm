@@ -29,12 +29,13 @@ impl ConverterController {
         let info: ConvertInfoResponse = deps
             .querier
             .query_wasm_smart(
-                "converter_contract".to_string(),
+                self.addr(),
                 &converter::QueryMsg::ConvertInfo {
                     asset_info: converter_info.from.clone(),
                 },
             )
             .unwrap();
+
         if converter_info.to.ne(&info.token_ratio.info) {
             return Err(StdError::generic_err("Convert error"));
         }

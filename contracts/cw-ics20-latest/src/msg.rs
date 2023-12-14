@@ -31,12 +31,13 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
-    // pub default_timeout: u64,
-    // pub default_gas_limit: Option<u64>,
-    // pub fee_denom: String,
-    // pub swap_router_contract: String,
-    // pub token_fee_receiver: String,
-    // pub relayer_fee_receiver: String,
+    pub default_timeout: u64,
+    pub default_gas_limit: Option<u64>,
+    pub fee_denom: String,
+    pub swap_router_contract: String,
+    pub token_fee_receiver: String,
+    pub relayer_fee_receiver: String,
+    pub converter_contract: String,
 }
 
 #[cw_serde]
@@ -239,6 +240,7 @@ pub struct ConfigResponse {
     pub relayer_fee_receiver: Addr,
     pub token_fees: Vec<TokenFee>,
     pub relayer_fees: Vec<RelayerFeeResponse>,
+    pub converter_contract: String,
 }
 
 #[cw_serde]
@@ -288,4 +290,5 @@ pub struct FeeData {
 pub struct FollowUpMsgsData {
     pub sub_msgs: Vec<SubMsg>,
     pub follow_up_msg: String,
+    pub is_success: bool,
 }

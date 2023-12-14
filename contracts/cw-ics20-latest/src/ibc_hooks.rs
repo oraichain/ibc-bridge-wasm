@@ -155,9 +155,12 @@ pub fn ibc_hooks_universal_swap(
             }
         }
 
+        // default decimals 6
+        let mut asset_info_decimals: u8 = 6;
         if let Some(mapping) = destination_pair_mapping.clone() {
             remote_destination_denom =
                 parse_ibc_denom_without_sanity_checks(&mapping.0)?.to_string();
+            asset_info_decimals = mapping.1.asset_info_decimals
         }
 
         // calc fee
@@ -168,11 +171,7 @@ pub fn ibc_hooks_universal_swap(
             &remote_address,
             &remote_destination_denom,
             to_send_amount.clone(),
-            destination_pair_mapping
-                .clone()
-                .unwrap()
-                .1
-                .asset_info_decimals,
+            asset_info_decimals,
             &config.swap_router_contract,
         )?;
 
@@ -222,23 +221,21 @@ pub fn ibc_hooks_universal_swap(
             new_deducted_to_send_amount,
             to_send.info,
             destination_asset_info_on_orai,
-            &hooks_info.receiver,
             &hooks_info.bridge_receiver,
+            &hooks_info.receiver,
             &destination,
             &destination.destination_channel,
             destination_pair_mapping,
         )?;
     }
 
-    // Different from ibc-wasm, we don't handle error of follow up msg.
-    // If an error occurred => ibc-hooks messages will revert => packet receive revert at app chain level
-    if !follow_up_msg_data.follow_up_msg.is_empty() {
+    // check follow up msg will be success
+    if !follow_up_msg_data.is_success {
         return Err(ContractError::Std(StdError::generic_err(format!(
             "ibc_error_msg: {}",
-            follow_up_msg_data.follow_up_msg
+            follow_up_msg_data.follow_up_msg,
         ))));
     }
-
     msgs.extend(
         follow_up_msg_data
             .sub_msgs

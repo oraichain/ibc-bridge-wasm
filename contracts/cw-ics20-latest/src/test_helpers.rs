@@ -110,18 +110,18 @@ pub fn test_memo() {
     );
     let address_raw = contract_instance
         .api()
-        .addr_canonicalize("orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq")
+        .addr_canonicalize("orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x")
         .unwrap();
 
     let memo = Binary::from(
         Anybuf::new()
             .append_bytes(1, address_raw.0.to_array::<20>().unwrap())
+            .append_string(2, "orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x")
+            .append_string(3, "channel-169")
             .append_string(
-                2,
-                "trontrx-mainnet0xb2c51ebd98576bf12beece06e38e4d4861410861",
+                4,
+                "ibc/8F3DA027B853B2C8797BE0148068AAC18CC07E306C659D8BCC6B4CAC5133FA56",
             )
-            .append_string(3, "channel-29")
-            .append_string(4, "orai12hzjxfh77wl572gdzct2fxv2arxcwh6gykc7qh")
             .as_bytes(),
     )
     .to_base64();
@@ -136,13 +136,12 @@ pub fn test_memo() {
         .api()
         .addr_humanize(&CanonicalAddr::from(deserialized.bytes(1).unwrap()))
         .unwrap();
-    let actual_receiver = deserialized.string(2).unwrap();
+    let destination_receiver = deserialized.string(2).unwrap();
     let destination_channel = deserialized.string(3).unwrap();
     let destination_denom = deserialized.string(4).unwrap();
-    let bridge_receiver = deserialized.string(5).unwrap();
 
     println!(
-        "{}-{}-{}-{}-{}",
-        receiver, actual_receiver, destination_channel, destination_denom, bridge_receiver
+        "{}-{}-{}-{}",
+        receiver, destination_receiver, destination_channel, destination_denom
     );
 }

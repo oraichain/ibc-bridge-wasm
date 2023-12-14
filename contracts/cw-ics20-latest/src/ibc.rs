@@ -563,7 +563,7 @@ pub fn get_follow_up_msgs(
     to_send: Amount,
     initial_receive_asset_info: AssetInfo,
     destination_asset_info_on_orai: AssetInfo,
-    sender: &str,   // will be receiver on remote chain
+    sender: &str, // will be receiver  of ics20 packet if  on remote chain if destination is evm
     receiver: &str, // receiver on Oraichain
     destination: &DestinationInfo,
     initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain,
@@ -578,6 +578,7 @@ pub fn get_follow_up_msgs(
     let mut follow_up_msgs_data = FollowUpMsgsData {
         sub_msgs: vec![send_only_sub_msg],
         follow_up_msg: "".to_string(),
+        is_success: true,
     };
     if destination.destination_denom.is_empty() {
         return Ok(follow_up_msgs_data);
@@ -601,6 +602,7 @@ pub fn get_follow_up_msgs(
                 swap_operations,
                 response.unwrap_err().to_string()
             );
+            follow_up_msgs_data.is_success = false;
 
             return Ok(follow_up_msgs_data);
         }
@@ -626,6 +628,10 @@ pub fn get_follow_up_msgs(
         to = None;
     } else {
         follow_up_msgs_data.follow_up_msg = build_ibc_msg_result.unwrap_err().to_string();
+        // if destination_channel is empty, still success
+        if !destination.destination_channel.is_empty() {
+            follow_up_msgs_data.is_success = false;
+        }
     };
     build_swap_msgs(
         minimum_receive,
