@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{to_binary, Coin, CosmosMsg, Deps, StdError, StdResult, WasmMsg};
+use cosmwasm_std::{to_binary, Coin, CosmosMsg, QuerierWrapper, StdError, StdResult, WasmMsg};
 use cw20::Cw20ExecuteMsg;
 use oraiswap::{
     asset::{Asset, AssetInfo},
@@ -22,12 +22,11 @@ impl ConverterController {
 
     pub fn process_convert(
         &self,
-        deps: Deps,
+        querier: &QuerierWrapper,
         from_asset: &Asset,
         converter_info: &ConverterInfo,
     ) -> StdResult<(CosmosMsg, Asset)> {
-        let info: ConvertInfoResponse = deps
-            .querier
+        let info: ConvertInfoResponse = querier
             .query_wasm_smart(
                 self.addr(),
                 &converter::QueryMsg::ConvertInfo {
