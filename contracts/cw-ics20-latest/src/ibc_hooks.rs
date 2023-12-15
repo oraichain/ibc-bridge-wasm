@@ -64,19 +64,21 @@ pub fn ibc_hooks_universal_swap(
     // if this receive token was registered, then execute converter before
     let converter_info = CONVERTER_INFO.may_load(deps.storage, &to_send.info.to_vec(deps.api)?)?;
     if let Some(converter_info) = converter_info {
-        let from_asset = Asset {
-            info: AssetInfo::NativeToken {
-                denom: source_coin.denom.clone(),
-            },
-            amount: source_coin.amount,
-        };
-        let (msg, return_amount) = config.converter_contract.process_convert(
-            deps.as_ref(),
-            &from_asset,
-            &converter_info,
-        )?;
-        msgs.push(msg);
-        to_send = return_amount;
+        if converter_info.from.eq(&to_send.info) {
+            let from_asset = Asset {
+                info: AssetInfo::NativeToken {
+                    denom: source_coin.denom.clone(),
+                },
+                amount: source_coin.amount,
+            };
+            let (msg, return_amount) = config.converter_contract.process_convert(
+                &deps.querier,
+                &from_asset,
+                &converter_info,
+            )?;
+            msgs.push(msg);
+            to_send = return_amount;
+        }
     }
 
     let destination_asset_info_on_orai =

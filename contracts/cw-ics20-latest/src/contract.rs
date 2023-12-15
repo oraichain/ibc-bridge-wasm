@@ -683,6 +683,11 @@ pub fn execute_update_converter_info(
         &converter_info.from.to_vec(deps.api)?,
         &converter_info,
     )?;
+    CONVERTER_INFO.save(
+        deps.storage,
+        &converter_info.to.to_vec(deps.api)?,
+        &converter_info,
+    )?;
 
     let res = Response::new()
         .add_attribute("action", "update_converter_info")
@@ -699,6 +704,7 @@ pub fn execute_delete_converter_info(
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
 
     CONVERTER_INFO.remove(deps.storage, &converter_info.from.to_vec(deps.api)?);
+    CONVERTER_INFO.remove(deps.storage, &converter_info.to.to_vec(deps.api)?);
 
     let res = Response::new()
         .add_attribute("action", "remove_converter_info")

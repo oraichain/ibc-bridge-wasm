@@ -3,7 +3,10 @@ use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
 use cw20_ics20_msg::converter::{ConverterController, ConverterInfo};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
-use oraiswap::{asset::AssetInfo, router::RouterController};
+use oraiswap::{
+    asset::{Asset, AssetInfo},
+    router::RouterController,
+};
 
 use crate::ContractError;
 
@@ -15,6 +18,8 @@ pub const CONFIG: Item<Config> = Item::new("ics20_config_v1.0.2");
 pub const REPLY_ARGS: Item<ReplyArgs> = Item::new("reply_args_v2");
 
 pub const SINGLE_STEP_REPLY_ARGS: Item<ReplyArgs> = Item::new("single_step_reply_args_v2");
+
+pub const CONVERT_REPLY_ARGS: Item<ConvertReplyArgs> = Item::new("convert_reply_args_v2");
 
 /// static info on one channel that doesn't change
 pub const CHANNEL_INFO: Map<&str, ChannelInfo> = Map::new("channel_info");
@@ -140,6 +145,12 @@ pub struct ReplyArgs {
     pub local_receiver: String,
     pub denom: String,
     pub amount: Uint128,
+}
+
+#[cw_serde]
+pub struct ConvertReplyArgs {
+    pub local_receiver: String,
+    pub asset: Asset,
 }
 
 pub fn increase_channel_balance(
