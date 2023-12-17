@@ -24,7 +24,7 @@ impl IbcHooksUniversalSwap {
             .addr_humanize(&CanonicalAddr::from(deserialized.bytes(1).unwrap()))
             .unwrap()
             .to_string();
-        let receiver = "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq".to_string();
+
         Ok(Self {
             receiver: receiver.clone(),
             destination_receiver: deserialized.string(2).unwrap(),
