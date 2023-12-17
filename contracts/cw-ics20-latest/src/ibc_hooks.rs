@@ -29,7 +29,6 @@ pub fn ibc_hooks_receive(
 ) -> Result<Response, ContractError> {
     match func {
         HookMethods::UniversalSwap => ibc_hooks_universal_swap(deps, env, info, args),
-        _ => Err(ContractError::InvalidIbcHooksMethods),
     }
 }
 
@@ -61,7 +60,7 @@ pub fn ibc_hooks_universal_swap(
         },
     };
 
-    // if this receive token was registered, then execute converter before
+    // if this receive token is already registered which needs to be converted, then execute the converter before
     let converter_info = CONVERTER_INFO.may_load(deps.storage, &to_send.info.to_vec(deps.api)?)?;
     if let Some(converter_info) = converter_info {
         if converter_info.from.eq(&to_send.info) {
@@ -85,22 +84,13 @@ pub fn ibc_hooks_universal_swap(
         denom_to_asset_info(&deps.querier, deps.api, &destination.destination_denom)?;
     let mut remote_destination_denom: String = "".to_string();
     let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
+    let to_send_amount =
+        Amount::from_parts(parse_asset_info_denom(to_send.info.clone()), to_send.amount);
+    let follow_up_msg_data;
 
     // There are 2 cases:
     // 1. If the destination chain is Oraichain
     // 2. If the destination chain is another
-
-    // Always require destination.receiver
-    if destination.receiver.is_empty() {
-        return Err(ContractError::Std(StdError::generic_err(
-            "Require destination receiver in memo",
-        )));
-    }
-
-    let to_send_amount =
-        Amount::from_parts(parse_asset_info_denom(to_send.info.clone()), to_send.amount);
-
-    let follow_up_msg_data;
 
     // case 1: destination chain is Orai (destination channel is empty)
     if destination.destination_channel.is_empty() {
@@ -119,15 +109,16 @@ pub fn ibc_hooks_universal_swap(
             destination_pair_mapping,
         )?;
     } else {
-        // case 2
-        // if destination is evm, it will use to create IBC Packet send from Orai --> Orai Bridge
-        // if destination is cosmos, it will use to handle refund
+        // case 2: the destination chain is another
+
+        // requires destination_channel and destination_denom not to be empty
         if destination.destination_channel.is_empty() || destination.destination_denom.is_empty() {
             return Err(ContractError::Std(StdError::generic_err(
                 "Require destination denom & channel in memo",
             )));
         }
 
+        // query pair mappings
         let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
             .idx
             .asset_info
@@ -135,7 +126,6 @@ pub fn ibc_hooks_universal_swap(
             .range(deps.storage, None, None, Order::Ascending)
             .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
 
-        let mut remote_address = "".to_string();
         let is_cosmos_based = destination.is_receiver_cosmos_based();
         if is_cosmos_based {
             destination_pair_mapping = pair_mappings.clone().into_iter().find(|(key, _)| {
@@ -143,7 +133,6 @@ pub fn ibc_hooks_universal_swap(
                     .unwrap_or_default()
                     .eq(&destination.destination_channel)
             });
-            remote_address = destination.receiver.clone();
         } else {
             let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
             if is_evm_based {
@@ -170,7 +159,7 @@ pub fn ibc_hooks_universal_swap(
             deps.storage,
             &deps.querier,
             deps.api,
-            &remote_address,
+            &destination.receiver.clone(),
             &remote_destination_denom,
             to_send_amount.clone(),
             asset_info_decimals,

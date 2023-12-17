@@ -115,12 +115,11 @@ pub fn test_memo() {
 
     let memo = Binary::from(
         Anybuf::new()
-            .append_bytes(1, address_raw.0.to_array::<20>().unwrap())
-            .append_string(2, "orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x")
-            .append_string(3, "channel-169")
+            .append_bytes(1, address_raw.0.to_array::<20>().unwrap()) // receiver on Oraichain
+            .append_string(2, "orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x") // destination receiver
+            .append_string(3, "") // destination channel
             .append_string(
-                4,
-                "ibc/8F3DA027B853B2C8797BE0148068AAC18CC07E306C659D8BCC6B4CAC5133FA56",
+                4, "", //destination denom
             )
             .as_bytes(),
     )

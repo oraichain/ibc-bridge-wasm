@@ -1,7 +1,7 @@
 use crate::helper::to_orai_bridge_address;
 use anybuf::Bufany;
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Api, Binary, CanonicalAddr, StdResult};
+use cosmwasm_std::{Api, Binary, CanonicalAddr, StdError, StdResult};
 
 #[cw_serde]
 pub enum HookMethods {
@@ -24,13 +24,24 @@ impl IbcHooksUniversalSwap {
             .addr_humanize(&CanonicalAddr::from(deserialized.bytes(1).unwrap()))
             .unwrap()
             .to_string();
+        let destination_receiver = deserialized.string(2).unwrap();
+        let destination_channel = deserialized.string(3).unwrap();
+        let destination_denom = deserialized.string(4).unwrap();
+        let bridge_receiver = to_orai_bridge_address(&receiver).unwrap();
+
+        // Always require destination.receiver
+        if destination_receiver.is_empty() {
+            return Err(StdError::generic_err(
+                "Require destination receiver in memo",
+            ));
+        }
 
         Ok(Self {
             receiver: receiver.clone(),
-            destination_receiver: deserialized.string(2).unwrap(),
-            destination_channel: deserialized.string(3).unwrap(),
-            destination_denom: deserialized.string(4).unwrap(),
-            bridge_receiver: to_orai_bridge_address(&receiver).unwrap(),
+            destination_receiver,
+            destination_channel,
+            destination_denom,
+            bridge_receiver,
         })
     }
 }
