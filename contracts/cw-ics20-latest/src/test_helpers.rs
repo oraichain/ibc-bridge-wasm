@@ -9,8 +9,8 @@ use cosmwasm_std::testing::{
 };
 
 use cosmwasm_std::{
-    coins, Addr, Api, Binary, CanonicalAddr, DepsMut, IbcChannel, IbcChannelConnectMsg,
-    IbcChannelOpenMsg, IbcEndpoint, OwnedDeps,
+    coins, Addr, Api, Binary, DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg,
+    IbcEndpoint, OwnedDeps,
 };
 use cosmwasm_testing_util::mock::MockContract;
 use cosmwasm_vm::testing::MockInstanceOptions;
@@ -136,7 +136,7 @@ pub fn test_memo() {
 
     let receiver = contract_instance
         .api()
-        .addr_humanize(&CanonicalAddr::from(deserialized.bytes(1).unwrap()))
+        .addr_humanize(&deserialized.bytes(1).unwrap().into())
         .unwrap();
     let destination_receiver = deserialized.string(2).unwrap();
     let destination_channel = deserialized.string(3).unwrap();
