@@ -1,7 +1,7 @@
 use crate::helper::to_orai_bridge_address;
 use anybuf::Bufany;
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Api, Binary, CanonicalAddr, StdError, StdResult};
+use cosmwasm_std::{Api, Binary, StdError, StdResult};
 
 #[cw_serde]
 pub enum HookMethods {
@@ -21,7 +21,7 @@ impl IbcHooksUniversalSwap {
     pub fn from_binary(api: &dyn Api, value: &Binary) -> StdResult<Self> {
         let deserialized = Bufany::deserialize(&value).unwrap();
         let receiver = api
-            .addr_humanize(&CanonicalAddr::from(deserialized.bytes(1).unwrap()))
+            .addr_humanize(&deserialized.bytes(1).unwrap().into())
             .unwrap()
             .to_string();
         let destination_receiver = deserialized.string(2).unwrap();
