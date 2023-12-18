@@ -49,14 +49,37 @@ impl IbcHooksUniversalSwap {
 #[cfg(test)]
 mod test {
 
-    use cosmwasm_std::Binary;
+    use anybuf::Anybuf;
+    use cosmwasm_std::{Api, Binary};
     use cosmwasm_testing_util::mock::MockApi;
 
     use crate::ibc_hooks::IbcHooksUniversalSwap;
 
     #[test]
     fn test_parse_ibc_hools_universal_swap() {
-        let memo = String::from("ChTsBUd+mFGWclLECUb6spUV/eCArxI5dHJvbnRyeC1tYWlubmV0MHhiMmM1MWViZDk4NTc2YmYxMmJlZWNlMDZlMzhlNGQ0ODYxNDEwODYxGgpjaGFubmVsLTI5IitvcmFpMTJoemp4Zmg3N3dsNTcyZ2R6Y3QyZnh2MmFyeGN3aDZneWtjN3Fo");
+        let mock_api = MockApi::default();
+
+        let memo = Binary::from(
+            Anybuf::new()
+                .append_bytes(
+                    1,
+                    mock_api
+                        .addr_canonicalize("orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq")
+                        .unwrap()
+                        .as_slice(),
+                ) // receiver on Oraichain
+                .append_string(
+                    2,
+                    "trontrx-mainnet0xb2c51ebd98576bf12beece06e38e4d4861410861",
+                ) // destination receiver
+                .append_string(3, "channel-29") // destination channel
+                .append_string(
+                    4,
+                    "orai12hzjxfh77wl572gdzct2fxv2arxcwh6gykc7qh", //destination denom
+                )
+                .as_bytes(),
+        )
+        .to_base64();
 
         let res = IbcHooksUniversalSwap::from_binary(
             &MockApi::default(),
