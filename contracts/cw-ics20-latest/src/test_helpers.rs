@@ -4,16 +4,13 @@ use crate::contract::instantiate;
 use crate::ibc::{ibc_channel_connect, ibc_channel_open, ICS20_ORDERING, ICS20_VERSION};
 use crate::state::ChannelInfo;
 
-use cosmwasm_std::testing::{
-    mock_dependencies, mock_env, mock_info, MockApi, MockQuerier, MockStorage,
-};
+use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
 
 use cosmwasm_std::{
-    coins, Addr, Api, Binary, DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcEndpoint, OwnedDeps,
+    Api, Binary, DepsMut, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint,
+    OwnedDeps,
 };
-use cosmwasm_testing_util::mock::MockContract;
-use cosmwasm_vm::testing::MockInstanceOptions;
+use cosmwasm_testing_util::mock::MockApi;
 
 use crate::msg::{AllowMsg, InitMsg};
 
@@ -21,10 +18,6 @@ pub const DEFAULT_TIMEOUT: u64 = 3600; // 1 hour,
 pub const CONTRACT_PORT: &str = "wasm.cosmos2contract"; // wasm.MOCK_CONTRACT_ADDR
 pub const REMOTE_PORT: &str = "transfer";
 pub const CONNECTION_ID: &str = "connection-2";
-
-const WASM_BYTES: &[u8] = include_bytes!("../artifacts/cw-ics20-latest.wasm");
-const SENDER: &str = "orai1gkr56hlnx9vc7vncln2dkd896zfsqjn300kfq0";
-const CONTRACT: &str = "orai19p43y0tqnr5qlhfwnxft2u5unph5yn60y7tuvu";
 
 pub fn mock_channel(channel_id: &str) -> IbcChannel {
     IbcChannel::new(
@@ -65,7 +58,11 @@ pub fn add_channel(mut deps: DepsMut, channel_id: &str) {
 pub fn setup(
     channels: &[&str],
     allow: &[(&str, u64)],
-) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
+) -> OwnedDeps<
+    cosmwasm_std::MemoryStorage,
+    cosmwasm_std::testing::MockApi,
+    cosmwasm_std::testing::MockQuerier,
+> {
     let mut deps = mock_dependencies();
 
     let allowlist = allow
@@ -99,23 +96,13 @@ use anybuf::{Anybuf, Bufany};
 
 #[test]
 pub fn test_memo() {
-    let contract_instance = MockContract::new(
-        WASM_BYTES,
-        Addr::unchecked(CONTRACT),
-        MockInstanceOptions {
-            balances: &[(SENDER, &coins(100_000_000_000, "orai"))],
-            gas_limit: 40_000_000_000_000_000,
-            ..MockInstanceOptions::default()
-        },
-    );
+    let api = MockApi::default();
 
     let memo = Binary::from(
         Anybuf::new()
             .append_bytes(
                 1,
-                contract_instance
-                    .api()
-                    .addr_canonicalize("orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x")
+                api.addr_canonicalize("orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x")
                     .unwrap()
                     .as_slice(),
             ) // receiver on Oraichain
@@ -134,8 +121,7 @@ pub fn test_memo() {
 
     let deserialized = Bufany::deserialize(&data).unwrap();
 
-    let receiver = contract_instance
-        .api()
+    let receiver = api
         .addr_humanize(&deserialized.bytes(1).unwrap().into())
         .unwrap();
     let destination_receiver = deserialized.string(2).unwrap();
