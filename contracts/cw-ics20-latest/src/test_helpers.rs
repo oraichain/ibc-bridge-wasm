@@ -99,7 +99,7 @@ use anybuf::{Anybuf, Bufany};
 
 #[test]
 pub fn test_memo() {
-    let mut contract_instance = MockContract::new(
+    let contract_instance = MockContract::new(
         WASM_BYTES,
         Addr::unchecked(CONTRACT),
         MockInstanceOptions {
@@ -108,14 +108,17 @@ pub fn test_memo() {
             ..MockInstanceOptions::default()
         },
     );
-    let address_raw = contract_instance
-        .api()
-        .addr_canonicalize("orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x")
-        .unwrap();
 
     let memo = Binary::from(
         Anybuf::new()
-            .append_bytes(1, address_raw.0.to_array::<20>().unwrap()) // receiver on Oraichain
+            .append_bytes(
+                1,
+                contract_instance
+                    .api()
+                    .addr_canonicalize("orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x")
+                    .unwrap()
+                    .as_slice(),
+            ) // receiver on Oraichain
             .append_string(2, "orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x") // destination receiver
             .append_string(3, "channel-19") // destination channel
             .append_string(

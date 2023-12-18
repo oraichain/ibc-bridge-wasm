@@ -15,7 +15,7 @@ mod test {
         from_binary, to_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, SubMsg,
         Timestamp, Uint128, WasmMsg,
     };
-    use cosmwasm_vm::testing::MockInstanceOptions;
+
     use cw20_ics20_msg::receiver::DestinationInfo;
     use oraiswap::asset::AssetInfo;
     use oraiswap::router::{RouterController, SwapOperation};
