@@ -117,9 +117,9 @@ pub fn test_memo() {
         Anybuf::new()
             .append_bytes(1, address_raw.0.to_array::<20>().unwrap()) // receiver on Oraichain
             .append_string(2, "orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x") // destination receiver
-            .append_string(3, "") // destination channel
+            .append_string(3, "channel-19") // destination channel
             .append_string(
-                4, "", //destination denom
+                4, "ibc/", //destination denom
             )
             .as_bytes(),
     )
