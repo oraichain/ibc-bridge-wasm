@@ -19,15 +19,45 @@ pub struct IbcHooksUniversalSwap {
 
 impl IbcHooksUniversalSwap {
     pub fn from_binary(api: &dyn Api, value: &Binary) -> StdResult<Self> {
-        let deserialized = Bufany::deserialize(&value).unwrap();
+        let deserialized = match Bufany::deserialize(&value) {
+            Ok(val) => val,
+            Err(err) => {
+                return Err(StdError::generic_err(format!(
+                    "Error on deserialize: {:?}",
+                    err
+                )))
+            }
+        };
+
         let receiver = api
-            .addr_humanize(&deserialized.bytes(1).unwrap().into())
-            .unwrap()
+            .addr_humanize(
+                &deserialized
+                    .bytes(1)
+                    .ok_or_else(|| StdError::generic_err("Error on deserialize receiver"))?
+                    .into(),
+            )?
             .to_string();
-        let destination_receiver = deserialized.string(2).unwrap();
-        let destination_channel = deserialized.string(3).unwrap();
-        let destination_denom = deserialized.string(4).unwrap();
-        let bridge_receiver = to_orai_bridge_address(&receiver).unwrap();
+        let destination_receiver = deserialized
+            .string(2)
+            .ok_or_else(|| StdError::generic_err("Error on deserialize destination_receiver"))?;
+
+        let destination_channel = deserialized
+            .string(3)
+            .ok_or_else(|| StdError::generic_err("Error on deserialize destination_channel"))?;
+
+        let destination_denom = deserialized
+            .string(4)
+            .ok_or_else(|| StdError::generic_err("Error on deserialize destination_denom"))?;
+
+        let bridge_receiver = match to_orai_bridge_address(&receiver) {
+            Ok(val) => val,
+            Err(err) => {
+                return Err(StdError::generic_err(format!(
+                    "Error on convert to orai bridge address: {:?}",
+                    err
+                )))
+            }
+        };
 
         // Always require destination.receiver
         if destination_receiver.is_empty() {
