@@ -2,11 +2,11 @@
 mod test {
     use anybuf::Anybuf;
     use cosmwasm_std::{
-        coin, coins, testing::mock_env, Addr, Api, BankMsg, Binary, CosmosMsg, IbcMsg, IbcTimeout,
-        StdError, SubMsg, Uint128,
+        coin, coins, testing::mock_env, Addr, Api, BankMsg, Binary, CosmosMsg, IbcMsg, StdError,
+        SubMsg,
     };
     use cosmwasm_testing_util::mock::{MockApi, MockContract};
-    use cosmwasm_vm::testing::{mock_backend, MockInstanceOptions};
+    use cosmwasm_vm::testing::MockInstanceOptions;
     use cw20_ics20_msg::ibc_hooks::HookMethods;
     use oraiswap::asset::AssetInfo;
 

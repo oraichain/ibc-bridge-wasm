@@ -81,7 +81,7 @@ pub fn ibc_hooks_universal_swap(
     }
 
     let destination_asset_info_on_orai =
-        denom_to_asset_info(&deps.querier, deps.api, &destination.destination_denom)?;
+        denom_to_asset_info(deps.api, &destination.destination_denom);
     let mut remote_destination_denom: String = "".to_string();
     let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
     let to_send_amount =

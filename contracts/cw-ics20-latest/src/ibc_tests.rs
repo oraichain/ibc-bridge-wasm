@@ -490,6 +490,7 @@ fn send_from_remote_to_local_receive_happy_path() {
         gov_contract: SENDER.to_string(),
         allowlist,
         swap_router_contract: "router".to_string(),
+        converter_contract: "converter".to_string(),
     };
 
     contract_instance
@@ -2212,6 +2213,7 @@ fn test_update_config() {
         }]),
         fee_receiver: Some("token_fee_receiver".to_string()),
         relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),
+        converter_contract: Some("new_converter".to_string()),
     };
     // unauthorized case
     let unauthorized_info = mock_info(&String::from("somebody"), &[]);

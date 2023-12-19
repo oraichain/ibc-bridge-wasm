@@ -852,6 +852,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
                 Ok(RelayerFeeResponse { prefix, amount })
             })
             .collect::<StdResult<_>>()?,
+        converter_contract: cfg.converter_contract.addr(),
     };
     Ok(res)
 }

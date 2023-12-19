@@ -3,7 +3,7 @@ use cosmwasm_std::{Addr, Binary, IbcEndpoint, SubMsg, Uint128};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
-use crate::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
+use crate::state::{ChannelInfo, MappingMetadata, RelayerFee, TokenFee};
 use cw20_ics20_msg::{amount::Amount, converter::ConverterInfo, ibc_hooks::HookMethods};
 
 #[cw_serde]
