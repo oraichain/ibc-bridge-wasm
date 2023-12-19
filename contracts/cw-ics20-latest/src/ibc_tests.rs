@@ -561,7 +561,7 @@ fn send_from_remote_to_local_receive_happy_path() {
     let (res, _gas_used) = contract_instance.ibc_packet_receive(ibc_msg).unwrap();
 
     // TODO: fix test cases. Possibly because we are adding two add_submessages?
-    // assert_eq!(res.messages.len(), 3); // 3 messages because we also have deduct fee msg and increase channel balance msg
+    assert_eq!(res.messages.len(), 3); // 3 messages because we also have deduct fee msg and increase channel balance msg
     match res.messages[0].msg.clone() {
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
@@ -569,7 +569,14 @@ fn send_from_remote_to_local_receive_happy_path() {
             funds: _,
         }) => {
             assert_eq!(contract_addr, cw20_addr);
-            assert_eq!(msg, Binary::from(b"null"));
+            assert_eq!(
+                msg,
+                to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: SENDER.to_string(),
+                    amount: Uint128::from(87654321u64) // send amount / token fee
+                })
+                .unwrap()
+            );
         }
         _ => panic!("Unexpected return message: {:?}", res.messages[0]),
     }
