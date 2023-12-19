@@ -80,13 +80,81 @@ impl IbcHooksUniversalSwap {
 mod test {
 
     use anybuf::Anybuf;
-    use cosmwasm_std::{Api, Binary};
+    use cosmwasm_std::{Api, Binary, StdError};
     use cosmwasm_testing_util::mock::MockApi;
 
     use crate::ibc_hooks::IbcHooksUniversalSwap;
 
     #[test]
-    fn test_parse_ibc_hools_universal_swap() {
+    fn test_parse_ibc_hooks_deserialize_error() {
+        let memo = "memo".to_string();
+        IbcHooksUniversalSwap::from_binary(
+            &MockApi::default(),
+            &Binary::from_base64(&memo).unwrap(),
+        )
+        .unwrap_err();
+    }
+
+    #[test]
+    fn test_parse_ibc_hooks_with_destination_empty() {
+        let mock_api = MockApi::default();
+        let memo = Binary::from(
+            Anybuf::new()
+                .append_bytes(
+                    1,
+                    mock_api
+                        .addr_canonicalize("orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .append_string(2, "")
+                .append_string(3, "")
+                .append_string(4, "")
+                .as_bytes(),
+        )
+        .to_base64();
+
+        let res = IbcHooksUniversalSwap::from_binary(
+            &MockApi::default(),
+            &Binary::from_base64(&memo).unwrap(),
+        );
+        assert_eq!(
+            res.unwrap_err(),
+            StdError::generic_err("Require destination receiver in memo")
+        )
+    }
+
+    #[test]
+    fn test_parse_ibc_hooks_with_invalid_types() {
+        let mock_api = MockApi::default();
+        let memo = Binary::from(
+            Anybuf::new()
+                .append_bytes(
+                    1,
+                    mock_api
+                        .addr_canonicalize("orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq")
+                        .unwrap()
+                        .as_slice(),
+                )
+                .append_string(2, "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq")
+                .append_int32(3, 123)
+                .append_string(4, "")
+                .as_bytes(),
+        )
+        .to_base64();
+
+        let res = IbcHooksUniversalSwap::from_binary(
+            &MockApi::default(),
+            &Binary::from_base64(&memo).unwrap(),
+        );
+        assert_eq!(
+            res.unwrap_err(),
+            StdError::generic_err("Error on deserialize destination_channel")
+        )
+    }
+
+    #[test]
+    fn test_parse_ibc_hooks_universal_swap_valid() {
         let mock_api = MockApi::default();
 
         let memo = Binary::from(
