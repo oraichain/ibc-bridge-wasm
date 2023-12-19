@@ -89,12 +89,12 @@ impl Amount {
                         contract: recipient,
                         amount: coin.amount,
                         msg,
-                    };
+                    }
                 } else {
                     Cw20ExecuteMsg::Transfer {
                         recipient: recipient.clone(),
                         amount: coin.amount,
-                    };
+                    }
                 };
 
                 WasmMsg::Execute {
