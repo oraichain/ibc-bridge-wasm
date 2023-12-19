@@ -193,7 +193,7 @@ pub enum QueryMsg {
     PairMapping { key: String },
     #[returns(Vec<PairQuery>)]
     PairMappingsFromAssetInfo { asset_info: AssetInfo },
-    #[returns(Ratio)]
+    #[returns(crate::state::Ratio)]
     GetTransferTokenFee { remote_token_denom: String },
 }
 

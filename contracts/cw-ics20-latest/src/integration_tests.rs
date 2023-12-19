@@ -1,23 +1,19 @@
-#![cfg(test)]
-
-use crate::ibc::{reply, Ics20Packet};
+use crate::ibc::Ics20Packet;
 use crate::msg::{AllowMsg, InitMsg, UpdatePairMsg};
 use crate::test_helpers::{CONTRACT_PORT, DEFAULT_TIMEOUT, REMOTE_PORT};
 
-use cosmwasm_std::{to_binary, Addr, Empty, IbcEndpoint, IbcPacket, Timestamp};
-use cw_multi_test::{App, Contract, ContractWrapper, Executor};
-use oraiswap::asset::AssetInfo;
+use cosmwasm_std::{to_binary, Addr, Coin, IbcEndpoint, IbcPacket, Timestamp};
+use oraiswap::asset::{AssetInfo, ORAI_DENOM};
+use osmosis_test_tube::{Module, OraichainTestApp, Wasm};
+use test_tube::Account;
 
-use crate::contract::{execute, instantiate, query};
 use crate::msg::ExecuteMsg;
 
-fn mock_app() -> App {
-    App::default()
-}
+const WASM_BYTES: &[u8] = include_bytes!("../artifacts/cw-ics20-latest.wasm");
 
-pub fn contract_cw20_ics20_latest() -> Box<dyn Contract<Empty>> {
-    let contract = ContractWrapper::new(execute, instantiate, query).with_reply(reply);
-    Box::new(contract)
+fn mock_app() -> OraichainTestApp {
+    let router = OraichainTestApp::default();
+    router
 }
 
 fn _mock_receive_packet(
@@ -51,17 +47,33 @@ fn _mock_receive_packet(
     )
 }
 
-fn initialize_basic_data_for_testings() -> (App, Addr, Addr, IbcEndpoint, String, String, String, u8)
-{
-    let mut router = mock_app();
+fn initialize_basic_data_for_testings() -> (
+    OraichainTestApp,
+    Addr,
+    String,
+    IbcEndpoint,
+    String,
+    String,
+    String,
+    u8,
+) {
+    let router = mock_app();
+    let init_funds = [Coin::new(5_000_000_000_000u128, ORAI_DENOM)];
+    let accounts = router.init_accounts(&init_funds, 1).unwrap();
+    let owner = &accounts[0];
+    let wasm = Wasm::new(&router);
 
-    let cw20_ics20_id = router.store_code(contract_cw20_ics20_latest());
+    let cw20_ics20_id = wasm
+        .store_code(WASM_BYTES, None, owner)
+        .unwrap()
+        .data
+        .code_id;
 
     let allowlist: Vec<AllowMsg> = vec![];
 
     // arrange
     let addr1 = Addr::unchecked("addr1");
-    let gov_cw20_ics20 = Addr::unchecked("gov");
+    let gov_cw20_ics20 = owner.address();
 
     // ibc stuff
     let src_ibc_endpoint = IbcEndpoint {
@@ -81,22 +93,24 @@ fn initialize_basic_data_for_testings() -> (App, Addr, Addr, IbcEndpoint, String
     let cw20_ics20_init_msg = InitMsg {
         default_gas_limit: Some(20000000u64),
         default_timeout: DEFAULT_TIMEOUT,
-        gov_contract: gov_cw20_ics20.to_string(),
+        gov_contract: gov_cw20_ics20.clone(),
         allowlist,
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
     };
 
-    let cw20_ics20_contract = router
-        .instantiate_contract(
+    let cw20_ics20_contract = wasm
+        .instantiate(
             cw20_ics20_id,
-            gov_cw20_ics20.clone(),
             &cw20_ics20_init_msg,
+            Some(gov_cw20_ics20.as_str()),
+            Some("cw20_ics20"),
             &[],
-            "cw20_ics20",
-            None,
+            owner,
         )
-        .unwrap();
+        .unwrap()
+        .data
+        .address;
 
     // update receiver contract
 
@@ -107,13 +121,7 @@ fn initialize_basic_data_for_testings() -> (App, Addr, Addr, IbcEndpoint, String
         remote_decimals,
         local_asset_info_decimals: asset_info_decimals,
     });
-    router
-        .execute_contract(
-            gov_cw20_ics20.clone(),
-            cw20_ics20_contract.clone(),
-            &update_allow_msg,
-            &[],
-        )
+    wasm.execute(&cw20_ics20_contract, &update_allow_msg, &[], owner)
         .unwrap();
 
     (

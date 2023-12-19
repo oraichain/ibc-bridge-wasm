@@ -1,5 +1,4 @@
-use cosmwasm_std::{Api, QuerierWrapper, StdError, StdResult};
-use cw20::{Cw20QueryMsg, TokenInfoResponse};
+use cosmwasm_std::{Api, StdError, StdResult};
 use oraiswap::asset::AssetInfo;
 
 pub fn get_prefix_decode_bech32(address: &str) -> StdResult<String> {
@@ -24,24 +23,14 @@ pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
     format!("wasm.{}", contract_addr)
 }
 
-pub fn denom_to_asset_info(
-    querier: &QuerierWrapper,
-    api: &dyn Api,
-    denom: &str,
-) -> StdResult<AssetInfo> {
-    let info = if querier
-        .query_wasm_smart::<TokenInfoResponse>(denom, &Cw20QueryMsg::TokenInfo {})
-        .is_ok()
-    {
-        AssetInfo::Token {
-            contract_addr: api.addr_validate(denom)?,
-        }
+pub fn denom_to_asset_info(api: &dyn Api, denom: &str) -> AssetInfo {
+    if let Ok(contract_addr) = api.addr_validate(denom) {
+        AssetInfo::Token { contract_addr }
     } else {
         AssetInfo::NativeToken {
             denom: denom.to_string(),
         }
-    };
-    Ok(info)
+    }
 }
 
 pub fn to_orai_bridge_address(address: &str) -> StdResult<String> {

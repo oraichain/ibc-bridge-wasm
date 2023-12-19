@@ -16,11 +16,17 @@ mod error;
 pub mod ibc;
 pub mod ibc_hooks;
 mod ibc_hooks_test;
-mod ibc_tests;
-mod integration_tests;
 mod migrations;
 pub mod msg;
 pub mod state;
-mod test_helpers;
 
 pub use crate::error::ContractError;
+
+#[cfg(test)]
+mod ibc_tests;
+
+#[cfg(test)]
+mod integration_tests;
+
+#[cfg(test)]
+mod test_helpers;
