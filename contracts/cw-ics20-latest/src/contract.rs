@@ -6,6 +6,7 @@ use cosmwasm_std::{
 };
 use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ReceiveMsg};
+use cw20_ics20_msg::converter::{ConverterController, ConverterInfo};
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
@@ -13,6 +14,7 @@ use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{build_ibc_send_packet, parse_voucher_denom, process_deduct_fee};
+use crate::ibc_hooks::ibc_hooks_receive;
 use crate::msg::{
     AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse,
     ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
@@ -22,8 +24,8 @@ use crate::msg::{
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
     reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
-    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, CONVERTER_INFO, RELAYER_FEE,
+    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
@@ -49,6 +51,7 @@ pub fn instantiate(
         swap_router_contract: RouterController(msg.swap_router_contract),
         token_fee_receiver: admin.clone(),
         relayer_fee_receiver: admin,
+        converter_contract: ConverterController(msg.converter_contract),
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -94,6 +97,7 @@ pub fn execute(
             fee_receiver,
             relayer_fee_receiver,
             relayer_fee,
+            converter_contract,
         } => update_config(
             deps,
             info,
@@ -106,6 +110,7 @@ pub fn execute(
             fee_receiver,
             relayer_fee_receiver,
             relayer_fee,
+            converter_contract,
         ),
         // self-called msgs for ibc_packet_receive
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
@@ -149,6 +154,11 @@ pub fn execute(
             outstanding,
             total_sent,
         ),
+        ExecuteMsg::UpdateConverterInfo(msg) => execute_update_converter_info(deps, info, msg),
+        ExecuteMsg::DeleteConverterInfo(msg) => execute_delete_converter_info(deps, info, msg),
+        ExecuteMsg::IbcHooksReceive { func, args } => {
+            ibc_hooks_receive(deps, env, info, func, args)
+        }
     }
 }
 
@@ -266,6 +276,7 @@ pub fn update_config(
     fee_receiver: Option<String>,
     relayer_fee_receiver: Option<String>,
     relayer_fee: Option<Vec<RelayerFee>>,
+    converter_contract: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
     if let Some(token_fee) = token_fee {
@@ -293,6 +304,9 @@ pub fn update_config(
         }
         if let Some(relayer_fee_receiver) = relayer_fee_receiver {
             config.relayer_fee_receiver = deps.api.addr_validate(&relayer_fee_receiver)?;
+        }
+        if let Some(converter_contract) = converter_contract {
+            config.converter_contract = ConverterController(converter_contract);
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -655,21 +669,66 @@ pub fn execute_delete_mapping_pair(
     Ok(res)
 }
 
+pub fn execute_update_converter_info(
+    deps: DepsMut,
+    info: MessageInfo,
+    converter_info: ConverterInfo,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+    CONVERTER_INFO.save(
+        deps.storage,
+        &converter_info.from.to_vec(deps.api)?,
+        &converter_info,
+    )?;
+    CONVERTER_INFO.save(
+        deps.storage,
+        &converter_info.to.to_vec(deps.api)?,
+        &converter_info,
+    )?;
+
+    let res = Response::new()
+        .add_attribute("action", "update_converter_info")
+        .add_attribute("from_asset", converter_info.from.to_string())
+        .add_attribute("to_asset", converter_info.to.to_string());
+    Ok(res)
+}
+
+pub fn execute_delete_converter_info(
+    deps: DepsMut,
+    info: MessageInfo,
+    converter_info: ConverterInfo,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+    CONVERTER_INFO.remove(deps.storage, &converter_info.from.to_vec(deps.api)?);
+    CONVERTER_INFO.remove(deps.storage, &converter_info.to.to_vec(deps.api)?);
+
+    let res = Response::new()
+        .add_attribute("action", "remove_converter_info")
+        .add_attribute("from_asset", converter_info.from.to_string())
+        .add_attribute("to_asset", converter_info.to.to_string());
+    Ok(res)
+}
+
 #[entry_point]
-pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
+pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
     // we don't need to save anything if migrating from the same version
-    // CONFIG.save(
-    //     deps.storage,
-    //     &Config {
-    //         default_timeout: msg.default_timeout,
-    //         default_gas_limit: msg.default_gas_limit,
-    //         fee_denom: msg.fee_denom,
-    //         swap_router_contract: RouterController(msg.swap_router_contract),
-    //         token_fee_receiver: deps.api.addr_validate(&msg.token_fee_receiver)?,
-    //         relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
-    //     },
-    // )?;
+    CONFIG.save(
+        deps.storage,
+        &Config {
+            default_timeout: msg.default_timeout,
+            default_gas_limit: msg.default_gas_limit,
+            fee_denom: msg.fee_denom,
+            swap_router_contract: RouterController(msg.swap_router_contract),
+            token_fee_receiver: deps.api.addr_validate(&msg.token_fee_receiver)?,
+            relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
+            converter_contract: ConverterController(msg.converter_contract),
+        },
+    )?;
+
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
     Ok(Response::new())
 }
 

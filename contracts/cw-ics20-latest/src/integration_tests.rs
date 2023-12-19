@@ -96,6 +96,7 @@ fn initialize_basic_data_for_testings() -> (
         gov_contract: gov_cw20_ics20.clone(),
         allowlist,
         swap_router_contract: "router".to_string(),
+        converter_contract: "converter".to_string(),
     };
 
     let cw20_ics20_contract = wasm

@@ -14,15 +14,15 @@ use cw20_ics20_msg::helper::{
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
 use cw_storage_plus::Map;
-use oraiswap::asset::AssetInfo;
+use oraiswap::asset::{Asset, AssetInfo};
 use oraiswap::router::{RouterController, SwapOperation};
 
 use crate::error::{ContractError, Never};
 use crate::msg::{ExecuteMsg, FeeData, FollowUpMsgsData};
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ChannelInfo,
-    MappingMetadata, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, RELAYER_FEE, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    ConvertReplyArgs, MappingMetadata, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, CONVERTER_INFO,
+    CONVERT_REPLY_ARGS, RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
@@ -100,6 +100,7 @@ pub const FOLLOW_UP_IBC_SEND_FAILURE_ID: u64 = 1339;
 pub const REFUND_FAILURE_ID: u64 = 1340;
 pub const IBC_TRANSFER_NATIVE_ERROR_ID: u64 = 1341;
 pub const SWAP_OPS_FAILURE_ID: u64 = 1342;
+pub const CONVERT_FAILURE_ID: u64 = 1343;
 pub const ACK_FAILURE_ID: u64 = 64023;
 
 #[entry_point]
@@ -190,6 +191,23 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                 .set_data(ack_success())
                 .add_attribute("action", "ibc_transfer_native_error_id")
                 .add_attribute("error_trying_to_transfer_ibc_native_with_error", err)),
+        },
+        // happens when convert failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
+        CONVERT_FAILURE_ID => match reply.result {
+            SubMsgResult::Ok(_) => Ok(Response::new()),
+            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+            // so no undo increase
+            SubMsgResult::Err(err) => {
+                let reply_args = CONVERT_REPLY_ARGS.load(deps.storage)?;
+                CONVERT_REPLY_ARGS.remove(deps.storage);
+                let sub_msg = handle_asset_refund(reply_args.local_receiver, reply_args.asset)?;
+
+                Ok(Response::new()
+                    .set_data(ack_success())
+                    .add_submessage(sub_msg)
+                    .add_attribute("action", "convert_failure_id")
+                    .add_attribute("error_convert_ops", err))
+            }
         },
         _ => Err(ContractError::UnknownReplyId { id: reply.id }),
     }
@@ -563,8 +581,8 @@ pub fn get_follow_up_msgs(
     to_send: Amount,
     initial_receive_asset_info: AssetInfo,
     destination_asset_info_on_orai: AssetInfo,
-    sender: &str,
-    receiver: &str,
+    sender: &str, // will be receiver  of ics20 packet if  on remote chain if destination is evm
+    receiver: &str, // receiver on Oraichain
     destination: &DestinationInfo,
     initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain,
     destination_pair_mapping: Option<(String, MappingMetadata)>,
@@ -578,13 +596,31 @@ pub fn get_follow_up_msgs(
     let mut follow_up_msgs_data = FollowUpMsgsData {
         sub_msgs: vec![send_only_sub_msg],
         follow_up_msg: "".to_string(),
+        is_success: true,
     };
+
     if destination.destination_denom.is_empty() {
         return Ok(follow_up_msgs_data);
     }
+
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
+
+    let mut target_asset_info_on_swap = destination_asset_info_on_orai.clone();
+
+    // check destination_asset_info_on_orai should converter before ibc transfer
+    let converter_info = CONVERTER_INFO.may_load(
+        storage,
+        &destination_asset_info_on_orai.to_vec(api).unwrap(),
+    )?;
+
+    if let Some(converter_info) = converter_info.clone() {
+        if converter_info.from.eq(&destination_asset_info_on_orai) {
+            target_asset_info_on_swap = converter_info.to;
+        }
+    }
+
     let swap_operations = build_swap_operations(
-        destination_asset_info_on_orai.clone(),
+        target_asset_info_on_swap.clone(),
         initial_receive_asset_info.clone(),
         config.fee_denom.as_str(),
     );
@@ -601,9 +637,57 @@ pub fn get_follow_up_msgs(
                 swap_operations,
                 response.unwrap_err().to_string()
             );
+            follow_up_msgs_data.is_success = false;
+
             return Ok(follow_up_msgs_data);
         }
         minimum_receive = response.unwrap().amount;
+    }
+
+    // by default, the receiver is the original address sent in ics20packet
+    let mut to = Some(api.addr_validate(receiver)?);
+
+    // build convert msg
+    let mut send_converted_msg: Option<CosmosMsg> = None;
+    if let Some(converter_info) = converter_info.clone() {
+        if converter_info.from.eq(&destination_asset_info_on_orai) {
+            let from_asset = Asset {
+                amount: minimum_receive,
+                info: target_asset_info_on_swap,
+            };
+
+            let convert_result =
+                config
+                    .converter_contract
+                    .process_convert(querier, &from_asset, &converter_info);
+
+            if let Some(convert_msg) = convert_result.ok() {
+                CONVERT_REPLY_ARGS.save(
+                    storage,
+                    &ConvertReplyArgs {
+                        local_receiver: receiver.to_string(),
+                        asset: from_asset,
+                    },
+                )?;
+                sub_msgs.push(SubMsg::reply_on_error(convert_msg.0, CONVERT_FAILURE_ID));
+                minimum_receive = convert_msg.1.amount;
+
+                to = None;
+                send_converted_msg = Some(
+                    Amount::from_parts(parse_asset_info_denom(convert_msg.1.info), minimum_receive)
+                        .send_amount(receiver.to_string(), None),
+                );
+            } else {
+                follow_up_msgs_data.follow_up_msg = format!(
+                    "Cannot convert from {} to {}",
+                    converter_info.from.to_string(),
+                    converter_info.to.to_string()
+                );
+                follow_up_msgs_data.is_success = false;
+
+                return Ok(follow_up_msgs_data);
+            }
+        }
     }
 
     let mut build_ibc_msg_result = build_ibc_msg(
@@ -617,16 +701,26 @@ pub fn get_follow_up_msgs(
         destination_pair_mapping,
     );
 
-    // by default, the receiver is the original address sent in ics20packet
-    let mut to = Some(api.addr_validate(receiver)?);
-    follow_up_msgs_data.follow_up_msg = if let Some(ibc_msg) = build_ibc_msg_result.as_mut().ok() {
+    if let Some(ibc_msg) = build_ibc_msg_result.as_mut().ok() {
         sub_msgs.append(ibc_msg);
         // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
         to = None;
-        "".to_string()
     } else {
-        build_ibc_msg_result.unwrap_err().to_string()
+        follow_up_msgs_data.follow_up_msg = build_ibc_msg_result.unwrap_err().to_string();
+        // if has converter message, but don't has ibc messages, must send return amount after convert to receiver
+        if let Some(send_converted_msg) = send_converted_msg {
+            sub_msgs.push(SubMsg::reply_on_error(
+                send_converted_msg,
+                NATIVE_RECEIVE_ID,
+            ));
+        }
+
+        // if destination_channel is empty, still success
+        if !destination.destination_channel.is_empty() {
+            follow_up_msgs_data.is_success = false;
+        }
     };
+
     build_swap_msgs(
         minimum_receive,
         &config.swap_router_contract,
@@ -1188,4 +1282,13 @@ pub fn build_ibc_send_packet(
         data: to_binary(&packet)?,
         timeout,
     })
+}
+
+pub fn handle_asset_refund(receiver: String, asset: Asset) -> Result<SubMsg, ContractError> {
+    let to_send = Amount::from_parts(parse_asset_info_denom(asset.info), asset.amount);
+    let cosmos_msg = to_send.send_amount(receiver, None);
+
+    // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
+    // similar event messages like ibctransfer module
+    Ok(SubMsg::reply_on_error(cosmos_msg, REFUND_FAILURE_ID))
 }

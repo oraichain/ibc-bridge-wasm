@@ -77,6 +77,9 @@ pub enum ContractError {
 
     #[error("Could not find the mapping pair")]
     MappingPairNotFound,
+
+    #[error("Invalid ibc-hooks methods")]
+    InvalidIbcHooksMethods,
 }
 
 impl From<FromUtf8Error> for ContractError {

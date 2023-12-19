@@ -14,6 +14,8 @@ For more information on this contract, please check out the
 pub mod contract;
 mod error;
 pub mod ibc;
+pub mod ibc_hooks;
+mod ibc_hooks_test;
 mod migrations;
 pub mod msg;
 pub mod state;

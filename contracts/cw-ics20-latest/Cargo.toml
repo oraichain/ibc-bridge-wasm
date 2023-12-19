@@ -37,3 +37,5 @@ cosmwasm-vm = { version = "=1.2" }
 osmosis-test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
 test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
 cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "70c4b6c" }
+anybuf = "0.3.0"
+cw-multi-test = "0.16.0"
