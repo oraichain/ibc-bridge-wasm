@@ -1,8 +1,8 @@
 use std::ops::Sub;
 
 use cosmwasm_std::{
-    coin, Addr, BankMsg, Binary, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcTimeout, StdError,
+    coin, Addr, BankMsg, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcTimeout,
+    StdError,
 };
 use cosmwasm_testing_util::mock::MockContract;
 use cosmwasm_vm::testing::MockInstanceOptions;
@@ -15,9 +15,10 @@ use crate::ibc::{
     build_ibc_msg, build_swap_msgs, convert_remote_denom_to_evm_prefix, deduct_fee,
     deduct_relayer_fee, deduct_token_fee, get_token_price, handle_packet_refund,
     ibc_packet_receive, parse_ibc_channel_without_sanity_checks,
-    parse_ibc_denom_without_sanity_checks, parse_voucher_denom, process_ibc_msg, Ics20Ack,
-    Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID, IBC_TRANSFER_NATIVE_ERROR_ID, ICS20_VERSION,
-    NATIVE_RECEIVE_ID, REFUND_FAILURE_ID, SWAP_OPS_FAILURE_ID,
+    parse_ibc_denom_without_sanity_checks, parse_ibc_info_without_sanity_checks,
+    parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID,
+    IBC_TRANSFER_NATIVE_ERROR_ID, ICS20_VERSION, NATIVE_RECEIVE_ID, REFUND_FAILURE_ID,
+    SWAP_OPS_FAILURE_ID,
 };
 use crate::ibc::{build_swap_operations, get_follow_up_msgs};
 use crate::test_helpers::*;
@@ -894,14 +895,14 @@ fn test_get_ibc_msg_evm_case() {
         remote_address,
         &destination,
         timeout,
-        Some((
-            pair_mapping_key.clone(),
-            MappingMetadata {
+        Some(PairQuery {
+            key: pair_mapping_key.clone(),
+            pair_mapping: MappingMetadata {
                 asset_info: receiver_asset_info.clone(),
                 remote_decimals,
                 asset_info_decimals: asset_info_decimals.clone(),
             },
-        )),
+        }),
     )
     .unwrap();
 
@@ -1052,14 +1053,14 @@ fn test_get_ibc_msg_cosmos_based_case() {
         remote_address,
         &destination,
         timeout,
-        Some((
-            pair_mapping_key.clone(),
-            MappingMetadata {
+        Some(PairQuery {
+            key: pair_mapping_key.clone(),
+            pair_mapping: MappingMetadata {
                 asset_info: receiver_asset_info.clone(),
                 remote_decimals,
                 asset_info_decimals,
             },
-        )),
+        }),
     )
     .unwrap();
 
@@ -1317,6 +1318,11 @@ fn test_parse_ibc_denom_without_sanity_checks() {
     );
     let result = parse_ibc_denom_without_sanity_checks("foo/bar/helloworld").unwrap();
     assert_eq!(result, "helloworld");
+
+    let result = parse_ibc_info_without_sanity_checks("foo/bar").unwrap_or_default();
+    assert_eq!(result.0, "");
+    assert_eq!(result.1, "");
+    assert_eq!(result.2, "");
 }
 
 #[test]
@@ -1331,6 +1337,29 @@ fn test_parse_ibc_channel_without_sanity_checks() {
     );
     let result = parse_ibc_channel_without_sanity_checks("foo/bar/helloworld").unwrap();
     assert_eq!(result, "bar");
+
+    let result = parse_ibc_info_without_sanity_checks("foo/bar").unwrap_or_default();
+    assert_eq!(result.0, "");
+    assert_eq!(result.1, "");
+    assert_eq!(result.2, "");
+}
+
+#[test]
+fn test_parse_ibc_info_without_sanity_checks() {
+    assert_eq!(parse_ibc_info_without_sanity_checks("foo").is_err(), true);
+    assert_eq!(
+        parse_ibc_info_without_sanity_checks("foo/bar").is_err(),
+        true
+    );
+    let result = parse_ibc_info_without_sanity_checks("foo/bar/helloworld").unwrap();
+    assert_eq!(result.0, "foo");
+    assert_eq!(result.1, "bar");
+    assert_eq!(result.2, "helloworld");
+
+    let result = parse_ibc_info_without_sanity_checks("foo/bar").unwrap_or_default();
+    assert_eq!(result.0, "");
+    assert_eq!(result.1, "");
+    assert_eq!(result.2, "");
 }
 
 #[test]
@@ -1454,16 +1483,16 @@ fn test_process_ibc_msg() {
     let amount = Uint128::from(1000u64);
     let storage = deps.as_mut().storage;
     let ibc_denom = "foo/bar/cosmos";
-    let pair_mapping = (
-        ibc_denom.to_string(),
-        MappingMetadata {
+    let pair_mapping = PairQuery {
+        key: ibc_denom.to_string(),
+        pair_mapping: MappingMetadata {
             asset_info: AssetInfo::NativeToken {
                 denom: "orai".to_string(),
             },
             remote_decimals: 18,
             asset_info_decimals: 6,
         },
-    );
+    };
     let local_channel_id = "channel";
     let ibc_msg_sender = "sender";
     let ibc_msg_receiver = "receiver";

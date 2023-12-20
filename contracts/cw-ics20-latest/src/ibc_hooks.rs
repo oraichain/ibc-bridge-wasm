@@ -1,6 +1,4 @@
-use cosmwasm_std::{
-    Binary, CosmosMsg, DepsMut, Env, MessageInfo, Order, Response, StdError, StdResult, Uint128,
-};
+use cosmwasm_std::{Binary, CosmosMsg, DepsMut, Env, MessageInfo, Response, StdError, Uint128};
 
 use cw20_ics20_msg::{
     amount::Amount,
@@ -16,7 +14,9 @@ use crate::{
         find_evm_pair_mapping, get_follow_up_msgs, parse_ibc_channel_without_sanity_checks,
         parse_ibc_denom_without_sanity_checks, process_deduct_fee,
     },
-    state::{ics20_denoms, MappingMetadata, CONFIG, CONVERTER_INFO},
+    msg::PairQuery,
+    query_helper::get_mappings_from_asset_info,
+    state::{CONFIG, CONVERTER_INFO},
     ContractError,
 };
 
@@ -83,7 +83,7 @@ pub fn ibc_hooks_universal_swap(
     let destination_asset_info_on_orai =
         denom_to_asset_info(deps.api, &destination.destination_denom);
     let mut remote_destination_denom: String = "".to_string();
-    let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
+    let mut destination_pair_mapping: Option<PairQuery> = None;
     let to_send_amount =
         Amount::from_parts(parse_asset_info_denom(to_send.info.clone()), to_send.amount);
     let follow_up_msg_data;
@@ -117,27 +117,25 @@ pub fn ibc_hooks_universal_swap(
                 "Require destination denom & channel in memo",
             )));
         }
-
-        // query pair mappings
-        let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
-            .idx
-            .asset_info
-            .prefix(destination_asset_info_on_orai.to_string())
-            .range(deps.storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
+        let pair_mappings =
+            get_mappings_from_asset_info(deps.storage, destination_asset_info_on_orai.to_owned())?;
 
         let is_cosmos_based = destination.is_receiver_cosmos_based();
         if is_cosmos_based {
-            destination_pair_mapping = pair_mappings.clone().into_iter().find(|(key, _)| {
-                parse_ibc_channel_without_sanity_checks(key)
+            destination_pair_mapping = pair_mappings.clone().into_iter().find(|pair_query| {
+                parse_ibc_channel_without_sanity_checks(&pair_query.key)
                     .unwrap_or_default()
                     .eq(&destination.destination_channel)
             });
         } else {
             let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
             if is_evm_based {
-                destination_pair_mapping = pair_mappings.into_iter().find(|(key, _)| {
-                    find_evm_pair_mapping(&key, &evm_prefix, &destination.destination_channel)
+                destination_pair_mapping = pair_mappings.into_iter().find(|pair_query| {
+                    find_evm_pair_mapping(
+                        &pair_query.key,
+                        &evm_prefix,
+                        &destination.destination_channel,
+                    )
                 });
             } else {
                 return Err(ContractError::Std(StdError::generic_err(
@@ -150,8 +148,8 @@ pub fn ibc_hooks_universal_swap(
         let mut asset_info_decimals: u8 = 6;
         if let Some(mapping) = destination_pair_mapping.clone() {
             remote_destination_denom =
-                parse_ibc_denom_without_sanity_checks(&mapping.0)?.to_string();
-            asset_info_decimals = mapping.1.asset_info_decimals
+                parse_ibc_denom_without_sanity_checks(&mapping.key)?.to_string();
+            asset_info_decimals = mapping.pair_mapping.asset_info_decimals
         }
 
         // calc fee
@@ -221,7 +219,7 @@ pub fn ibc_hooks_universal_swap(
     }
 
     // check follow up msg will be success
-    if !follow_up_msg_data.is_success {
+    if !follow_up_msg_data.follow_up_msg.is_empty() {
         return Err(ContractError::Std(StdError::generic_err(format!(
             "ibc_error_msg: {}",
             follow_up_msg_data.follow_up_msg,

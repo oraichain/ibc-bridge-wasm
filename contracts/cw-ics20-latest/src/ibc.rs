@@ -18,11 +18,12 @@ use oraiswap::asset::{Asset, AssetInfo};
 use oraiswap::router::{RouterController, SwapOperation};
 
 use crate::error::{ContractError, Never};
-use crate::msg::{ExecuteMsg, FeeData, FollowUpMsgsData};
+use crate::msg::{ExecuteMsg, FeeData, FollowUpMsgsData, PairQuery};
+use crate::query_helper::get_mappings_from_asset_info;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ChannelInfo,
-    ConvertReplyArgs, MappingMetadata, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, CONVERTER_INFO,
-    CONVERT_REPLY_ARGS, RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    ConvertReplyArgs, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, CONVERTER_INFO, CONVERT_REPLY_ARGS,
+    RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
@@ -368,6 +369,19 @@ pub fn parse_ibc_channel_without_sanity_checks<'a>(ibc_denom: &'a str) -> StdRes
     Ok(split_denom[1])
 }
 
+pub fn parse_ibc_info_without_sanity_checks<'a>(
+    ibc_denom: &'a str,
+) -> StdResult<(&'a str, &'a str, &'a str)> {
+    let split_denom: Vec<&str> = ibc_denom.splitn(3, '/').collect();
+
+    if split_denom.len() != 3 {
+        return Err(StdError::generic_err(
+            ContractError::NoForeignTokens {}.to_string(),
+        ));
+    }
+    Ok((split_denom[0], split_denom[1], split_denom[2]))
+}
+
 // this does the work of ibc_packet_receive, we wrap it to turn errors into acknowledgements
 fn do_ibc_packet_receive(
     storage: &mut dyn Storage,
@@ -447,32 +461,32 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
     let destination_asset_info_on_orai = denom_to_asset_info(api, &destination.destination_denom);
     let mut remote_destination_denom: String = "".to_string();
-    let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
+    let mut destination_pair_mapping: Option<PairQuery> = None;
     // if there's a round trip in the destination then we charge additional token and relayer fees
     if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {
-        let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
-            .idx
-            .asset_info
-            .prefix(destination_asset_info_on_orai.to_string())
-            .range(storage, None, None, Order::Ascending)
-            .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
+        let pair_mappings =
+            get_mappings_from_asset_info(storage, destination_asset_info_on_orai.to_owned())?;
         let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
         if is_evm_based {
-            destination_pair_mapping = pair_mappings.clone().into_iter().find(|(key, _)| {
-                find_evm_pair_mapping(&key, &evm_prefix, &destination.destination_channel)
+            destination_pair_mapping = pair_mappings.clone().into_iter().find(|pair_query| {
+                find_evm_pair_mapping(
+                    &pair_query.key,
+                    &evm_prefix,
+                    &destination.destination_channel,
+                )
             });
         }
         let is_cosmos_based = destination.is_receiver_cosmos_based();
         if is_cosmos_based {
-            destination_pair_mapping = pair_mappings.into_iter().find(|(key, _)| {
-                parse_ibc_channel_without_sanity_checks(key)
+            destination_pair_mapping = pair_mappings.into_iter().find(|pair_query| {
+                parse_ibc_channel_without_sanity_checks(&pair_query.key)
                     .unwrap_or_default()
                     .eq(&destination.destination_channel)
             });
         }
         if let Some(mapping) = destination_pair_mapping.clone() {
             remote_destination_denom =
-                parse_ibc_denom_without_sanity_checks(&mapping.0)?.to_string();
+                parse_ibc_denom_without_sanity_checks(&mapping.key)?.to_string();
         }
         // if there's a round trip to a different network, we deduct the token fee based on the remote destination denom
         // for relayer fee, we need to deduct using the destination network
@@ -585,7 +599,7 @@ pub fn get_follow_up_msgs(
     receiver: &str, // receiver on Oraichain
     destination: &DestinationInfo,
     initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain,
-    destination_pair_mapping: Option<(String, MappingMetadata)>,
+    destination_pair_mapping: Option<PairQuery>,
 ) -> Result<FollowUpMsgsData, ContractError> {
     let config = CONFIG.load(storage)?;
     let mut sub_msgs: Vec<SubMsg> = vec![];
@@ -604,7 +618,6 @@ pub fn get_follow_up_msgs(
     }
 
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
-
     let mut target_asset_info_on_swap = destination_asset_info_on_orai.clone();
 
     // check destination_asset_info_on_orai should converter before ibc transfer
@@ -707,7 +720,7 @@ pub fn get_follow_up_msgs(
         to = None;
     } else {
         follow_up_msgs_data.follow_up_msg = build_ibc_msg_result.unwrap_err().to_string();
-        // if has converter message, but don't has ibc messages, must send return amount after convert to receiver
+        // if has converter message, but don't have ibc messages, must send return amount after convert to receiver
         if let Some(send_converted_msg) = send_converted_msg {
             sub_msgs.push(SubMsg::reply_on_error(
                 send_converted_msg,
@@ -812,7 +825,7 @@ pub fn build_ibc_msg(
     remote_address: &str,
     destination: &DestinationInfo,
     default_timeout: u64,
-    pair_mapping: Option<(String, MappingMetadata)>,
+    pair_mapping: Option<PairQuery>,
 ) -> StdResult<Vec<SubMsg>> {
     // if there's no dest channel then we stop, no need to transfer ibc
     if destination.destination_channel.is_empty() {
@@ -821,13 +834,6 @@ pub fn build_ibc_msg(
         ));
     }
     let timeout = env.block.time.plus_seconds(default_timeout);
-    // let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
-    //     .idx
-    //     .asset_info
-    //     .prefix(receiver_asset_info.to_string())
-    //     .range(storage, None, None, Order::Ascending)
-    //     .collect::<StdResult<Vec<(String, MappingMetadata)>>>()?;
-
     let (is_evm_based, _) = destination.is_receiver_evm_based();
     if is_evm_based {
         if let Some(mapping) = pair_mapping {
@@ -885,7 +891,7 @@ pub fn build_ibc_msg(
 
 // TODO: Write unit tests for relayer fee & cosmos based universal swap in simulate js
 pub fn process_ibc_msg(
-    pair_mapping: (String, MappingMetadata),
+    pair_query: PairQuery,
     contract_addr: String,
     local_receiver: &str,
     src_channel: &str,
@@ -897,14 +903,14 @@ pub fn process_ibc_msg(
 ) -> StdResult<Vec<SubMsg>> {
     let remote_amount = convert_local_to_remote(
         amount,
-        pair_mapping.1.remote_decimals,
-        pair_mapping.1.asset_info_decimals,
+        pair_query.pair_mapping.remote_decimals,
+        pair_query.pair_mapping.asset_info_decimals,
     )?;
 
     // prepare ibc message
     let msg: CosmosMsg = build_ibc_send_packet(
         remote_amount,
-        &pair_mapping.0,
+        &pair_query.key,
         ibc_msg_sender,
         ibc_msg_receiver,
         memo,
@@ -917,7 +923,7 @@ pub fn process_ibc_msg(
         contract_addr,
         msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
             src_channel_id: src_channel.to_string(),
-            ibc_denom: pair_mapping.0.clone(),
+            ibc_denom: pair_query.key.clone(),
             amount: remote_amount.clone(),
             local_receiver: local_receiver.to_string(),
         })?,
@@ -1138,13 +1144,10 @@ pub fn find_evm_pair_mapping(
     // parse to get eth-mainnet0x...
     // then collect eth-mainnet prefix, and compare with dest channel
     // then we compare the dest channel with the pair mapping. They should match as well
-    convert_remote_denom_to_evm_prefix(
-        parse_ibc_denom_without_sanity_checks(ibc_denom_pair_mapping_key).unwrap_or_default(),
-    )
-    .eq(&evm_prefix)
-        && parse_ibc_channel_without_sanity_checks(ibc_denom_pair_mapping_key)
-            .unwrap_or_default()
-            .eq(destination_channel)
+    let (_, ibc_channel, ibc_denom) =
+        parse_ibc_info_without_sanity_checks(ibc_denom_pair_mapping_key).unwrap_or_default();
+    convert_remote_denom_to_evm_prefix(ibc_denom).eq(&evm_prefix)
+        && ibc_channel.eq(destination_channel)
 }
 
 #[entry_point]

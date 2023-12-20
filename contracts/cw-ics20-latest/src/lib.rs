@@ -18,6 +18,7 @@ pub mod ibc_hooks;
 mod ibc_hooks_test;
 mod migrations;
 pub mod msg;
+pub mod query_helper;
 pub mod state;
 
 pub use crate::error::ContractError;

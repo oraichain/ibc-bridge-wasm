@@ -21,6 +21,7 @@ use crate::msg::{
     ListMappingResponse, MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse,
     TransferBackMsg, UpdatePairMsg,
 };
+use crate::query_helper::get_mappings_from_asset_info;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
     reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
@@ -930,32 +931,6 @@ fn get_mapping_from_key(deps: Deps, ibc_denom: String) -> StdResult<PairQuery> {
         key: ibc_denom,
         pair_mapping: result,
     })
-}
-
-fn get_mappings_from_asset_info(
-    storage: &dyn Storage,
-    asset_info: AssetInfo,
-) -> StdResult<Vec<PairQuery>> {
-    let pair_mapping_result: StdResult<Vec<_>> = ics20_denoms()
-        .idx
-        .asset_info
-        .prefix(asset_info.to_string())
-        .range(storage, None, None, Order::Ascending)
-        .collect();
-
-    let pair_mappings = match pair_mapping_result {
-        Ok(val) => val,
-        Err(error) => return Err(error),
-    };
-
-    let pair_queries = pair_mappings
-        .into_iter()
-        .map(|pair| PairQuery {
-            key: pair.0,
-            pair_mapping: pair.1,
-        })
-        .collect();
-    Ok(pair_queries)
 }
 
 fn map_order(order: Option<u8>) -> Order {

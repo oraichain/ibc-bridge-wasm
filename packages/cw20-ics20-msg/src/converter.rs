@@ -26,17 +26,17 @@ impl ConverterController {
         from_asset: &Asset,
         converter_info: &ConverterInfo,
     ) -> StdResult<(CosmosMsg, Asset)> {
-        let info: ConvertInfoResponse = querier
-            .query_wasm_smart(
-                self.addr(),
-                &converter::QueryMsg::ConvertInfo {
-                    asset_info: converter_info.from.clone(),
-                },
-            )
-            .unwrap();
+        let info: ConvertInfoResponse = querier.query_wasm_smart(
+            self.addr(),
+            &converter::QueryMsg::ConvertInfo {
+                asset_info: converter_info.from.clone(),
+            },
+        )?;
 
         if converter_info.to.ne(&info.token_ratio.info) {
-            return Err(StdError::generic_err("Convert error"));
+            return Err(StdError::generic_err(
+                "Convert error. To token does not match converter info",
+            ));
         }
 
         if converter_info.from.eq(&from_asset.info) {
