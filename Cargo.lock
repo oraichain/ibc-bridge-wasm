@@ -478,7 +478,7 @@ dependencies = [
 [[package]]
 name = "cosmwasm-testing-util"
 version = "0.1.0"
-source = "git+https://github.com/oraichain/cosmwasm-testing-util.git?rev=70c4b6c#70c4b6c0e866aa02d7a708956ae25d8f07f1481b"
+source = "git+https://github.com/oraichain/cosmwasm-testing-util.git?rev=24c138c#24c138cb128843569d49f1bdfe14d273bd7844d3"
 dependencies = [
  "bech32 0.9.1",
  "cosmwasm-crypto",
@@ -703,7 +703,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cw-ics20"
+name = "cw-ics20-latest"
 version = "1.0.8"
 dependencies = [
  "anybuf",

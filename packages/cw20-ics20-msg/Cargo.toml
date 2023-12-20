@@ -23,5 +23,5 @@ anybuf = "0.3.0"
 
 [dev-dependencies]
 cw-multi-test = "0.16.0"
-cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "70c4b6c" }
+cosmwasm-testing-util = { workspace = true }
 cosmwasm-vm = { version = "=1.2" }

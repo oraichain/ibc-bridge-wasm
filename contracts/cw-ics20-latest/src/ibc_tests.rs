@@ -46,7 +46,6 @@ use crate::msg::{
 use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
 use cosmwasm_std::{coins, to_vec};
 
-const WASM_BYTES: &[u8] = include_bytes!("../artifacts/cw-ics20-latest.wasm");
 const SENDER: &str = "orai1gkr56hlnx9vc7vncln2dkd896zfsqjn300kfq0";
 const CONTRACT: &str = "orai19p43y0tqnr5qlhfwnxft2u5unph5yn60y7tuvu";
 
@@ -1616,7 +1615,10 @@ fn setup_and_query() {
         },
     )
     .unwrap_err();
-    assert_eq!(err, StdError::not_found("cw_ics20::state::ChannelInfo"));
+    assert_eq!(
+        err,
+        StdError::not_found("cw_ics20_latest::state::ChannelInfo")
+    );
 }
 
 #[test]
@@ -2316,7 +2318,7 @@ fn test_handle_packet_refund() {
         handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount).unwrap_err();
     assert_eq!(
         result.to_string(),
-        "cw_ics20::state::MappingMetadata not found"
+        "cw_ics20_latest::state::MappingMetadata not found"
     );
 
     // update mapping pair so that we can get refunded

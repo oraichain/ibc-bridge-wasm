@@ -18,6 +18,7 @@ pub const DEFAULT_TIMEOUT: u64 = 3600; // 1 hour,
 pub const CONTRACT_PORT: &str = "wasm.cosmos2contract"; // wasm.MOCK_CONTRACT_ADDR
 pub const REMOTE_PORT: &str = "transfer";
 pub const CONNECTION_ID: &str = "connection-2";
+pub const WASM_BYTES: &[u8] = include_bytes!("../artifacts/cw-ics20-latest.wasm");
 
 pub fn mock_channel(channel_id: &str) -> IbcChannel {
     IbcChannel::new(

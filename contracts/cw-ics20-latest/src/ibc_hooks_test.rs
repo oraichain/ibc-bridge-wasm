@@ -13,10 +13,9 @@ mod test {
     use crate::{
         msg::{AllowMsg, ExecuteMsg, InitMsg, UpdatePairMsg},
         state::{Ratio, TOKEN_FEE},
-        test_helpers::DEFAULT_TIMEOUT,
+        test_helpers::{DEFAULT_TIMEOUT, WASM_BYTES},
     };
 
-    const WASM_BYTES: &[u8] = include_bytes!("../artifacts/cw-ics20-latest.wasm");
     const SENDER: &str = "orai1gkr56hlnx9vc7vncln2dkd896zfsqjn300kfq0";
     const CONTRACT: &str = "orai19p43y0tqnr5qlhfwnxft2u5unph5yn60y7tuvu";
 

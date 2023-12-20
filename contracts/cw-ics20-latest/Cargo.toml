@@ -1,5 +1,5 @@
 [package]
-name = "cw-ics20"
+name = "cw-ics20-latest"
 version = "1.0.8"
 authors = ["Ethan Frey <ethanfrey@users.noreply.github.com>, Oraichain Labs"]
 edition = "2021"
@@ -36,6 +36,6 @@ serde = { version = "1.0.193", default-features = false, features = ["derive"] }
 cosmwasm-vm = { version = "=1.2" }
 osmosis-test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
 test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
-cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "70c4b6c" }
+cosmwasm-testing-util = { workspace = true }
 anybuf = "0.3.0"
 cw-multi-test = "0.16.0"
