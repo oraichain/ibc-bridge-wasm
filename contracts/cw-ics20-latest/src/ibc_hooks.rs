@@ -82,9 +82,8 @@ pub fn ibc_hooks_universal_swap(
 
     let destination_asset_info_on_orai =
         denom_to_asset_info(deps.api, &destination.destination_denom);
-    let mut remote_destination_denom: String = "".to_string();
     let mut destination_pair_mapping: Option<PairQuery> = None;
-    let to_send_amount =
+    let mut to_send_amount =
         Amount::from_parts(parse_asset_info_denom(to_send.info.clone()), to_send.amount);
     let follow_up_msg_data;
 
@@ -144,70 +143,68 @@ pub fn ibc_hooks_universal_swap(
             }
         }
 
-        // default decimals 6
-        let mut asset_info_decimals: u8 = 6;
-        if let Some(mapping) = destination_pair_mapping.clone() {
-            remote_destination_denom =
-                parse_ibc_denom_without_sanity_checks(&mapping.key)?.to_string();
-            asset_info_decimals = mapping.pair_mapping.asset_info_decimals
-        }
-
         // calc fee
-        let fee_data = process_deduct_fee(
-            deps.storage,
-            &deps.querier,
-            deps.api,
-            &destination.receiver.clone(),
-            &remote_destination_denom,
-            to_send_amount.clone(),
-            asset_info_decimals,
-            &config.swap_router_contract,
-        )?;
+        if let Some(mapping) = destination_pair_mapping.clone() {
+            let remote_destination_denom =
+                parse_ibc_denom_without_sanity_checks(&mapping.key)?.to_string();
 
-        // if the fees have consumed all user funds, we send all the fees to our token fee receiver
-        if fee_data.deducted_amount.is_zero() {
-            return Ok(Response::new()
-                .add_message(
-                    to_send_amount.send_amount(config.token_fee_receiver.into_string(), None),
-                )
-                .add_attributes(vec![
-                    ("action", "receive_ibc_hooks"),
-                    ("receiver", &destination.receiver),
-                    ("denom", source_coin.denom.as_str()),
-                    ("amount", &source_coin.amount.to_string()),
-                    ("destination", &destination.receiver),
-                    ("token_fee", &fee_data.token_fee.amount().to_string()),
-                    ("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
-                ]));
-        }
+            let fee_data = process_deduct_fee(
+                deps.storage,
+                &deps.querier,
+                deps.api,
+                &destination.receiver.clone(),
+                &remote_destination_denom,
+                to_send_amount.clone(),
+                mapping.pair_mapping.asset_info_decimals,
+                &config.swap_router_contract,
+            )?;
 
-        if !fee_data.token_fee.is_empty() {
-            msgs.push(
-                fee_data
-                    .token_fee
-                    .send_amount(config.token_fee_receiver.into_string(), None),
+            // if the fees have consumed all user funds, we send all the fees to our token fee receiver
+            if fee_data.deducted_amount.is_zero() {
+                return Ok(Response::new()
+                    .add_message(
+                        to_send_amount.send_amount(config.token_fee_receiver.into_string(), None),
+                    )
+                    .add_attributes(vec![
+                        ("action", "receive_ibc_hooks"),
+                        ("receiver", &destination.receiver),
+                        ("denom", source_coin.denom.as_str()),
+                        ("amount", &source_coin.amount.to_string()),
+                        ("destination", &destination.receiver),
+                        ("token_fee", &fee_data.token_fee.amount().to_string()),
+                        ("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
+                    ]));
+            }
+
+            if !fee_data.token_fee.is_empty() {
+                msgs.push(
+                    fee_data
+                        .token_fee
+                        .send_amount(config.token_fee_receiver.into_string(), None),
+                );
+                token_fee = fee_data.token_fee.amount();
+            }
+            if !fee_data.relayer_fee.is_empty() {
+                msgs.push(
+                    fee_data
+                        .relayer_fee
+                        .send_amount(config.relayer_fee_receiver.to_string(), None),
+                );
+                relayer_fee = fee_data.relayer_fee.amount();
+            }
+
+            to_send_amount = Amount::from_parts(
+                parse_asset_info_denom(to_send.info.clone()),
+                fee_data.deducted_amount,
             );
-            token_fee = fee_data.token_fee.amount();
-        }
-        if !fee_data.relayer_fee.is_empty() {
-            msgs.push(
-                fee_data
-                    .relayer_fee
-                    .send_amount(config.relayer_fee_receiver.to_string(), None),
-            );
-            relayer_fee = fee_data.relayer_fee.amount();
         }
 
-        let new_deducted_to_send_amount = Amount::from_parts(
-            parse_asset_info_denom(to_send.info.clone()),
-            fee_data.deducted_amount,
-        );
         follow_up_msg_data = get_follow_up_msgs(
             deps.storage,
             deps.api,
             &deps.querier,
             env.clone(),
-            new_deducted_to_send_amount,
+            to_send_amount,
             to_send.info,
             destination_asset_info_on_orai,
             &hooks_info.bridge_receiver,
