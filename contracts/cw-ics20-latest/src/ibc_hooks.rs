@@ -2,12 +2,13 @@ use cosmwasm_std::{Binary, CosmosMsg, DepsMut, Env, MessageInfo, Response, StdEr
 
 use cw20_ics20_msg::{
     amount::Amount,
+    converter::ConvertType,
     helper::{denom_to_asset_info, parse_asset_info_denom},
     ibc_hooks::{HookMethods, IbcHooksUniversalSwap},
     receiver::DestinationInfo,
 };
 use cw_utils::one_coin;
-use oraiswap::asset::{Asset, AssetInfo};
+use oraiswap::asset::AssetInfo;
 
 use crate::{
     ibc::{
@@ -16,7 +17,7 @@ use crate::{
     },
     msg::PairQuery,
     query_helper::get_mappings_from_asset_info,
-    state::{CONFIG, CONVERTER_INFO},
+    state::CONFIG,
     ContractError,
 };
 
@@ -53,31 +54,17 @@ pub fn ibc_hooks_universal_swap(
     let mut token_fee = Uint128::zero();
     let mut relayer_fee = Uint128::zero();
 
-    let mut to_send = Asset {
-        amount: source_coin.amount.clone(),
-        info: AssetInfo::NativeToken {
+    let (msg, to_send) = config.converter_contract.process_convert(
+        &deps.querier,
+        &AssetInfo::NativeToken {
             denom: source_coin.denom.clone(),
         },
-    };
+        source_coin.amount,
+        ConvertType::FromSource,
+    )?;
 
-    // if this receive token is already registered which needs to be converted, then execute the converter before
-    let converter_info = CONVERTER_INFO.may_load(deps.storage, &to_send.info.to_vec(deps.api)?)?;
-    if let Some(converter_info) = converter_info {
-        if converter_info.from.eq(&to_send.info) {
-            let from_asset = Asset {
-                info: AssetInfo::NativeToken {
-                    denom: source_coin.denom.clone(),
-                },
-                amount: source_coin.amount,
-            };
-            let (msg, return_amount) = config.converter_contract.process_convert(
-                &deps.querier,
-                &from_asset,
-                &converter_info,
-            )?;
-            msgs.push(msg);
-            to_send = return_amount;
-        }
+    if let Some(msg) = msg {
+        msgs.push(msg);
     }
 
     let destination_asset_info_on_orai =

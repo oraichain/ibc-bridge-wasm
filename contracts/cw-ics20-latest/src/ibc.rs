@@ -9,6 +9,7 @@ use cosmwasm_std::{
     Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
     Timestamp, Uint128,
 };
+use cw20_ics20_msg::converter::ConvertType;
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
@@ -22,8 +23,8 @@ use crate::msg::{ExecuteMsg, FeeData, FollowUpMsgsData, PairQuery};
 use crate::query_helper::get_mappings_from_asset_info;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ChannelInfo,
-    ConvertReplyArgs, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, CONVERTER_INFO, CONVERT_REPLY_ARGS,
-    RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    ConvertReplyArgs, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, CONVERT_REPLY_ARGS, RELAYER_FEE,
+    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
@@ -620,16 +621,13 @@ pub fn get_follow_up_msgs(
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
     let mut target_asset_info_on_swap = destination_asset_info_on_orai.clone();
 
-    // check destination_asset_info_on_orai should converter before ibc transfer
-    let converter_info = CONVERTER_INFO.may_load(
-        storage,
-        &destination_asset_info_on_orai.to_vec(api).unwrap(),
-    )?;
+    // check destination_asset_info_on_orai should convert before ibc transfer
+    let converter_info = config
+        .converter_contract
+        .converter_info(querier, &destination_asset_info_on_orai);
 
     if let Some(converter_info) = converter_info.clone() {
-        if converter_info.from.eq(&destination_asset_info_on_orai) {
-            target_asset_info_on_swap = converter_info.to;
-        }
+        target_asset_info_on_swap = converter_info.token_ratio.info;
     }
 
     let swap_operations = build_swap_operations(
@@ -662,44 +660,35 @@ pub fn get_follow_up_msgs(
 
     // build convert msg
     let mut send_converted_msg: Option<CosmosMsg> = None;
-    if let Some(converter_info) = converter_info.clone() {
-        if converter_info.from.eq(&destination_asset_info_on_orai) {
-            let from_asset = Asset {
-                amount: minimum_receive,
-                info: target_asset_info_on_swap,
-            };
+    if converter_info.is_some() {
+        let from_asset = Asset {
+            amount: minimum_receive,
+            info: target_asset_info_on_swap,
+        };
 
-            let convert_result =
-                config
-                    .converter_contract
-                    .process_convert(querier, &from_asset, &converter_info);
+        let (convert_msg, return_asset) = config.converter_contract.process_convert(
+            querier,
+            &destination_asset_info_on_orai,
+            minimum_receive,
+            ConvertType::ToSource,
+        )?;
 
-            if let Some(convert_msg) = convert_result.ok() {
-                CONVERT_REPLY_ARGS.save(
-                    storage,
-                    &ConvertReplyArgs {
-                        local_receiver: receiver.to_string(),
-                        asset: from_asset,
-                    },
-                )?;
-                sub_msgs.push(SubMsg::reply_on_error(convert_msg.0, CONVERT_FAILURE_ID));
-                minimum_receive = convert_msg.1.amount;
+        if let Some(convert_msg) = convert_msg {
+            CONVERT_REPLY_ARGS.save(
+                storage,
+                &ConvertReplyArgs {
+                    local_receiver: receiver.to_string(),
+                    asset: from_asset,
+                },
+            )?;
+            sub_msgs.push(SubMsg::reply_on_error(convert_msg, CONVERT_FAILURE_ID));
+            minimum_receive = return_asset.amount;
 
-                to = None;
-                send_converted_msg = Some(
-                    Amount::from_parts(parse_asset_info_denom(convert_msg.1.info), minimum_receive)
-                        .send_amount(receiver.to_string(), None),
-                );
-            } else {
-                follow_up_msgs_data.follow_up_msg = format!(
-                    "Cannot convert from {} to {}",
-                    converter_info.from.to_string(),
-                    converter_info.to.to_string()
-                );
-                follow_up_msgs_data.is_success = false;
-
-                return Ok(follow_up_msgs_data);
-            }
+            to = None;
+            send_converted_msg = Some(
+                Amount::from_parts(parse_asset_info_denom(return_asset.info), minimum_receive)
+                    .send_amount(receiver.to_string(), None),
+            );
         }
     }
 
