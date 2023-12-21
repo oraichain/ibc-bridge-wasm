@@ -139,90 +139,98 @@ fn test_destination_info_from_str() {
     assert_eq!(d1.destination_denom, "");
 }
 
-#[test]
-fn test_parse_destination_info() {
-    // swap to orai then orai to atom, then use swapped amount to transfer ibc to destination
-    let d1 =
-        DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:atom");
-    assert_eq!(
-        d1,
-        DestinationInfo {
-            receiver: "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz".to_string(),
-            destination_channel: "channel-15".to_string(),
-            destination_denom: "atom".to_string()
-        }
-    );
-    // swap to orai then orai to usdt with 'to' as the receiver when swapping, then we're done
-    let d2 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573:usdt");
-    assert_eq!(
-        d2,
-        DestinationInfo {
-            receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
-            destination_channel: "".to_string(),
-            destination_denom: "usdt".to_string()
-        }
-    );
-    // this case returns an error (because it has channel but no destination denom)
-    let d3 = DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
-    assert_eq!(
-        d3,
-        DestinationInfo {
-            receiver: "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz".to_string(),
-            destination_channel: "channel-15".to_string(),
-            destination_denom: "".to_string()
-        }
-    );
-    let d4 =
-        DestinationInfo::from_str("trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt");
-    assert_eq!(
-        d4,
-        DestinationInfo {
-            receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
-            destination_channel: "".to_string(),
-            destination_denom: "usdt".to_string()
-        }
-    );
+#[cfg(test)]
+mod tests {
+    use crate::receiver::DestinationInfo;
 
-    let d5 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
-    assert_eq!(
-        d5,
-        DestinationInfo {
-            receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
-            destination_channel: "".to_string(),
-            destination_denom: "".to_string()
-        }
-    );
+    #[test]
+    fn test_parse_destination_info() {
+        // swap to orai then orai to atom, then use swapped amount to transfer ibc to destination
+        let d1 = DestinationInfo::from_str(
+            "channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:atom",
+        );
+        assert_eq!(
+            d1,
+            DestinationInfo {
+                receiver: "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz".to_string(),
+                destination_channel: "channel-15".to_string(),
+                destination_denom: "atom".to_string()
+            }
+        );
+        // swap to orai then orai to usdt with 'to' as the receiver when swapping, then we're done
+        let d2 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573:usdt");
+        assert_eq!(
+            d2,
+            DestinationInfo {
+                receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
+                destination_channel: "".to_string(),
+                destination_denom: "usdt".to_string()
+            }
+        );
+        // this case returns an error (because it has channel but no destination denom)
+        let d3 =
+            DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
+        assert_eq!(
+            d3,
+            DestinationInfo {
+                receiver: "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz".to_string(),
+                destination_channel: "channel-15".to_string(),
+                destination_denom: "".to_string()
+            }
+        );
+        let d4 =
+            DestinationInfo::from_str("trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt");
+        assert_eq!(
+            d4,
+            DestinationInfo {
+                receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
+                destination_channel: "".to_string(),
+                destination_denom: "usdt".to_string()
+            }
+        );
 
-    let d6 = DestinationInfo::from_str(
-        "channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt",
-    );
-    assert_eq!(
-        d6,
-        DestinationInfo {
-            receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
-            destination_channel: "channel-5".to_string(),
-            destination_denom: "usdt".to_string()
-        }
-    );
-    // ibc hash case
-    let d7 = DestinationInfo::from_str("channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78");
-    assert_eq!(
-        d7,
-        DestinationInfo {
-            receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
-            destination_channel: "channel-5".to_string(),
-            destination_denom:
-                "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78".to_string()
-        }
-    );
-    let d8 = DestinationInfo::from_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
-    assert_eq!(
-        d8,
-        DestinationInfo {
-            receiver: "cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm".to_string(),
-            destination_channel: "channel-124".to_string(),
-            destination_denom: "orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf"
-                .to_string(),
-        }
-    )
+        let d5 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
+        assert_eq!(
+            d5,
+            DestinationInfo {
+                receiver: "orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573".to_string(),
+                destination_channel: "".to_string(),
+                destination_denom: "".to_string()
+            }
+        );
+
+        let d6 = DestinationInfo::from_str(
+            "channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt",
+        );
+        assert_eq!(
+            d6,
+            DestinationInfo {
+                receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
+                destination_channel: "channel-5".to_string(),
+                destination_denom: "usdt".to_string()
+            }
+        );
+        // ibc hash case
+        let d7 = DestinationInfo::from_str("channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78");
+        assert_eq!(
+            d7,
+            DestinationInfo {
+                receiver: "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string(),
+                destination_channel: "channel-5".to_string(),
+                destination_denom:
+                    "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78"
+                        .to_string()
+            }
+        );
+        let d8 = DestinationInfo::from_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
+        assert_eq!(
+            d8,
+            DestinationInfo {
+                receiver: "cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm".to_string(),
+                destination_channel: "channel-124".to_string(),
+                destination_denom:
+                    "orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf".to_string(),
+            }
+        )
+    }
 }

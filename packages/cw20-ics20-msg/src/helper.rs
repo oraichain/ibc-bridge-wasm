@@ -40,17 +40,23 @@ pub fn to_orai_bridge_address(address: &str) -> StdResult<String> {
     Ok(oraib_address)
 }
 
-#[test]
-fn test_get_prefix_decode_bech32() {
-    let result = get_prefix_decode_bech32("cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm").unwrap();
-    assert_eq!(result, "cosmos".to_string());
-}
+#[cfg(test)]
+mod tests {
+    use crate::helper::{get_prefix_decode_bech32, to_orai_bridge_address};
 
-#[test]
-fn test_to_orai_bridge_address() {
-    let result = to_orai_bridge_address("orai1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejvfgs7g").unwrap();
-    assert_eq!(
-        result,
-        "oraib1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejmgvu0t".to_string()
-    );
+    #[test]
+    fn test_get_prefix_decode_bech32() {
+        let result =
+            get_prefix_decode_bech32("cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm").unwrap();
+        assert_eq!(result, "cosmos".to_string());
+    }
+
+    #[test]
+    fn test_to_orai_bridge_address() {
+        let result = to_orai_bridge_address("orai1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejvfgs7g").unwrap();
+        assert_eq!(
+            result,
+            "oraib1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejmgvu0t".to_string()
+        );
+    }
 }

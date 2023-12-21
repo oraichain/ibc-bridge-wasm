@@ -21,7 +21,7 @@ use crate::ibc::{
     SWAP_OPS_FAILURE_ID,
 };
 use crate::ibc::{build_swap_operations, get_follow_up_msgs};
-use crate::test_helpers::*;
+use crate::testing::test_helpers::*;
 use cosmwasm_std::{
     from_binary, to_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, SubMsg, Timestamp,
     Uint128, WasmMsg,

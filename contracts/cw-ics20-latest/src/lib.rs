@@ -15,7 +15,6 @@ pub mod contract;
 mod error;
 pub mod ibc;
 pub mod ibc_hooks;
-mod ibc_hooks_test;
 mod migrations;
 pub mod msg;
 pub mod query_helper;
@@ -24,10 +23,4 @@ pub mod state;
 pub use crate::error::ContractError;
 
 #[cfg(test)]
-mod ibc_tests;
-
-#[cfg(test)]
-mod integration_tests;
-
-#[cfg(test)]
-mod test_helpers;
+mod testing;

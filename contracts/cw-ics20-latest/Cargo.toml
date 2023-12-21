@@ -23,19 +23,16 @@ cw-utils = "0.16.0"
 cw2 = "1.0.1"
 cw20 = "1.0.1"
 cw20-ics20-msg = { path = "../../packages/cw20-ics20-msg" }
-oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "03f4955b" }
-cosmwasm-std = { version = "=1.2", features = ["stargate", "ibc3"] }
+oraiswap = { workspace = true }
+cosmwasm-std = { version = "=1.2", features = ["ibc3"] }
 cw-storage-plus = "1.0.1"
 cw-controllers = "1.0.1"
-schemars = "0.8.11"
-semver = "1"
 thiserror = { version = "1.0.23" }
-serde = { version = "1.0.193", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 cosmwasm-vm = { version = "=1.2" }
-osmosis-test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
-test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
+osmosis-test-tube = { workspace = true }
+test-tube = { workspace = true }
 cosmwasm-testing-util = { workspace = true }
 anybuf = "0.3.0"
 cw-multi-test = "0.16.0"

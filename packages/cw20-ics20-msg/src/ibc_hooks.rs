@@ -77,7 +77,7 @@ impl IbcHooksUniversalSwap {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
 
     use anybuf::Anybuf;
     use cosmwasm_std::{Api, Binary, StdError};

@@ -720,9 +720,6 @@ dependencies = [
  "cw20-ics20-msg",
  "oraiswap",
  "osmosis-test-tube",
- "schemars",
- "semver",
- "serde",
  "test-tube",
  "thiserror",
 ]
@@ -870,8 +867,6 @@ dependencies = [
  "cw-storage-plus 1.1.0",
  "cw20",
  "oraiswap",
- "schemars",
- "serde",
 ]
 
 [[package]]

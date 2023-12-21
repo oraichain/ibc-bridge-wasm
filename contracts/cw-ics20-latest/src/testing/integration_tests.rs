@@ -1,6 +1,6 @@
 use crate::ibc::Ics20Packet;
 use crate::msg::{AllowMsg, InitMsg, UpdatePairMsg};
-use crate::test_helpers::{CONTRACT_PORT, DEFAULT_TIMEOUT, REMOTE_PORT, WASM_BYTES};
+use crate::testing::test_helpers::{CONTRACT_PORT, DEFAULT_TIMEOUT, REMOTE_PORT, WASM_BYTES};
 
 use cosmwasm_std::{to_binary, Addr, Coin, IbcEndpoint, IbcPacket, Timestamp};
 use oraiswap::asset::{AssetInfo, ORAI_DENOM};
