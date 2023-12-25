@@ -58,11 +58,14 @@ pub fn get_destination_info_on_orai(
     }
 
     // case 2: port is transfer
-    let ibc_denom = digest(format!(
-        "transfer/{}/{}",
-        destination_channel, destination_denom
-    ))
-    .to_uppercase();
+    let ibc_denom = format!(
+        "ibc/{}",
+        digest(format!(
+            "transfer/{}/{}",
+            destination_channel, destination_denom
+        ))
+        .to_uppercase()
+    );
 
     (AssetInfo::NativeToken { denom: ibc_denom }, None)
 }

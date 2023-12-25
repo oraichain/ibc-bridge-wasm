@@ -107,9 +107,9 @@ pub fn test_memo() {
                     .as_slice(),
             ) // receiver on Oraichain
             .append_string(2, "orai1ntdmh848kktumfw5tx8l2semwkxa5s7e5rs03x") // destination receiver
-            .append_string(3, "channel-19") // destination channel
+            .append_string(3, "channel-170") // destination channel
             .append_string(
-                4, "ibc/", //destination denom
+                4, "orai", //destination denom
             )
             .as_bytes(),
     )
@@ -132,10 +132,4 @@ pub fn test_memo() {
         "{}-{}-{}-{}",
         receiver, destination_receiver, destination_channel, destination_denom
     );
-}
-
-#[test]
-pub fn test_hash() {
-    let res = digest("transfer/channel-15/uatom").to_uppercase();
-    println!("{}", res);
 }
