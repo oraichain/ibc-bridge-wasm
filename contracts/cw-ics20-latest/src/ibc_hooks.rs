@@ -3,7 +3,7 @@ use cosmwasm_std::{Binary, CosmosMsg, DepsMut, Env, MessageInfo, Response, StdEr
 use cw20_ics20_msg::{
     amount::Amount,
     converter::ConvertType,
-    helper::{denom_to_asset_info, parse_asset_info_denom},
+    helper::parse_asset_info_denom,
     ibc_hooks::{HookMethods, IbcHooksUniversalSwap},
     receiver::DestinationInfo,
 };
@@ -11,12 +11,8 @@ use cw_utils::one_coin;
 use oraiswap::asset::AssetInfo;
 
 use crate::{
-    ibc::{
-        find_evm_pair_mapping, get_follow_up_msgs, parse_ibc_channel_without_sanity_checks,
-        parse_ibc_denom_without_sanity_checks, process_deduct_fee,
-    },
-    msg::PairQuery,
-    query_helper::get_mappings_from_asset_info,
+    ibc::{get_follow_up_msgs, process_deduct_fee},
+    query_helper::get_destination_info_on_orai,
     state::CONFIG,
     ContractError,
 };
@@ -67,9 +63,14 @@ pub fn ibc_hooks_universal_swap(
         msgs.push(msg);
     }
 
-    let destination_asset_info_on_orai =
-        denom_to_asset_info(deps.api, &destination.destination_denom);
-    let mut destination_pair_mapping: Option<PairQuery> = None;
+    let (destination_asset_info_on_orai, destination_pair_mapping) = get_destination_info_on_orai(
+        deps.storage,
+        deps.api,
+        &env,
+        destination.destination_channel.clone(),
+        destination.destination_denom.clone(),
+    );
+
     let mut to_send_amount =
         Amount::from_parts(parse_asset_info_denom(to_send.info.clone()), to_send.amount);
     let follow_up_msg_data;
@@ -103,44 +104,15 @@ pub fn ibc_hooks_universal_swap(
                 "Require destination denom & channel in memo",
             )));
         }
-        let pair_mappings =
-            get_mappings_from_asset_info(deps.storage, destination_asset_info_on_orai.to_owned())?;
-
-        let is_cosmos_based = destination.is_receiver_cosmos_based();
-        if is_cosmos_based {
-            destination_pair_mapping = pair_mappings.clone().into_iter().find(|pair_query| {
-                parse_ibc_channel_without_sanity_checks(&pair_query.key)
-                    .unwrap_or_default()
-                    .eq(&destination.destination_channel)
-            });
-        } else {
-            let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
-            if is_evm_based {
-                destination_pair_mapping = pair_mappings.into_iter().find(|pair_query| {
-                    find_evm_pair_mapping(
-                        &pair_query.key,
-                        &evm_prefix,
-                        &destination.destination_channel,
-                    )
-                });
-            } else {
-                return Err(ContractError::Std(StdError::generic_err(
-                    "Destination chain is invalid!",
-                )));
-            }
-        }
 
         // calc fee
         if let Some(mapping) = destination_pair_mapping.clone() {
-            let remote_destination_denom =
-                parse_ibc_denom_without_sanity_checks(&mapping.key)?.to_string();
-
             let fee_data = process_deduct_fee(
                 deps.storage,
                 &deps.querier,
                 deps.api,
                 &destination.receiver.clone(),
-                &remote_destination_denom,
+                &destination.destination_denom,
                 to_send_amount.clone(),
                 mapping.pair_mapping.asset_info_decimals,
                 &config.swap_router_contract,

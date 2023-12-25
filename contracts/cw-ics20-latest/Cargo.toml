@@ -28,6 +28,7 @@ cosmwasm-std = { version = "=1.2", features = ["ibc3"] }
 cw-storage-plus = "1.0.1"
 cw-controllers = "1.0.1"
 thiserror = { version = "1.0.23" }
+sha256 = "=1.1.0"
 
 [dev-dependencies]
 cosmwasm-vm = { version = "=1.2" }

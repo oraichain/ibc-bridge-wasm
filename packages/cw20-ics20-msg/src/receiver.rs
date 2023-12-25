@@ -1,4 +1,6 @@
+use anybuf::Bufany;
 use cosmwasm_schema::cw_serde;
+use cosmwasm_std::{Binary, StdError, StdResult};
 
 use crate::helper::get_prefix_decode_bech32;
 
@@ -28,6 +30,36 @@ impl DestinationInfo {
             destination_channel: channel.to_string(),
             destination_denom: denom.to_string(),
         }
+    }
+
+    pub fn from_binary(value: &Binary) -> StdResult<Self> {
+        let deserialized = match Bufany::deserialize(&value) {
+            Ok(val) => val,
+            Err(err) => {
+                return Err(StdError::generic_err(format!(
+                    "Error on deserialize: {:?}",
+                    err
+                )))
+            }
+        };
+
+        let destination_receiver = deserialized
+            .string(2)
+            .ok_or_else(|| StdError::generic_err("Error on deserialize destination_receiver"))?;
+
+        let destination_channel = deserialized
+            .string(3)
+            .ok_or_else(|| StdError::generic_err("Error on deserialize destination_channel"))?;
+
+        let destination_denom = deserialized
+            .string(4)
+            .ok_or_else(|| StdError::generic_err("Error on deserialize destination_denom"))?;
+
+        Ok(Self {
+            receiver: destination_receiver,
+            destination_channel,
+            destination_denom,
+        })
     }
 
     pub fn is_receiver_evm_based(&self) -> (bool, String) {

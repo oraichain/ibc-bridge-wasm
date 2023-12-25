@@ -9,6 +9,7 @@ use cosmwasm_std::{
     OwnedDeps,
 };
 use cosmwasm_testing_util::mock::MockApi;
+use sha256::digest;
 
 use crate::msg::{AllowMsg, InitMsg};
 
@@ -131,4 +132,10 @@ pub fn test_memo() {
         "{}-{}-{}-{}",
         receiver, destination_receiver, destination_channel, destination_denom
     );
+}
+
+#[test]
+pub fn test_hash() {
+    let res = digest("transfer/channel-15/uatom").to_uppercase();
+    println!("{}", res);
 }

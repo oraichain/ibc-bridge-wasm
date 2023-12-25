@@ -720,6 +720,7 @@ dependencies = [
  "cw20-ics20-msg",
  "oraiswap",
  "osmosis-test-tube",
+ "sha256",
  "test-tube",
  "thiserror",
 ]
@@ -2690,6 +2691,16 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha256"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bd6094abafa66199bd1371761b49d285e6a4c9549887dbcdf2c7f3401d9b82f"
+dependencies = [
+ "hex",
+ "sha2 0.9.9",
 ]
 
 [[package]]

@@ -80,6 +80,9 @@ pub enum ContractError {
 
     #[error("Invalid ibc-hooks methods")]
     InvalidIbcHooksMethods,
+
+    #[error("Invalid destination memo {error}")]
+    InvalidDestinationMemo { error: String },
 }
 
 impl From<FromUtf8Error> for ContractError {

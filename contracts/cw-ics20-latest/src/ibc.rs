@@ -20,7 +20,7 @@ use oraiswap::router::{RouterController, SwapOperation};
 
 use crate::error::{ContractError, Never};
 use crate::msg::{ExecuteMsg, FeeData, FollowUpMsgsData, PairQuery};
-use crate::query_helper::get_mappings_from_asset_info;
+use crate::query_helper::get_destination_info_on_orai;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ChannelInfo,
     ConvertReplyArgs, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, CONVERT_REPLY_ARGS, RELAYER_FEE,
@@ -458,41 +458,28 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &config.swap_router_contract,
     )?;
 
-    let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
+    // let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
+    let destination = DestinationInfo::from_binary(
+        &Binary::from_base64(&msg.memo.clone().unwrap_or_default()).unwrap(),
+    )
+    .map_err(|err| ContractError::InvalidDestinationMemo {
+        error: err.to_string(),
+    })?;
 
-    let destination_asset_info_on_orai = denom_to_asset_info(api, &destination.destination_denom);
-    let mut remote_destination_denom: String = "".to_string();
-    let mut destination_pair_mapping: Option<PairQuery> = None;
+    let (destination_asset_info_on_orai, destination_pair_mapping) = get_destination_info_on_orai(
+        storage,
+        api,
+        &env,
+        destination.destination_channel.clone(),
+        destination.destination_denom.clone(),
+    );
+
     // if there's a round trip in the destination then we charge additional token and relayer fees
     if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {
-        let pair_mappings =
-            get_mappings_from_asset_info(storage, destination_asset_info_on_orai.to_owned())?;
-        let (is_evm_based, evm_prefix) = destination.is_receiver_evm_based();
-        if is_evm_based {
-            destination_pair_mapping = pair_mappings.clone().into_iter().find(|pair_query| {
-                find_evm_pair_mapping(
-                    &pair_query.key,
-                    &evm_prefix,
-                    &destination.destination_channel,
-                )
-            });
-        }
-        let is_cosmos_based = destination.is_receiver_cosmos_based();
-        if is_cosmos_based {
-            destination_pair_mapping = pair_mappings.into_iter().find(|pair_query| {
-                parse_ibc_channel_without_sanity_checks(&pair_query.key)
-                    .unwrap_or_default()
-                    .eq(&destination.destination_channel)
-            });
-        }
-        if let Some(mapping) = destination_pair_mapping.clone() {
-            remote_destination_denom =
-                parse_ibc_denom_without_sanity_checks(&mapping.key)?.to_string();
-        }
         // if there's a round trip to a different network, we deduct the token fee based on the remote destination denom
         // for relayer fee, we need to deduct using the destination network
         let (_, additional_token_fee) =
-            deduct_token_fee(storage, &remote_destination_denom, to_send.amount())?;
+            deduct_token_fee(storage, &destination.destination_denom, to_send.amount())?;
         fee_data.token_fee = Amount::from_parts(
             fee_data.token_fee.denom(),
             fee_data
@@ -504,7 +491,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
             storage,
             api,
             &destination.receiver,
-            &remote_destination_denom,
+            &destination.destination_denom,
             fee_data.token_simulate_amount,
             fee_data.token_exchange_rate_with_orai,
         )?;
