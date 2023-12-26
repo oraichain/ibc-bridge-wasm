@@ -821,6 +821,9 @@ fn test_get_ibc_msg_evm_case() {
         destination_channel: "channel-10".to_string(),
         destination_denom: "atom".to_string(),
     };
+    let destination_asset_info_on_orai = AssetInfo::NativeToken {
+        denom: "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646".to_string(),
+    };
     let timeout = 1000u64;
     let local_receiver = "local_receiver";
 
@@ -836,6 +839,7 @@ fn test_get_ibc_msg_evm_case() {
         &destination,
         timeout,
         None,
+        destination_asset_info_on_orai.clone(),
     )
     .unwrap_err();
     assert_eq!(
@@ -855,6 +859,7 @@ fn test_get_ibc_msg_evm_case() {
         &destination,
         timeout,
         None,
+        destination_asset_info_on_orai.clone(),
     )
     .unwrap_err();
     assert_eq!(err, StdError::generic_err("cannot find pair mappings"));
@@ -902,6 +907,7 @@ fn test_get_ibc_msg_evm_case() {
                 asset_info_decimals: asset_info_decimals.clone(),
             },
         }),
+        destination_asset_info_on_orai,
     )
     .unwrap();
 
@@ -960,6 +966,9 @@ fn test_get_ibc_msg_cosmos_based_case() {
         destination_channel: send_channel.to_string(),
         destination_denom: "atom".to_string(),
     };
+    let destination_asset_info_on_orai = AssetInfo::NativeToken {
+        denom: "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646".to_string(),
+    };
     let env = mock_env();
     let remote_address = "foobar";
     let ibc_denom = format!("foo/bar/{}", pair_mapping_denom);
@@ -1002,6 +1011,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
         &destination,
         timeout,
         None,
+        destination_asset_info_on_orai.clone(),
     )
     .unwrap();
     assert_eq!(
@@ -1010,7 +1020,10 @@ fn test_get_ibc_msg_cosmos_based_case() {
             CosmosMsg::Ibc(IbcMsg::Transfer {
                 channel_id: send_channel.to_string(),
                 to_address: destination.receiver.clone(),
-                amount: coin(1000u128, "atom"),
+                amount: coin(
+                    1000u128,
+                    "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646"
+                ),
                 timeout: mock_env().block.time.plus_seconds(timeout).into()
             }),
             IBC_TRANSFER_NATIVE_ERROR_ID
@@ -1060,6 +1073,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
                 asset_info_decimals,
             },
         }),
+        destination_asset_info_on_orai,
     )
     .unwrap();
 
@@ -1109,6 +1123,9 @@ fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
         destination_channel: "channel-10".to_string(),
         destination_denom: "atom".to_string(),
     };
+    let destination_asset_info_on_orai = AssetInfo::NativeToken {
+        denom: "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646".to_string(),
+    };
     let env = mock_env();
     let remote_address = "foobar";
     // cosmos based case but no mapping found. should be successful & cosmos msg is ibc transfer
@@ -1121,6 +1138,7 @@ fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
         &destination,
         timeout,
         None,
+        destination_asset_info_on_orai,
     )
     .unwrap_err();
     assert_eq!(

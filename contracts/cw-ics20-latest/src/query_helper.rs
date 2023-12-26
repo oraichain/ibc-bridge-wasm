@@ -41,7 +41,7 @@ pub fn get_destination_info_on_orai(
         return (denom_to_asset_info(api, &destination_denom), None);
     }
 
-    // case 1: port is ibc wasm. must be register in mapping
+    // case 1: port is ibc wasm, must be register in mapping
     let ibc_denom = get_key_ics20_ibc_denom(
         &parse_ibc_wasm_port_id(env.contract.address.clone().into_string()),
         &destination_channel,

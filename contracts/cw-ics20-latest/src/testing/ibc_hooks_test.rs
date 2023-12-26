@@ -176,7 +176,7 @@ fn test_ibc_hooks_receive() {
         SENDER.to_string(),
         "cosmos1gkr56hlnx9vc7vncln2dkd896zfsqjn3uuq2pu".to_string(),
         "channel-15".to_string(),
-        "ibc/cosmos".to_string(),
+        "uatom".to_string(),
     );
     let res = contract_instance
         .execute(
@@ -185,7 +185,10 @@ fn test_ibc_hooks_receive() {
                 args: args,
             },
             SENDER,
-            &vec![coin(100_000_000_000, "ibc/cosmos")],
+            &vec![coin(
+                100_000_000_000,
+                "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78",
+            )],
         )
         .unwrap();
 
@@ -194,7 +197,10 @@ fn test_ibc_hooks_receive() {
         vec![SubMsg::new(CosmosMsg::Ibc(IbcMsg::Transfer {
             channel_id: "channel-15".to_string(),
             to_address: "cosmos1gkr56hlnx9vc7vncln2dkd896zfsqjn3uuq2pu".to_string(),
-            amount: coin(100_000_000_000, "ibc/cosmos"),
+            amount: coin(
+                100_000_000_000,
+                "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78"
+            ),
             timeout: mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT).into()
         }))]
     );
@@ -203,7 +209,10 @@ fn test_ibc_hooks_receive() {
         vec![
             ("action", "receive_ibc_hooks"),
             ("receiver", "cosmos1gkr56hlnx9vc7vncln2dkd896zfsqjn3uuq2pu"),
-            ("denom", "ibc/cosmos"),
+            (
+                "denom",
+                "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78"
+            ),
             ("amount", "100000000000"),
             ("token_fee", "0"),
             ("relayer_fee", "0")

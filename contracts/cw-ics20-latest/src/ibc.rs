@@ -583,7 +583,7 @@ pub fn get_follow_up_msgs(
     to_send: Amount,
     initial_receive_asset_info: AssetInfo,
     destination_asset_info_on_orai: AssetInfo,
-    sender: &str, // will be receiver  of ics20 packet if  on remote chain if destination is evm
+    sender: &str,   // will be receiver  of ics20 packet if destination is evm
     receiver: &str, // receiver on Oraichain
     destination: &DestinationInfo,
     initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain,
@@ -688,6 +688,7 @@ pub fn get_follow_up_msgs(
         &destination,
         config.default_timeout,
         destination_pair_mapping,
+        destination_asset_info_on_orai,
     );
 
     if let Some(ibc_msg) = build_ibc_msg_result.as_mut().ok() {
@@ -802,6 +803,7 @@ pub fn build_ibc_msg(
     destination: &DestinationInfo,
     default_timeout: u64,
     pair_mapping: Option<PairQuery>,
+    destination_asset_info_on_orai: AssetInfo,
 ) -> StdResult<Vec<SubMsg>> {
     // if there's no dest channel then we stop, no need to transfer ibc
     if destination.destination_channel.is_empty() {
@@ -848,13 +850,25 @@ pub fn build_ibc_msg(
         // we use ibc transfer so that attackers cannot manipulate the data to send to oraibridge without reducing the channel balance
         // by using ibc transfer, the contract must actually owns native ibc tokens, which is not possible if it's oraibridge tokens
         // we do not need to reduce channel balance because this transfer is not on our contract channel, but on destination channel
-        let ibc_msg: CosmosMsg = IbcMsg::Transfer {
-            channel_id: destination.destination_channel.clone(),
-            to_address: destination.receiver.clone(),
-            amount: coin(amount.u128(), destination.destination_denom.clone()),
-            timeout: IbcTimeout::with_timestamp(timeout),
-        }
-        .into();
+        let ibc_msg: CosmosMsg = match destination_asset_info_on_orai {
+            AssetInfo::NativeToken { denom } => IbcMsg::Transfer {
+                channel_id: destination.destination_channel.clone(),
+                to_address: destination.receiver.clone(),
+                amount: coin(amount.u128(), denom),
+                timeout: IbcTimeout::with_timestamp(timeout),
+            }
+            .into(),
+            AssetInfo::Token { contract_addr: _ } => {
+                return Err(StdError::generic_err("The destination must be denom"))
+            }
+        };
+        // let ibc_msg: CosmosMsg = IbcMsg::Transfer {
+        //     channel_id: destination.destination_channel.clone(),
+        //     to_address: destination.receiver.clone(),
+        //     amount: coin(amount.u128(), destination.destination_denom.clone()),
+        //     timeout: IbcTimeout::with_timestamp(timeout),
+        // }
+        // .into();
         return Ok(vec![SubMsg::reply_on_error(
             ibc_msg,
             IBC_TRANSFER_NATIVE_ERROR_ID,
