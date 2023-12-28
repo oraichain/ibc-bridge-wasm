@@ -34,8 +34,19 @@ pub fn denom_to_asset_info(api: &dyn Api, denom: &str) -> AssetInfo {
 }
 
 pub fn to_orai_bridge_address(address: &str) -> StdResult<String> {
-    let decode_result = bech32::decode(address).unwrap();
-    let oraib_address = bech32::encode("oraib", decode_result.1, bech32::Variant::Bech32).unwrap();
+    let decode_result = bech32::decode(address).map_err(|_| {
+        StdError::generic_err(format!(
+            "Cannot decode sender address in to_orai_bridge_address: {}",
+            address
+        ))
+    })?;
+    let oraib_address =
+        bech32::encode("oraib", decode_result.1, bech32::Variant::Bech32).map_err(|_| {
+            StdError::generic_err(format!(
+                "Cannot encode sender address to oraibridge address in to_orai_bridge_address: {}",
+                address
+            ))
+        })?;
 
     Ok(oraib_address)
 }

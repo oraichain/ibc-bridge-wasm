@@ -582,8 +582,8 @@ pub fn get_follow_up_msgs(
     to_send: Amount,
     initial_receive_asset_info: AssetInfo,
     destination_asset_info_on_orai: AssetInfo,
-    sender: &str,   // will be receiver  of ics20 packet if destination is evm
-    receiver: &str, // receiver on Oraichain
+    ibc_sender: &str,    // will be receiver  of ics20 packet if destination is evm
+    orai_receiver: &str, // receiver on Oraichain
     destination: &DestinationInfo,
     initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain,
     destination_pair_mapping: Option<PairQuery>,
@@ -591,7 +591,7 @@ pub fn get_follow_up_msgs(
     let config = CONFIG.load(storage)?;
     let mut sub_msgs: Vec<SubMsg> = vec![];
     let send_only_sub_msg = SubMsg::reply_on_error(
-        to_send.send_amount(receiver.to_string(), None),
+        to_send.send_amount(orai_receiver.to_string(), None),
         NATIVE_RECEIVE_ID,
     );
     let mut follow_up_msgs_data = FollowUpMsgsData {
@@ -642,7 +642,7 @@ pub fn get_follow_up_msgs(
     }
 
     // by default, the receiver is the original address sent in ics20packet
-    let mut to = Some(api.addr_validate(receiver)?);
+    let mut to = Some(api.addr_validate(orai_receiver)?);
 
     // build convert msg
     let mut send_converted_msg: Option<CosmosMsg> = None;
@@ -663,7 +663,7 @@ pub fn get_follow_up_msgs(
             CONVERT_REPLY_ARGS.save(
                 storage,
                 &ConvertReplyArgs {
-                    local_receiver: receiver.to_string(),
+                    local_receiver: orai_receiver.to_string(),
                     asset: from_asset,
                 },
             )?;
@@ -673,17 +673,17 @@ pub fn get_follow_up_msgs(
             to = None;
             send_converted_msg = Some(
                 Amount::from_parts(parse_asset_info_denom(return_asset.info), minimum_receive)
-                    .send_amount(receiver.to_string(), None),
+                    .send_amount(orai_receiver.to_string(), None),
             );
         }
     }
 
     let mut build_ibc_msg_result = build_ibc_msg(
         env,
-        receiver,
+        orai_receiver,
         initial_dest_channel_id,
         minimum_receive.clone(),
-        &sender,
+        &ibc_sender,
         &destination,
         config.default_timeout,
         destination_pair_mapping,

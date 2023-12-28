@@ -98,8 +98,8 @@ pub fn ibc_hooks_universal_swap(
     } else {
         // case 2: the destination chain is another
 
-        // requires destination_channel and destination_denom not to be empty
-        if destination.destination_channel.is_empty() || destination.destination_denom.is_empty() {
+        // requires both destination_channel and destination_denom not to be empty
+        if destination.destination_denom.is_empty() {
             return Err(ContractError::Std(StdError::generic_err(
                 "Require destination denom & channel in memo",
             )));
