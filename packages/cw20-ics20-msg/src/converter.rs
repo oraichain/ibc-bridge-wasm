@@ -43,73 +43,73 @@ impl ConverterController {
         amount: Uint128,
         convert_type: ConvertType,
     ) -> StdResult<(Option<CosmosMsg>, Asset)> {
-        let res = self.converter_info(querier, source_info);
-        if res.is_none() {
-            return Ok((
-                None,
-                Asset {
-                    info: source_info.to_owned(),
-                    amount,
-                },
-            ));
-        }
-        let converter_info: ConvertInfoResponse = res.unwrap();
-        match convert_type {
-            ConvertType::FromSource => {
-                let return_asset = Asset {
-                    info: converter_info.token_ratio.info.clone(),
-                    amount: amount * converter_info.token_ratio.ratio,
-                };
-
-                let msg = match source_info.to_owned() {
-                    AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: self.addr(),
-                        msg: to_binary(&converter::ExecuteMsg::Convert {})?,
-                        funds: vec![Coin { denom, amount }],
-                    }),
-                    AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: contract_addr.to_string(),
-                        msg: to_binary(&Cw20ExecuteMsg::Send {
-                            contract: self.addr(),
-                            amount,
-                            msg: to_binary(&converter::Cw20HookMsg::Convert {})?,
-                        })?,
-                        funds: vec![],
-                    }),
-                };
-
-                return Ok((Some(msg), return_asset));
+        match self.converter_info(querier, source_info) {
+            None => {
+                return Ok((
+                    None,
+                    Asset {
+                        info: source_info.to_owned(),
+                        amount,
+                    },
+                ))
             }
-            ConvertType::ToSource => {
-                let return_asset = Asset {
-                    info: source_info.to_owned(),
-                    amount: amount.checked_div_decimal(converter_info.token_ratio.ratio)?,
-                };
+            Some(converter_info) => match convert_type {
+                ConvertType::FromSource => {
+                    let return_asset = Asset {
+                        info: converter_info.token_ratio.info.clone(),
+                        amount: amount * converter_info.token_ratio.ratio,
+                    };
 
-                let msg = match converter_info.token_ratio.info {
-                    AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: self.addr(),
-                        msg: to_binary(&converter::ExecuteMsg::ConvertReverse {
-                            from_asset: source_info.to_owned(),
-                        })?,
-                        funds: vec![Coin { denom, amount }],
-                    }),
-                    AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: contract_addr.to_string(),
-                        msg: to_binary(&Cw20ExecuteMsg::Send {
-                            contract: self.addr(),
-                            amount,
-                            msg: to_binary(&converter::Cw20HookMsg::ConvertReverse {
-                                from: source_info.to_owned(),
+                    let msg = match source_info.to_owned() {
+                        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: self.addr(),
+                            msg: to_binary(&converter::ExecuteMsg::Convert {})?,
+                            funds: vec![Coin { denom, amount }],
+                        }),
+                        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: contract_addr.to_string(),
+                            msg: to_binary(&Cw20ExecuteMsg::Send {
+                                contract: self.addr(),
+                                amount,
+                                msg: to_binary(&converter::Cw20HookMsg::Convert {})?,
                             })?,
-                        })?,
-                        funds: vec![],
-                    }),
-                };
+                            funds: vec![],
+                        }),
+                    };
 
-                return Ok((Some(msg), return_asset));
-            }
-        }
+                    return Ok((Some(msg), return_asset));
+                }
+                ConvertType::ToSource => {
+                    let return_asset = Asset {
+                        info: source_info.to_owned(),
+                        amount: amount.checked_div_decimal(converter_info.token_ratio.ratio)?,
+                    };
+
+                    let msg = match converter_info.token_ratio.info {
+                        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: self.addr(),
+                            msg: to_binary(&converter::ExecuteMsg::ConvertReverse {
+                                from_asset: source_info.to_owned(),
+                            })?,
+                            funds: vec![Coin { denom, amount }],
+                        }),
+                        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: contract_addr.to_string(),
+                            msg: to_binary(&Cw20ExecuteMsg::Send {
+                                contract: self.addr(),
+                                amount,
+                                msg: to_binary(&converter::Cw20HookMsg::ConvertReverse {
+                                    from: source_info.to_owned(),
+                                })?,
+                            })?,
+                            funds: vec![],
+                        }),
+                    };
+
+                    return Ok((Some(msg), return_asset));
+                }
+            },
+        };
     }
 }
 
