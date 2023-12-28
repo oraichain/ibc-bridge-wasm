@@ -857,8 +857,13 @@ pub fn build_ibc_msg(
                 timeout: IbcTimeout::with_timestamp(timeout),
             }
             .into(),
-            AssetInfo::Token { contract_addr: _ } => {
-                return Err(StdError::generic_err("The destination must be denom"))
+            AssetInfo::Token {
+                contract_addr: addr,
+            } => {
+                return Err(StdError::generic_err(format!(
+                    "The destination must be denom. Got {}",
+                    addr
+                )))
             }
         };
         // let ibc_msg: CosmosMsg = IbcMsg::Transfer {
