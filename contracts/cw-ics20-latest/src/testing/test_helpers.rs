@@ -9,7 +9,6 @@ use cosmwasm_std::{
     OwnedDeps,
 };
 use cosmwasm_testing_util::mock::MockApi;
-use sha256::digest;
 
 use crate::msg::{AllowMsg, InitMsg};
 

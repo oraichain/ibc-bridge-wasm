@@ -4,6 +4,7 @@ use cw20::Cw20ExecuteMsg;
 use oraiswap::{
     asset::{Asset, AssetInfo},
     converter::{self, ConvertInfoResponse},
+    math::Converter128,
 };
 
 pub enum ConvertType {
@@ -42,26 +43,17 @@ impl ConverterController {
         amount: Uint128,
         convert_type: ConvertType,
     ) -> StdResult<(Option<CosmosMsg>, Asset)> {
-        let res = match querier.query_wasm_smart(
-            self.addr(),
-            &converter::QueryMsg::ConvertInfo {
-                asset_info: source_info.to_owned(),
-            },
-        ) {
-            Ok(val) => val,
-            Err(_) => {
-                return Ok((
-                    None,
-                    Asset {
-                        info: source_info.to_owned(),
-                        amount,
-                    },
-                ))
-            }
-        };
-
-        let converter_info: ConvertInfoResponse = res;
-
+        let res = self.converter_info(querier, source_info);
+        if res.is_none() {
+            return Ok((
+                None,
+                Asset {
+                    info: source_info.to_owned(),
+                    amount,
+                },
+            ));
+        }
+        let converter_info: ConvertInfoResponse = res.unwrap();
         match convert_type {
             ConvertType::FromSource => {
                 let return_asset = Asset {
@@ -91,7 +83,7 @@ impl ConverterController {
             ConvertType::ToSource => {
                 let return_asset = Asset {
                     info: source_info.to_owned(),
-                    amount: amount.div_ceil(converter_info.token_ratio.ratio),
+                    amount: amount.checked_div_decimal(converter_info.token_ratio.ratio)?,
                 };
 
                 let msg = match converter_info.token_ratio.info {
@@ -118,5 +110,30 @@ impl ConverterController {
                 return Ok((Some(msg), return_asset));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cosmwasm_std::{testing::mock_dependencies, Addr, Api, Decimal, Uint128};
+    use cw_storage_plus::KeyDeserialize;
+    use oraiswap::math::Converter128;
+
+    #[test]
+    fn test_convert_from_string_to_addr_from_slice() {
+        let addr_string = "cosmos19a4cjjdlx5fpsgfz7t4tgh6kn6heqg874ylr2y";
+        let deps = mock_dependencies();
+        let addr_from_api = deps.api.addr_validate(addr_string).unwrap();
+        let addr = Addr::from_slice(addr_string.as_bytes()).unwrap();
+        assert_eq!(addr_from_api, addr);
+    }
+
+    #[test]
+    fn test_div_uint128_with_decimals_atomic() {
+        let amount = Uint128::from(100u64);
+        let decimal = Decimal::from_ratio(1u64, 20u64);
+        let div_ceil_result = amount.div_ceil(decimal);
+        let check_div_result = amount.checked_div_decimal(decimal).unwrap();
+        assert_eq!(div_ceil_result, check_div_result)
     }
 }
