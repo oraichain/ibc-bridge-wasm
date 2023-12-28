@@ -459,12 +459,11 @@ fn handle_ibc_packet_receive_native_remote_chain(
     )?;
 
     // let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
-    let destination = DestinationInfo::from_binary(
-        &Binary::from_base64(&msg.memo.clone().unwrap_or_default()).unwrap(),
-    )
-    .map_err(|err| ContractError::InvalidDestinationMemo {
-        error: err.to_string(),
-    })?;
+    let destination =
+        DestinationInfo::from_binary(&Binary::from_base64(&msg.memo.clone().unwrap_or_default())?)
+            .map_err(|err| ContractError::InvalidDestinationMemo {
+                error: err.to_string(),
+            })?;
 
     let (destination_asset_info_on_orai, destination_pair_mapping) = get_destination_info_on_orai(
         storage,

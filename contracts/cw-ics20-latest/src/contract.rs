@@ -331,12 +331,6 @@ pub fn execute_receive(
     });
     let api = deps.api;
 
-    // let msg_result: StdResult<TransferMsg> = from_binary(&wrapper.msg);
-    // if msg_result.is_ok() {
-    //     let msg: TransferMsg = msg_result.unwrap();
-    //     return execute_transfer(deps, env, msg, amount, api.addr_validate(&wrapper.sender)?);
-    // }
-
     let msg: TransferBackMsg = from_binary(&wrapper.msg)?;
     execute_transfer_back_to_remote_chain(
         deps,
@@ -890,12 +884,14 @@ fn get_mapping_from_key(deps: Deps, ibc_denom: String) -> StdResult<PairQuery> {
 }
 
 fn map_order(order: Option<u8>) -> Order {
-    if order.is_none() {
-        return Order::Ascending;
+    match order {
+        Some(order) => {
+            if order == 1 {
+                Order::Ascending
+            } else {
+                Order::Descending
+            }
+        }
+        None => Order::Ascending,
     }
-    let order_unwrap = order.unwrap();
-    if order_unwrap == 1 {
-        return Order::Ascending;
-    }
-    Order::Descending
 }
