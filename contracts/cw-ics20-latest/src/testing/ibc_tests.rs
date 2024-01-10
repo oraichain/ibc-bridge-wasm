@@ -21,6 +21,7 @@ use crate::ibc::{
     SWAP_OPS_FAILURE_ID,
 };
 use crate::ibc::{build_swap_operations, get_follow_up_msgs};
+use crate::query_helper::get_destination_info_on_orai;
 use crate::testing::test_helpers::*;
 use cosmwasm_std::{
     from_binary, to_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, SubMsg, Timestamp,
@@ -2556,4 +2557,91 @@ fn test_handle_override_channel_balance() {
         result.total_sent,
         Amount::from_parts(ibc_denom.to_string(), total_sent_override)
     );
+}
+
+#[test]
+fn test_get_destination_info_on_orai() {
+    let mut deps = setup(&["channel-3", "channel-7"], &[]);
+    let asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked("cw20:foobar".to_string()),
+    };
+    let update = UpdatePairMsg {
+        local_channel_id: "mars-channel".to_string(),
+        denom: "earth".to_string(),
+        local_asset_info: asset_info.clone(),
+        remote_decimals: 18,
+        local_asset_info_decimals: 18,
+    };
+
+    // works with proper funds
+    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+
+    let info = mock_info("gov", &coins(1234567, "ucosm"));
+    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+
+    //case 1: destination asset on Oraichain
+    let destination_info = get_destination_info_on_orai(
+        deps.as_ref().storage,
+        deps.as_ref().api,
+        &mock_env(),
+        "".to_string(),
+        "orai1lus0f0rhx8s03gdllx2n6vhkmf0536dv57wfge".to_string(),
+    );
+    assert_eq!(
+        destination_info.0,
+        AssetInfo::Token {
+            contract_addr: Addr::unchecked("orai1lus0f0rhx8s03gdllx2n6vhkmf0536dv57wfge")
+        }
+    );
+    assert_eq!(destination_info.1, None);
+
+    // case 2: Destination asset was registered in mapping pair
+    let destination_info = get_destination_info_on_orai(
+        deps.as_ref().storage,
+        deps.as_ref().api,
+        &mock_env(),
+        "mars-channel".to_string(),
+        "earth".to_string(),
+    );
+    assert_eq!(
+        destination_info.0,
+        AssetInfo::Token {
+            contract_addr: Addr::unchecked("cw20:foobar".to_string())
+        }
+    );
+    assert_eq!(
+        destination_info.1,
+        Some(PairQuery {
+            key: format!(
+                "wasm.{}/{}/{}",
+                mock_env().contract.address,
+                "mars-channel",
+                "earth"
+            ),
+            pair_mapping: MappingMetadata {
+                asset_info: AssetInfo::Token {
+                    contract_addr: Addr::unchecked("cw20:foobar".to_string())
+                },
+                remote_decimals: 18,
+                asset_info_decimals: 18
+            }
+        })
+    );
+
+    // case 3: Destination asset wasn't registered in mapping pair
+    let destination_info = get_destination_info_on_orai(
+        deps.as_ref().storage,
+        deps.as_ref().api,
+        &mock_env(),
+        "channel-15".to_string(),
+        "uatom".to_string(),
+    );
+    assert_eq!(
+        destination_info.0,
+        AssetInfo::NativeToken {
+            denom: "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78"
+                .to_string()
+        }
+    );
+    assert_eq!(destination_info.1, None);
 }

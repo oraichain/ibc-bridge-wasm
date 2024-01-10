@@ -115,9 +115,98 @@ impl ConverterController {
 
 #[cfg(test)]
 mod tests {
-    use cosmwasm_std::{testing::mock_dependencies, Addr, Api, Decimal, Uint128};
+    use std::marker::PhantomData;
+
+    use cosmwasm_std::{
+        from_binary, from_slice,
+        testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR},
+        to_binary, Addr, Api, Coin, ContractResult, CosmosMsg, Decimal, Empty, OwnedDeps, Querier,
+        QuerierResult, QueryRequest, SystemError, SystemResult, Uint128, WasmMsg, WasmQuery,
+    };
+    use cw20::Cw20ExecuteMsg;
     use cw_storage_plus::KeyDeserialize;
-    use oraiswap::math::Converter128;
+    use oraiswap::{
+        asset::{Asset, AssetInfo},
+        converter::{self, ConvertInfoResponse, TokenRatio},
+        math::Converter128,
+    };
+
+    use super::{ConvertType, ConverterController};
+
+    /// mock_dependencies is a drop-in replacement for cosmwasm_std::testing::mock_dependencies
+    /// this uses our CustomQuerier.
+    pub fn mock_dependencies() -> OwnedDeps<MockStorage, MockApi, WasmMockQuerier> {
+        let custom_querier: WasmMockQuerier =
+            WasmMockQuerier::new(MockQuerier::new(&[(&MOCK_CONTRACT_ADDR, &vec![])]));
+
+        OwnedDeps {
+            storage: MockStorage::default(),
+            api: MockApi::default(),
+            querier: custom_querier,
+            custom_query_type: PhantomData::default(),
+        }
+    }
+
+    pub struct WasmMockQuerier {
+        base: MockQuerier,
+    }
+
+    impl WasmMockQuerier {
+        pub fn new(base: MockQuerier<Empty>) -> Self {
+            WasmMockQuerier { base }
+        }
+    }
+
+    impl Querier for WasmMockQuerier {
+        fn raw_query(&self, bin_request: &[u8]) -> QuerierResult {
+            // MockQuerier doesn't support Custom, so we ignore it completely here
+            let request: QueryRequest<Empty> = match from_slice(bin_request) {
+                Ok(v) => v,
+                Err(e) => {
+                    return SystemResult::Err(SystemError::InvalidRequest {
+                        error: format!("Parsing query request: {}", e),
+                        request: bin_request.into(),
+                    })
+                }
+            };
+            self.handle_query(&request)
+        }
+    }
+    impl WasmMockQuerier {
+        pub fn handle_query(&self, request: &QueryRequest<Empty>) -> QuerierResult {
+            match &request {
+                QueryRequest::Wasm(WasmQuery::Smart {
+                    contract_addr: _,
+                    msg,
+                }) => match from_binary(msg) {
+                    Ok(converter::QueryMsg::ConvertInfo { asset_info }) => {
+                        if asset_info.eq(&AssetInfo::NativeToken {
+                            denom: "inj".to_string(),
+                        }) {
+                            SystemResult::Ok(ContractResult::Ok(
+                                to_binary(&ConvertInfoResponse {
+                                    token_ratio: TokenRatio {
+                                        info: AssetInfo::Token {
+                                            contract_addr: Addr::unchecked("orai123"),
+                                        },
+                                        ratio: Decimal::from_ratio(1u128, 100u128),
+                                    },
+                                })
+                                .unwrap(),
+                            ))
+                        } else {
+                            SystemResult::Err(SystemError::InvalidRequest {
+                                error: "Converter info not found".to_string(),
+                                request: msg.as_slice().into(),
+                            })
+                        }
+                    }
+                    _ => panic!("DO NOT ENTER HERE"),
+                },
+                _ => self.base.handle_query(request),
+            }
+        }
+    }
 
     #[test]
     fn test_convert_from_string_to_addr_from_slice() {
@@ -135,5 +224,141 @@ mod tests {
         let div_ceil_result = amount.div_ceil(decimal);
         let check_div_result = amount.checked_div_decimal(decimal).unwrap();
         assert_eq!(div_ceil_result, check_div_result)
+    }
+
+    #[test]
+    fn test_query_converter_info() {
+        // query converter info
+        let deps = mock_dependencies();
+        let converter_contract = ConverterController("converter".to_string());
+
+        // case query failed, this token has not registered
+        let res = converter_contract.converter_info(
+            &deps.as_ref().querier,
+            &AssetInfo::NativeToken {
+                denom: "cosmos".to_string(),
+            },
+        );
+        assert_eq!(res, None);
+
+        // case success
+        let res = converter_contract.converter_info(
+            &deps.as_ref().querier,
+            &AssetInfo::NativeToken {
+                denom: "inj".to_string(),
+            },
+        );
+        assert_eq!(
+            res,
+            Some(ConvertInfoResponse {
+                token_ratio: TokenRatio {
+                    info: AssetInfo::Token {
+                        contract_addr: Addr::unchecked("orai123"),
+                    },
+                    ratio: Decimal::from_ratio(1u128, 100u128),
+                },
+            })
+        )
+    }
+
+    #[test]
+    fn test_process_convert() {
+        let deps = mock_dependencies();
+        let converter_contract = ConverterController("converter".to_string());
+
+        // case: token not registered
+        let res = converter_contract
+            .process_convert(
+                &deps.as_ref().querier,
+                &AssetInfo::NativeToken {
+                    denom: "cosmos".to_string(),
+                },
+                Uint128::from(100000u128),
+                ConvertType::FromSource,
+            )
+            .unwrap();
+        assert_eq!(
+            res,
+            (
+                None,
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "cosmos".to_string()
+                    },
+                    amount: Uint128::from(100000u128)
+                }
+            )
+        );
+
+        // case token registered, convert from source
+        // ratio: 0.01
+        let res = converter_contract
+            .process_convert(
+                &deps.as_ref().querier,
+                &AssetInfo::NativeToken {
+                    denom: "inj".to_string(),
+                },
+                Uint128::from(100000u128),
+                ConvertType::FromSource,
+            )
+            .unwrap();
+        assert_eq!(
+            res,
+            (
+                Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: "converter".to_string(),
+                    msg: to_binary(&converter::ExecuteMsg::Convert {}).unwrap(),
+                    funds: vec![Coin {
+                        amount: Uint128::from(100000u128),
+                        denom: "inj".to_string()
+                    }]
+                })),
+                Asset {
+                    info: AssetInfo::Token {
+                        contract_addr: Addr::unchecked("orai123")
+                    },
+                    amount: Uint128::from(1000u128)
+                }
+            )
+        );
+
+        // case token registered, convert to source
+        // ratio: 0.01
+        let res = converter_contract
+            .process_convert(
+                &deps.as_ref().querier,
+                &AssetInfo::NativeToken {
+                    denom: "inj".to_string(),
+                },
+                Uint128::from(100000u128),
+                ConvertType::ToSource,
+            )
+            .unwrap();
+        assert_eq!(
+            res,
+            (
+                Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: "orai123".to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Send {
+                        contract: "converter".to_string(),
+                        amount: Uint128::from(100000u128),
+                        msg: to_binary(&converter::Cw20HookMsg::ConvertReverse {
+                            from: AssetInfo::NativeToken {
+                                denom: "inj".to_string(),
+                            },
+                        })
+                        .unwrap(),
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                })),
+                Asset {
+                    info: AssetInfo::NativeToken {
+                        denom: "inj".to_string()
+                    },
+                    amount: Uint128::from(10000000u128)
+                }
+            )
+        )
     }
 }
