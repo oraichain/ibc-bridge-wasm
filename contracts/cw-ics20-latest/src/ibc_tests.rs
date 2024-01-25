@@ -7,10 +7,11 @@ mod test {
 
     use crate::ibc::{
         build_ibc_msg, build_swap_msgs, convert_remote_denom_to_evm_prefix, deduct_fee,
-        deduct_relayer_fee, deduct_token_fee, get_token_price, ibc_packet_receive,
-        parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
-        parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID,
-        IBC_TRANSFER_NATIVE_ERROR_ID, NATIVE_RECEIVE_ID, SWAP_OPS_FAILURE_ID,
+        deduct_relayer_fee, deduct_token_fee, get_swap_token_amount_out_from_orai,
+        ibc_packet_receive, parse_ibc_channel_without_sanity_checks,
+        parse_ibc_denom_without_sanity_checks, parse_voucher_denom, process_ibc_msg, Ics20Ack,
+        Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID, IBC_TRANSFER_NATIVE_ERROR_ID,
+        NATIVE_RECEIVE_ID, SWAP_OPS_FAILURE_ID,
     };
     use crate::ibc::{build_swap_operations, get_follow_up_msgs};
     use crate::test_helpers::*;
@@ -1105,16 +1106,20 @@ mod test {
         let deps_mut = deps.as_mut();
         let token_fee_denom = "cosmos";
         let remote_address = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n";
-        let offer_amount = Uint128::from(10u32.pow(0 as u32));
-        let token_price = Uint128::from(10u64);
+        let destination_asset_on_orai = AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        };
+        let swap_router_contract = RouterController("foo".to_string());
+
         // token price empty case. Should return zero fee
         let result = deduct_relayer_fee(
             deps_mut.storage,
             deps_mut.api,
+            &deps_mut.querier,
             remote_address,
             token_fee_denom,
-            offer_amount.clone(),
-            Uint128::from(0u64),
+            destination_asset_on_orai.clone(),
+            &swap_router_contract,
         )
         .unwrap();
         assert_eq!(result, Uint128::from(0u64));
@@ -1124,10 +1129,11 @@ mod test {
             deduct_relayer_fee(
                 deps_mut.storage,
                 deps_mut.api,
+                &deps_mut.querier,
                 "foobar",
                 token_fee_denom,
-                offer_amount.clone(),
-                token_price,
+                destination_asset_on_orai.clone(),
+                &swap_router_contract,
             )
             .unwrap(),
             Uint128::from(0u128)
@@ -1138,10 +1144,11 @@ mod test {
             deduct_relayer_fee(
                 deps_mut.storage,
                 deps_mut.api,
+                &deps_mut.querier,
                 remote_address,
                 token_fee_denom,
-                offer_amount.clone(),
-                token_price,
+                destination_asset_on_orai.clone(),
+                &swap_router_contract,
             )
             .unwrap(),
             Uint128::from(0u64)
@@ -1160,13 +1167,14 @@ mod test {
             deduct_relayer_fee(
                 deps_mut.storage,
                 deps_mut.api,
+                &deps_mut.querier,
                 "oraib1603j3e4juddh7cuhfquxspl0p0nsun047wz3rl",
                 "foo0x",
-                offer_amount.clone(),
-                token_price,
+                destination_asset_on_orai.clone(),
+                &swap_router_contract,
             )
             .unwrap(),
-            Uint128::from(100u64)
+            Uint128::from(1000u64)
         );
 
         // normal case with remote address
@@ -1174,13 +1182,14 @@ mod test {
             deduct_relayer_fee(
                 deps_mut.storage,
                 deps_mut.api,
+                &deps_mut.querier,
                 remote_address,
                 token_fee_denom,
-                offer_amount.clone(),
-                token_price,
+                destination_asset_on_orai,
+                &swap_router_contract,
             )
             .unwrap(),
-            Uint128::from(10u64)
+            Uint128::from(100u64)
         );
     }
 
@@ -1270,10 +1279,10 @@ mod test {
     }
 
     #[test]
-    fn test_get_token_price_orai_case() {
+    fn test_get_swap_token_amount_out_from_orai() {
         let deps = mock_dependencies();
         let simulate_amount = Uint128::from(10u128);
-        let result = get_token_price(
+        let result = get_swap_token_amount_out_from_orai(
             &deps.as_ref().querier,
             simulate_amount,
             &RouterController("foo".to_string()),

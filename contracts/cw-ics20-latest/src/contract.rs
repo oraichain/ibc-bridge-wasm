@@ -463,7 +463,6 @@ pub fn execute_transfer_back_to_remote_chain(
         &msg.remote_address,
         &msg.remote_denom,
         amount,
-        mapping.pair_mapping.asset_info_decimals,
         &config.swap_router_contract,
     )?;
 

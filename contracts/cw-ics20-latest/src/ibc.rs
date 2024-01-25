@@ -421,7 +421,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &msg.sender,
         &msg.denom,
         to_send.clone(),
-        pair_mapping.asset_info_decimals,
         &config.swap_router_contract,
     )?;
 
@@ -470,10 +469,11 @@ fn handle_ibc_packet_receive_native_remote_chain(
         let additional_relayer_fee = deduct_relayer_fee(
             storage,
             api,
+            querier,
             &destination.receiver,
             &remote_destination_denom,
-            fee_data.token_simulate_amount,
-            fee_data.token_exchange_rate_with_orai,
+            destination_asset_info_on_orai.clone(),
+            &config.swap_router_contract,
         )?;
 
         fee_data.relayer_fee = Amount::from_parts(
@@ -861,36 +861,28 @@ pub fn process_deduct_fee(
     remote_sender: &str,
     remote_token_denom: &str,
     local_amount: Amount, // local amount
-    decimals: u8,
     swap_router_contract: &RouterController,
 ) -> StdResult<FeeData> {
     let local_denom = local_amount.denom();
     let (deducted_amount, token_fee) =
         deduct_token_fee(storage, remote_token_denom, local_amount.amount())?;
     // simulate for relayer fee
-    let offer_asset_info = denom_to_asset_info(querier, api, &local_amount.raw_denom())?;
-    let simulate_amount = Uint128::from(10u64.pow((decimals + 1) as u32) as u64); // +1 to make sure the offer amount is large enough to swap successfully
-    let exchange_rate_with_orai = get_token_price(
-        querier,
-        simulate_amount,
-        swap_router_contract,
-        offer_asset_info,
-    );
+    let ask_asset_info = denom_to_asset_info(querier, api, &local_amount.raw_denom())?;
+
     let relayer_fee = deduct_relayer_fee(
         storage,
         api,
+        querier,
         remote_sender,
         remote_token_denom,
-        simulate_amount,
-        exchange_rate_with_orai,
+        ask_asset_info,
+        swap_router_contract,
     )?;
 
     let mut fee_data = FeeData {
         deducted_amount: deducted_amount.checked_sub(relayer_fee).unwrap_or_default(),
         token_fee: Amount::from_parts(local_denom.clone(), token_fee),
         relayer_fee: Amount::from_parts(local_denom.clone(), relayer_fee),
-        token_simulate_amount: simulate_amount,
-        token_exchange_rate_with_orai: exchange_rate_with_orai,
     };
 
     // if after token fee, the deducted amount is 0 then we deduct all to token fee
@@ -927,16 +919,12 @@ pub fn deduct_token_fee(
 pub fn deduct_relayer_fee(
     storage: &mut dyn Storage,
     _api: &dyn Api,
+    querier: &QuerierWrapper,
     remote_address: &str,
     remote_token_denom: &str,
-    simulate_amount: Uint128, // offer amount of token that swaps to ORAI
-    token_price: Uint128,
+    ask_asset_info: AssetInfo,
+    swap_router_contract: &RouterController,
 ) -> StdResult<Uint128> {
-    // api.debug(format!("token price: {}", token_price).as_str());
-    if token_price.is_zero() {
-        return Ok(Uint128::from(0u64));
-    }
-
     // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
     // evm case, need to filter remote token denom since prefix is always oraib
     let prefix_result = get_prefix_decode_bech32(remote_address);
@@ -958,13 +946,15 @@ pub fn deduct_relayer_fee(
     if relayer_fee.is_none() {
         return Ok(Uint128::from(0u64));
     }
-    let relayer_fee = relayer_fee.unwrap();
-    let required_fee_needed = relayer_fee
-        .checked_mul(simulate_amount)
-        .unwrap_or_default()
-        .checked_div(token_price)
-        .unwrap_or_default();
-    Ok(required_fee_needed)
+
+    let relayer_fee = get_swap_token_amount_out_from_orai(
+        querier,
+        relayer_fee.unwrap(),
+        swap_router_contract,
+        ask_asset_info,
+    );
+
+    Ok(relayer_fee)
 }
 
 pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
@@ -978,26 +968,26 @@ pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
     ))
 }
 
-pub fn get_token_price(
+pub fn get_swap_token_amount_out_from_orai(
     querier: &QuerierWrapper,
-    simulate_amount: Uint128,
+    offer_amount: Uint128,
     swap_router_contract: &RouterController,
-    offer_asset_info: AssetInfo,
+    ask_asset_info: AssetInfo,
 ) -> Uint128 {
     let orai_asset_info = AssetInfo::NativeToken {
         denom: "orai".to_string(),
     };
-    if offer_asset_info.eq(&orai_asset_info) {
-        return simulate_amount;
+    if ask_asset_info.eq(&orai_asset_info) {
+        return offer_amount;
     }
     let token_price = swap_router_contract
         .simulate_swap(
             querier,
-            simulate_amount,
+            offer_amount,
             vec![SwapOperation::OraiSwap {
-                offer_asset_info,
+                offer_asset_info: orai_asset_info,
                 // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
-                ask_asset_info: orai_asset_info,
+                ask_asset_info,
             }],
         )
         .map(|data| data.amount)
