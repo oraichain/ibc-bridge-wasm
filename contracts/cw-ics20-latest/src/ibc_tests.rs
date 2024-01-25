@@ -1166,7 +1166,7 @@ mod test {
                 token_price,
             )
             .unwrap(),
-            Uint128::from(100u64)
+            Uint128::from(10000u64)
         );
 
         // normal case with remote address
@@ -1180,7 +1180,7 @@ mod test {
                 token_price,
             )
             .unwrap(),
-            Uint128::from(10u64)
+            Uint128::from(1000u64)
         );
     }
 

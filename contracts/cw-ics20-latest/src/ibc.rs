@@ -868,13 +868,13 @@ pub fn process_deduct_fee(
     let (deducted_amount, token_fee) =
         deduct_token_fee(storage, remote_token_denom, local_amount.amount())?;
     // simulate for relayer fee
-    let offer_asset_info = denom_to_asset_info(querier, api, &local_amount.raw_denom())?;
-    let simulate_amount = Uint128::from(10u64.pow((decimals + 1) as u32) as u64); // +1 to make sure the offer amount is large enough to swap successfully
+    let ask_asset_info = denom_to_asset_info(querier, api, &local_amount.raw_denom())?;
+    let simulate_amount = Uint128::from(10u64.pow((decimals) as u32) as u64); // simulate swap 1 Orai to local asset
     let exchange_rate_with_orai = get_token_price(
         querier,
         simulate_amount,
         swap_router_contract,
-        offer_asset_info,
+        ask_asset_info,
     );
     let relayer_fee = deduct_relayer_fee(
         storage,
@@ -929,7 +929,7 @@ pub fn deduct_relayer_fee(
     _api: &dyn Api,
     remote_address: &str,
     remote_token_denom: &str,
-    simulate_amount: Uint128, // offer amount of token that swaps to ORAI
+    simulate_amount: Uint128, //  amount of orai that swaps to local asset token
     token_price: Uint128,
 ) -> StdResult<Uint128> {
     // api.debug(format!("token price: {}", token_price).as_str());
@@ -960,9 +960,9 @@ pub fn deduct_relayer_fee(
     }
     let relayer_fee = relayer_fee.unwrap();
     let required_fee_needed = relayer_fee
-        .checked_mul(simulate_amount)
+        .checked_mul(token_price)
         .unwrap_or_default()
-        .checked_div(token_price)
+        .checked_div(simulate_amount)
         .unwrap_or_default();
     Ok(required_fee_needed)
 }
@@ -982,12 +982,12 @@ pub fn get_token_price(
     querier: &QuerierWrapper,
     simulate_amount: Uint128,
     swap_router_contract: &RouterController,
-    offer_asset_info: AssetInfo,
+    ask_asset_info: AssetInfo,
 ) -> Uint128 {
     let orai_asset_info = AssetInfo::NativeToken {
         denom: "orai".to_string(),
     };
-    if offer_asset_info.eq(&orai_asset_info) {
+    if ask_asset_info.eq(&orai_asset_info) {
         return simulate_amount;
     }
     let token_price = swap_router_contract
@@ -995,9 +995,9 @@ pub fn get_token_price(
             querier,
             simulate_amount,
             vec![SwapOperation::OraiSwap {
-                offer_asset_info,
+                offer_asset_info: orai_asset_info,
                 // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
-                ask_asset_info: orai_asset_info,
+                ask_asset_info,
             }],
         )
         .map(|data| data.amount)
