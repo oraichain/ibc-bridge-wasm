@@ -280,8 +280,6 @@ pub struct FeeData {
     pub deducted_amount: Uint128,
     pub token_fee: Amount,
     pub relayer_fee: Amount,
-    pub token_simulate_amount: Uint128,
-    pub token_exchange_rate_with_orai: Uint128,
 }
 
 #[cw_serde]

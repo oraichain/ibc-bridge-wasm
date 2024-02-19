@@ -106,7 +106,7 @@ pub fn ibc_hooks_universal_swap(
         }
 
         // calc fee
-        if let Some(mapping) = destination_pair_mapping.clone() {
+        if let Some(_mapping) = destination_pair_mapping.clone() {
             let fee_data = process_deduct_fee(
                 deps.storage,
                 &deps.querier,
@@ -114,7 +114,6 @@ pub fn ibc_hooks_universal_swap(
                 &destination.receiver.clone(),
                 &destination.destination_denom,
                 to_send_amount.clone(),
-                mapping.pair_mapping.asset_info_decimals,
                 &config.swap_router_contract,
             )?;
 
