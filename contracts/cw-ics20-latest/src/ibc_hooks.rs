@@ -106,7 +106,7 @@ pub fn ibc_hooks_universal_swap(
         }
 
         // calc fee
-        if let Some(_mapping) = destination_pair_mapping.clone() {
+        if destination_pair_mapping.is_some() {
             let fee_data = process_deduct_fee(
                 deps.storage,
                 &deps.querier,
