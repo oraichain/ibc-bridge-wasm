@@ -414,6 +414,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
         )?,
     );
 
+    let initial_receive_asset_info = pair_mapping.asset_info.clone();
+
     let mut fee_data = process_deduct_fee(
         storage,
         querier,
@@ -429,6 +431,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         denom_to_asset_info(querier, api, &destination.destination_denom)?;
     let mut remote_destination_denom: String = "".to_string();
     let mut destination_pair_mapping: Option<(String, MappingMetadata)> = None;
+
     // if there's a round trip in the destination then we charge additional token and relayer fees
     if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {
         let pair_mappings: Vec<(String, MappingMetadata)> = ics20_denoms()
@@ -466,7 +469,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
                 .amount()
                 .checked_add(additional_token_fee)?,
         );
-        let additional_relayer_fee = deduct_relayer_fee(
+        let mut additional_relayer_fee = deduct_relayer_fee(
             storage,
             api,
             querier,
@@ -475,6 +478,22 @@ fn handle_ibc_packet_receive_native_remote_chain(
             destination_asset_info_on_orai.clone(),
             &config.swap_router_contract,
         )?;
+
+        // if initial asset info is different with destination asset info,
+        // we need convert relayer fee from destination_asset_info_on_orai to initial token receive
+
+        let swap_operations = build_swap_operations(
+            initial_receive_asset_info,
+            destination_asset_info_on_orai.clone(),
+            config.fee_denom.as_str(),
+        );
+
+        if !swap_operations.is_empty() {
+            additional_relayer_fee = config
+                .swap_router_contract
+                .simulate_swap(querier, additional_relayer_fee, swap_operations)?
+                .amount;
+        }
 
         fee_data.relayer_fee = Amount::from_parts(
             fee_data.relayer_fee.denom(),
