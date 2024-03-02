@@ -489,10 +489,15 @@ fn handle_ibc_packet_receive_native_remote_chain(
         );
 
         if !swap_operations.is_empty() {
-            additional_relayer_fee = config
-                .swap_router_contract
-                .simulate_swap(querier, additional_relayer_fee, swap_operations)?
-                .amount;
+            // if simulate swap fails, set fee to zero
+            additional_relayer_fee = match config.swap_router_contract.simulate_swap(
+                querier,
+                additional_relayer_fee,
+                swap_operations,
+            ) {
+                Ok(res) => res.amount,
+                Err(_) => Uint128::default(),
+            };
         }
 
         fee_data.relayer_fee = Amount::from_parts(
