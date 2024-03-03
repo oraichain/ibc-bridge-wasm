@@ -174,7 +174,7 @@ pub fn ibc_hooks_universal_swap(
     }
 
     // check follow up msg will be success
-    if !follow_up_msg_data.follow_up_msg.is_empty() {
+    if !follow_up_msg_data.is_success {
         return Err(ContractError::Std(StdError::generic_err(format!(
             "ibc_error_msg: {}",
             follow_up_msg_data.follow_up_msg,
