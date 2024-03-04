@@ -687,7 +687,7 @@ pub fn build_swap_operations(
             ask_asset_info: fee_denom_asset_info.clone(),
         })
     }
-    if destination_asset_info_on_orai.to_string().ne(fee_denom) {
+    if destination_asset_info_on_orai.ne(&fee_denom_asset_info) {
         swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: destination_asset_info_on_orai,
