@@ -447,6 +447,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
         )?,
     );
 
+    let initial_receive_asset_info = pair_mapping.asset_info.clone();
+
     let mut fee_data = process_deduct_fee(
         storage,
         querier,
@@ -485,7 +487,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
                 .amount()
                 .checked_add(additional_token_fee)?,
         );
-        let additional_relayer_fee = deduct_relayer_fee(
+        let mut additional_relayer_fee = deduct_relayer_fee(
             storage,
             api,
             querier,
@@ -494,6 +496,27 @@ fn handle_ibc_packet_receive_native_remote_chain(
             destination_asset_info_on_orai.clone(),
             &config.swap_router_contract,
         )?;
+
+        // if initial asset info is different with destination asset info,
+        // we need convert relayer fee from destination_asset_info_on_orai to initial token receive
+
+        let swap_operations = build_swap_operations(
+            initial_receive_asset_info,
+            destination_asset_info_on_orai.clone(),
+            config.fee_denom.as_str(),
+        );
+
+        if !swap_operations.is_empty() {
+            // if simulate swap fails, set fee to zero
+            additional_relayer_fee = match config.swap_router_contract.simulate_swap(
+                querier,
+                additional_relayer_fee,
+                swap_operations,
+            ) {
+                Ok(res) => res.amount,
+                Err(_) => Uint128::default(),
+            };
+        }
 
         fee_data.relayer_fee = Amount::from_parts(
             fee_data.relayer_fee.denom(),
@@ -746,7 +769,7 @@ pub fn build_swap_operations(
             ask_asset_info: fee_denom_asset_info.clone(),
         })
     }
-    if destination_asset_info_on_orai.to_string().ne(fee_denom) {
+    if destination_asset_info_on_orai.ne(&fee_denom_asset_info) {
         swap_operations.push(SwapOperation::OraiSwap {
             offer_asset_info: fee_denom_asset_info.clone(),
             ask_asset_info: destination_asset_info_on_orai,
