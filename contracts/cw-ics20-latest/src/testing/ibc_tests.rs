@@ -610,7 +610,7 @@ fn send_from_remote_to_local_receive_happy_path() {
 
 #[test]
 fn test_swap_operations() {
-    let receiver_asset_info = AssetInfo::Token {
+    let mut receiver_asset_info = AssetInfo::Token {
         contract_addr: Addr::unchecked("contract"),
     };
     let mut initial_asset_info = AssetInfo::Token {
@@ -626,6 +626,9 @@ fn test_swap_operations() {
     assert_eq!(operations.len(), 2);
 
     let fee_denom = "contract".to_string();
+    receiver_asset_info = AssetInfo::NativeToken {
+        denom: "contract".to_string(),
+    };
     let operations = build_swap_operations(
         receiver_asset_info.clone(),
         initial_asset_info.clone(),
