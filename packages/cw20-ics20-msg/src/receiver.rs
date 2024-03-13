@@ -44,15 +44,15 @@ impl DestinationInfo {
         };
 
         let destination_receiver = deserialized
-            .string(2)
+            .string(1)
             .ok_or_else(|| StdError::generic_err("Error on deserialize destination_receiver"))?;
 
         let destination_channel = deserialized
-            .string(3)
+            .string(2)
             .ok_or_else(|| StdError::generic_err("Error on deserialize destination_channel"))?;
 
         let destination_denom = deserialized
-            .string(4)
+            .string(3)
             .ok_or_else(|| StdError::generic_err("Error on deserialize destination_denom"))?;
 
         Ok(Self {
@@ -173,6 +173,9 @@ fn test_destination_info_from_str() {
 
 #[cfg(test)]
 mod tests {
+    use anybuf::Anybuf;
+    use cosmwasm_std::{Binary, StdError};
+
     use crate::receiver::DestinationInfo;
 
     #[test]
@@ -264,5 +267,85 @@ mod tests {
                     "orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf".to_string(),
             }
         )
+    }
+
+    #[test]
+    fn test_parse_destination_from_binary_invalid_type() {
+        let memo = Binary::from(
+            Anybuf::new()
+                .append_int32(1, 100) // destination receiver
+                .append_string(2, "channel-170") // destination channel
+                .append_string(
+                    3, "orai", //destination denom
+                )
+                .as_bytes(),
+        )
+        .to_base64();
+
+        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap());
+
+        assert_eq!(
+            res.unwrap_err(),
+            StdError::generic_err("Error on deserialize destination_receiver")
+        );
+
+        let memo = Binary::from(
+            Anybuf::new()
+                .append_string(1, "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq") // destination receiver
+                .append_int32(2, 100) // destination channel
+                .append_string(
+                    3, "orai", //destination denom
+                )
+                .as_bytes(),
+        )
+        .to_base64();
+
+        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap());
+        assert_eq!(
+            res.unwrap_err(),
+            StdError::generic_err("Error on deserialize destination_channel")
+        );
+
+        let memo = Binary::from(
+            Anybuf::new()
+                .append_string(1, "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq") // destination receiver
+                .append_string(2, "channel-170") // destination channel
+                .append_int32(
+                    3, 2, //destination denom
+                )
+                .as_bytes(),
+        )
+        .to_base64();
+
+        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap());
+        assert_eq!(
+            res.unwrap_err(),
+            StdError::generic_err("Error on deserialize destination_denom")
+        );
+    }
+
+    #[test]
+    fn test_parse_destination_from_binary_valid() {
+        let memo = Binary::from(
+            Anybuf::new()
+                .append_string(1, "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq") // destination receiver
+                .append_string(2, "channel-170") // destination channel
+                .append_string(
+                    3, "orai", //destination denom
+                )
+                .as_bytes(),
+        )
+        .to_base64();
+        println!("{:?}", memo);
+
+        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap()).unwrap();
+        assert_eq!(
+            res,
+            DestinationInfo {
+                receiver: "orai1asz5wl5c2xt8y5kyp9r04v54zh77pq90fhchjq".to_string(),
+                destination_channel: "channel-170".to_string(),
+                destination_denom: "orai".to_string()
+            }
+        );
     }
 }
