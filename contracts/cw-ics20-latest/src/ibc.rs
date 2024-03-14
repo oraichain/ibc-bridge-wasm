@@ -819,7 +819,7 @@ pub fn build_swap_msgs(
 pub fn build_ibc_msg(
     env: Env,
     local_receiver: &str,
-    local_channel_id: &str,
+    _local_channel_id: &str,
     amount: Uint128,
     remote_address: &str,
     destination: &DestinationInfo,
@@ -841,7 +841,7 @@ pub fn build_ibc_msg(
                 mapping,
                 env.contract.address.to_string(),
                 local_receiver,
-                local_channel_id,
+                &destination.destination_channel,
                 env.contract.address.as_str(),
                 remote_address, // use sender from ICS20Packet as receiver when transferring back because we have the actual receiver in memo for evm cases
                 Some(destination.receiver.clone()),
