@@ -804,7 +804,6 @@ fn test_build_swap_msgs_forbidden_case() {
 fn test_get_ibc_msg_evm_case() {
     // setup
     let send_channel = "channel-9";
-    let receive_channel = "channel-1";
     let allowed = "foobar";
     let pair_mapping_denom = "trx-mainnet0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C";
     let allowed_gas = 777666;
@@ -837,7 +836,6 @@ fn test_get_ibc_msg_evm_case() {
     let err = build_ibc_msg(
         env.clone(),
         local_receiver,
-        receive_channel,
         amount,
         remote_address,
         &destination,
@@ -857,7 +855,6 @@ fn test_get_ibc_msg_evm_case() {
     let err = build_ibc_msg(
         env.clone(),
         local_receiver,
-        receive_channel,
         amount,
         remote_address,
         &destination,
@@ -886,19 +883,12 @@ fn test_get_ibc_msg_evm_case() {
         "wasm.{}/{}/{}",
         "cosmos2contract", update.local_channel_id, pair_mapping_denom
     );
-    increase_channel_balance(
-        deps.as_mut().storage,
-        receive_channel,
-        pair_mapping_key.as_str(),
-        remote_amount.clone(),
-    )
-    .unwrap();
+
     destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
     destination.destination_channel = update.local_channel_id;
     let result = build_ibc_msg(
         env.clone(),
         local_receiver,
-        receive_channel,
         amount,
         remote_address,
         &destination,
@@ -919,7 +909,7 @@ fn test_get_ibc_msg_evm_case() {
         result[1],
         SubMsg::reply_on_error(
             CosmosMsg::Ibc(IbcMsg::SendPacket {
-                channel_id: receive_channel.to_string(),
+                channel_id: destination.destination_channel.clone(),
                 data: to_binary(&Ics20Packet::new(
                     remote_amount.clone(),
                     pair_mapping_key.clone(),
@@ -938,7 +928,7 @@ fn test_get_ibc_msg_evm_case() {
         SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: env.contract.address.into_string(),
             msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
-                src_channel_id: receive_channel.to_string(),
+                src_channel_id: destination.destination_channel,
                 ibc_denom: pair_mapping_key,
                 amount: remote_amount,
                 local_receiver: local_receiver.to_string()
@@ -1009,7 +999,6 @@ fn test_get_ibc_msg_cosmos_based_case() {
     let result = build_ibc_msg(
         env.clone(),
         local_receiver,
-        local_channel_id,
         amount,
         remote_address,
         &destination,
@@ -1064,7 +1053,6 @@ fn test_get_ibc_msg_cosmos_based_case() {
     let result = build_ibc_msg(
         env.clone(),
         local_receiver,
-        local_channel_id,
         amount,
         remote_address,
         &destination,
@@ -1119,7 +1107,6 @@ fn test_get_ibc_msg_cosmos_based_case() {
 fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
     // setup
     let amount = Uint128::from(1000u64);
-    let local_channel_id = "channel";
     let local_receiver = "receiver";
     let timeout = 10u64;
     let destination = DestinationInfo {
@@ -1136,7 +1123,6 @@ fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
     let result = build_ibc_msg(
         env.clone(),
         local_receiver,
-        local_channel_id,
         amount,
         remote_address,
         &destination,
@@ -1154,7 +1140,6 @@ fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
 #[test]
 fn test_follow_up_msgs() {
     let send_channel = "channel-9";
-    let local_channel = "channel";
     let allowed = "foobar";
     let allowed_gas = 777666;
     let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
@@ -1184,7 +1169,6 @@ fn test_follow_up_msgs() {
         "foobar",
         receiver,
         &DestinationInfo::from_str(""),
-        local_channel,
         None,
     )
     .unwrap();
@@ -1223,7 +1207,6 @@ fn test_follow_up_msgs() {
         "foobar",
         "foobar",
         &DestinationInfo::from_str(memo),
-        local_channel,
         None,
     )
     .unwrap();
@@ -1264,7 +1247,6 @@ fn test_follow_up_msgs() {
         "foobar",
         "foobar",
         &DestinationInfo::from_str(memo),
-        local_channel,
         None,
     )
     .unwrap();

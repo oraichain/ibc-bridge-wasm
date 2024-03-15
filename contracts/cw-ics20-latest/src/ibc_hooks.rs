@@ -92,7 +92,6 @@ pub fn ibc_hooks_universal_swap(
             "",
             &destination.receiver,
             &destination,
-            "",
             destination_pair_mapping,
         )?;
     } else {
@@ -168,7 +167,6 @@ pub fn ibc_hooks_universal_swap(
             &hooks_info.bridge_receiver,
             &hooks_info.receiver,
             &destination,
-            &destination.destination_channel,
             destination_pair_mapping,
         )?;
     }

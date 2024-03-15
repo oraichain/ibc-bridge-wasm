@@ -566,7 +566,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &msg.sender,
         &msg.receiver,
         &destination,
-        packet.dest.channel_id.as_str(),
         destination_pair_mapping,
     )?;
 
@@ -608,7 +607,6 @@ pub fn get_follow_up_msgs(
     ibc_sender: &str,    // will be receiver  of ics20 packet if destination is evm
     orai_receiver: &str, // receiver on Oraichain
     destination: &DestinationInfo,
-    initial_dest_channel_id: &str, // channel id on Oraichain receiving the token from other chain,
     destination_pair_mapping: Option<PairQuery>,
 ) -> Result<FollowUpMsgsData, ContractError> {
     let config = CONFIG.load(storage)?;
@@ -704,7 +702,6 @@ pub fn get_follow_up_msgs(
     let mut build_ibc_msg_result = build_ibc_msg(
         env,
         orai_receiver,
-        initial_dest_channel_id,
         minimum_receive.clone(),
         &ibc_sender,
         &destination,
@@ -819,7 +816,6 @@ pub fn build_swap_msgs(
 pub fn build_ibc_msg(
     env: Env,
     local_receiver: &str,
-    _local_channel_id: &str,
     amount: Uint128,
     remote_address: &str,
     destination: &DestinationInfo,
