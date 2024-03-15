@@ -47,8 +47,8 @@ pub fn ibc_hooks_universal_swap(
     };
 
     let mut msgs: Vec<CosmosMsg> = vec![];
-    let mut token_fee = Uint128::zero();
-    let mut relayer_fee = Uint128::zero();
+    let token_fee;
+    let relayer_fee;
 
     let (msg, to_send) = config.converter_contract.process_convert(
         &deps.querier,
@@ -94,6 +94,8 @@ pub fn ibc_hooks_universal_swap(
             &destination,
             destination_pair_mapping,
         )?;
+        token_fee = Uint128::zero();
+        relayer_fee = Uint128::zero();
     } else {
         // case 2: the destination chain is another
 
@@ -133,27 +135,30 @@ pub fn ibc_hooks_universal_swap(
                     ]));
             }
 
-            if !fee_data.token_fee.is_empty() {
+            token_fee = fee_data.token_fee.amount();
+            if !token_fee.is_zero() {
                 msgs.push(
                     fee_data
                         .token_fee
                         .send_amount(config.token_fee_receiver.into_string(), None),
                 );
-                token_fee = fee_data.token_fee.amount();
             }
-            if !fee_data.relayer_fee.is_empty() {
+            relayer_fee = fee_data.relayer_fee.amount();
+            if !relayer_fee.is_zero() {
                 msgs.push(
                     fee_data
                         .relayer_fee
                         .send_amount(config.relayer_fee_receiver.to_string(), None),
                 );
-                relayer_fee = fee_data.relayer_fee.amount();
             }
 
             to_send_amount = Amount::from_parts(
                 parse_asset_info_denom(to_send.info.clone()),
                 fee_data.deducted_amount,
             );
+        } else {
+            token_fee = Uint128::zero();
+            relayer_fee = Uint128::zero();
         }
 
         follow_up_msg_data = get_follow_up_msgs(
@@ -178,6 +183,7 @@ pub fn ibc_hooks_universal_swap(
             follow_up_msg_data.follow_up_msg,
         ))));
     }
+
     msgs.extend(
         follow_up_msg_data
             .sub_msgs
