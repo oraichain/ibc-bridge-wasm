@@ -19,7 +19,7 @@ jobs:
 
       - name: Generate code coverage
         run: |
-          cargo tarpaulin --skip-clean --ignore-tests --frozen --engine llvm --out xml
+          cargo tarpaulin --skip-clean --ignore-tests --frozen --engine llvm --out xml --exclude-files contracts/*/src/error.rs --exclude-files contracts/*/src/bin/*
 
       - name: Caching
         uses: Swatinem/rust-cache@v2
