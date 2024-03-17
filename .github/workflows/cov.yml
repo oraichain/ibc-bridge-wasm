@@ -82,4 +82,5 @@ jobs:
 
       - name: Run test
         run: |
+          cd simulate-tests
           yarn test
