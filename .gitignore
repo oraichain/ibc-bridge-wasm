@@ -4,5 +4,6 @@ build
 target
 libwasmvm_muslc.a
 tests/test-data.json
-artifacts
+**/artifacts/*
+!**/artifacts/*.wasm
 .env
