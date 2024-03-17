@@ -10,23 +10,19 @@ jobs:
   check-coverage:
     name: check-coverage
     runs-on: ubuntu-latest
+    container:
+      image: xd009642/tarpaulin:develop
+      options: --security-opt seccomp=unconfined
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # selecting a toolchain either by action or manual `rustup` calls should happen
-      # before the plugin, as the cache uses the current rustc version as its cache key
-      - name: Install Rust & deps
-        run: |
-          rustup toolchain install stable --profile minimal
-          cargo install cargo-tarpaulin --locked
-
-      - name: Caching
-        uses: Swatinem/rust-cache@v2
-
       - name: Generate code coverage
         run: |
           cargo tarpaulin --skip-clean --ignore-tests --frozen --engine llvm --out xml
+
+      - name: Caching
+        uses: Swatinem/rust-cache@v2
 
       - name: Produce the coverage report
         uses: insightsengineering/coverage-action@v2
