@@ -1,0 +1,52 @@
+{
+  "name": "ibc-bridge-wasm-simulate-tests",
+  "version": "1.0.0",
+  "homepage": "https://oraidex.orai.io",
+  "repository": "https://github.com/oraichain/ibc-bridge-wasm.git",
+  "author": "Oraichain Labs",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@cosmjs/cosmwasm-stargate": "^0.31.0",
+    "@cosmjs/proto-signing": "^0.31.0",
+    "@cosmjs/stargate": "^0.31.0",
+    "@oraichain/common-contracts-build": "^1.0.35",
+    "@oraichain/common-contracts-sdk": "^1.0.31",
+    "@oraichain/cw-simulate": "^2.8.77",
+    "@oraichain/oraidex-common": "^1.0.76",
+    "@oraichain/oraidex-contracts-build": "1.0.22",
+    "@oraichain/oraidex-contracts-sdk": "^1.0.40",
+    "@types/jest": "^29.5.10",
+    "@types/node": "^20.11.28",
+    "bech32": "^1.1.4",
+    "jest": "^29.7.0",
+    "process": "^0.11.10",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.1.6"
+  },
+  "scripts": {
+    "test": "jest test",
+    "ts-check": "tsc --noEmit"
+  },
+  "eslintConfig": {
+    "extends": "react-app"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "resolutions": {
+    "bech32": "1.1.4"
+  },
+  "engines": {
+    "node": "^18 || ^20"
+  },
+  "packageManager": "yarn@1.22.19"
+}
