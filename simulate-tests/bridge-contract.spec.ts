@@ -33,6 +33,7 @@ import {
   TransferBackMsg,
 } from "@oraichain/common-contracts-sdk/build/CwIcs20Latest.types";
 import { toDisplay } from "@oraichain/oraidex-common";
+import { parseToIbcWasmMemo } from "./proto-gen";
 
 let cosmosChain: CWSimulateApp;
 // oraichain support cosmwasm
@@ -517,7 +518,7 @@ describe.only("IBCModule", () => {
 
   it.each([
     [
-      "",
+      parseToIbcWasmMemo("", "", ""),
       ibcTransferAmount,
       "empty-memo-should-fallback-to-transfer-to-receiver",
     ],
