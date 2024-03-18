@@ -466,13 +466,19 @@ fn handle_ibc_packet_receive_native_remote_chain(
                 error: err.to_string(),
             })?;
 
-    let (destination_asset_info_on_orai, destination_pair_mapping) = get_destination_info_on_orai(
-        storage,
-        api,
-        &env,
-        destination.destination_channel.clone(),
-        destination.destination_denom.clone(),
-    );
+    // if destination denom is empty, set destination denom to ibc denom receive
+    let (destination_asset_info_on_orai, destination_pair_mapping) =
+        if destination.destination_denom.is_empty() {
+            (pair_mapping.asset_info.clone(), None)
+        } else {
+            get_destination_info_on_orai(
+                storage,
+                api,
+                &env,
+                destination.destination_channel.clone(),
+                destination.destination_denom.clone(),
+            )
+        };
 
     // if there's a round trip in the destination then we charge additional token and relayer fees
     if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {

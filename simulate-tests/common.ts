@@ -5,6 +5,7 @@ import * as oraidexArtifacts from "@oraichain/oraidex-contracts-build";
 import * as commonArtifacts from "@oraichain/common-contracts-build";
 import { readFileSync } from "fs";
 import { Cw20Coin } from "@oraichain/common-contracts-sdk";
+import "dotenv/config";
 
 export const TOKEN1 = "orai10ldgzued6zjp0mkqwsv2mux3ml50l97c74x8sg";
 export const TOKEN2 = "orai1lus0f0rhx8s03gdllx2n6vhkmf0536dv57wfge";
@@ -59,8 +60,13 @@ export const deployIcs20Token = async (
   client: SimulateCosmWasmClient,
   {
     swap_router_contract,
+    converter_contract,
     gov_contract = senderAddress,
-  }: { gov_contract?: string; swap_router_contract: string }
+  }: {
+    gov_contract?: string;
+    swap_router_contract: string;
+    converter_contract: string;
+  }
 ): Promise<CwIcs20LatestClient> => {
   const { codeId } = await client.upload(
     senderAddress,
@@ -78,6 +84,7 @@ export const deployIcs20Token = async (
       default_timeout: 3600,
       gov_contract,
       swap_router_contract,
+      converter_contract,
     },
     "cw-ics20-latest",
     "auto"

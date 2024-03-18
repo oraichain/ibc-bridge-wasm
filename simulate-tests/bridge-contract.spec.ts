@@ -42,6 +42,7 @@ const bobAddress = "orai1ur2vsjrjarygawpdwtqteaazfchvw4fg6uql76";
 const bobAddressEth = "0x8754032Ac7966A909e2E753308dF56bb08DabD69";
 const bridgeReceiver = "tron-testnet0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222";
 const routerContractAddress = "placeholder"; // we will update the contract config later when we need to deploy the actual router contract
+const converterContractAddress = "converter"; // we will update the contract config later when we need to deploy the actual converter contract
 const cosmosSenderAddress = bech32.encode(
   "cosmos",
   bech32.decode(oraiSenderAddress).words
@@ -97,6 +98,7 @@ describe.only("IBCModule", () => {
 
     ics20Contract = await deployIcs20Token(oraiClient, {
       swap_router_contract: routerContractAddress,
+      converter_contract: converterContractAddress,
     });
     oraiPort = "wasm." + ics20Contract.contractAddress;
     packetData.dest.port_id = oraiPort;
@@ -194,6 +196,7 @@ describe.only("IBCModule", () => {
 
     const ics20Contract = await deployIcs20Token(oraiClient, {
       swap_router_contract: routerContractAddress,
+      converter_contract: converterContractAddress,
     });
     const oraiPort = "wasm." + ics20Contract.contractAddress;
     let newPacketData = {
@@ -311,6 +314,7 @@ describe.only("IBCModule", () => {
     const { channels } = await ics20Contract.listChannels();
     for (let channel of channels) {
       const { balances } = await ics20Contract.channel({ id: channel.id });
+      console.log(balances);
       for (let balance of balances) {
         if ("native" in balance) {
           const pairMapping = await ics20Contract.pairMapping({
