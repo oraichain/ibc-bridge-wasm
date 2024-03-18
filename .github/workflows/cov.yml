@@ -27,6 +27,9 @@ jobs:
         run: |
           cp $(find target/debug | grep libosmosistesttube.so) contracts/*
 
+      - name: install tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
       - name: Generate code coverage
         run: |
           cargo tarpaulin --skip-clean --ignore-tests --frozen --engine llvm --out xml --exclude-files contracts/*/src/error.rs --exclude-files contracts/*/src/bin/*
