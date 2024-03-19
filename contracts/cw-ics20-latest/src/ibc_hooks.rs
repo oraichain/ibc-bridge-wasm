@@ -63,13 +63,19 @@ pub fn ibc_hooks_universal_swap(
         msgs.push(msg);
     }
 
-    let (destination_asset_info_on_orai, destination_pair_mapping) = get_destination_info_on_orai(
-        deps.storage,
-        deps.api,
-        &env,
-        destination.destination_channel.clone(),
-        destination.destination_denom.clone(),
-    );
+    // if destination denom is empty, set destination denom to ibc denom receive
+    let (destination_asset_info_on_orai, destination_pair_mapping) =
+        if destination.destination_denom.is_empty() {
+            (to_send.info.clone(), None)
+        } else {
+            get_destination_info_on_orai(
+                deps.storage,
+                deps.api,
+                &env,
+                destination.destination_channel.clone(),
+                destination.destination_denom.clone(),
+            )
+        };
 
     let mut to_send_amount =
         Amount::from_parts(parse_asset_info_denom(to_send.info.clone()), to_send.amount);
