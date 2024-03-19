@@ -614,8 +614,6 @@ pub fn get_follow_up_msgs(
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
     // by default, the receiver is the original address sent in ics20packet
     let mut to = Some(api.addr_validate(orai_receiver)?);
-    // build convert msg
-    let mut send_converted_msg: Option<CosmosMsg> = None;
 
     // check destination_asset_info_on_orai should convert before ibc transfer
     let converter_info = config
@@ -632,7 +630,7 @@ pub fn get_follow_up_msgs(
         config.fee_denom.as_str(),
     );
     let mut minimum_receive = to_send.amount();
-    let mut ibc_transfer_amount = minimum_receive;
+    let mut ibc_transfer_amount = to_send.amount();
 
     if swap_operations.len() > 0 {
         let response = config.swap_router_contract.simulate_swap(
@@ -675,12 +673,6 @@ pub fn get_follow_up_msgs(
             )?;
             sub_msgs.push(SubMsg::reply_on_error(convert_msg, CONVERT_FAILURE_ID));
             ibc_transfer_amount = return_asset.amount;
-
-            to = None;
-            send_converted_msg = Some(
-                Amount::from_parts(parse_asset_info_denom(return_asset.info), minimum_receive)
-                    .send_amount(orai_receiver.to_string(), None),
-            );
         }
     }
 
@@ -701,15 +693,10 @@ pub fn get_follow_up_msgs(
         to = None;
     } else {
         follow_up_msgs_data.follow_up_msg = build_ibc_msg_result.unwrap_err().to_string();
-        // if has converter message, but don't have ibc messages, must send return amount after convert to receiver
-        if let Some(send_converted_msg) = send_converted_msg {
-            sub_msgs.push(SubMsg::reply_on_error(
-                send_converted_msg,
-                NATIVE_RECEIVE_ID,
-            ));
-        }
+        // if has converter message, but don't have ibc messages, then we simply dont convert & send the destination_asset_info_on_orai to user's orai_receiver
+        sub_msgs.pop();
 
-        // if destination_channel is empty, still success
+        // if destination_channel is not empty then it means there's something wrong with the build_ibc_msg -> is_success = false
         if !destination.destination_channel.is_empty() {
             follow_up_msgs_data.is_success = false;
         }
@@ -870,13 +857,6 @@ pub fn build_ibc_msg(
                 )))
             }
         };
-        // let ibc_msg: CosmosMsg = IbcMsg::Transfer {
-        //     channel_id: destination.destination_channel.clone(),
-        //     to_address: destination.receiver.clone(),
-        //     amount: coin(amount.u128(), destination.destination_denom.clone()),
-        //     timeout: IbcTimeout::with_timestamp(timeout),
-        // }
-        // .into();
         return Ok(vec![SubMsg::reply_on_error(
             ibc_msg,
             IBC_TRANSFER_NATIVE_ERROR_ID,
