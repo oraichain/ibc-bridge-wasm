@@ -632,6 +632,8 @@ pub fn get_follow_up_msgs(
         config.fee_denom.as_str(),
     );
     let mut minimum_receive = to_send.amount();
+    let mut ibc_transfer_amount = minimum_receive;
+
     if swap_operations.len() > 0 {
         let response = config.swap_router_contract.simulate_swap(
             querier,
@@ -649,6 +651,7 @@ pub fn get_follow_up_msgs(
             return Ok(follow_up_msgs_data);
         }
         minimum_receive = response.unwrap().amount;
+        ibc_transfer_amount = minimum_receive;
 
         let from_asset = Asset {
             amount: minimum_receive,
@@ -671,7 +674,7 @@ pub fn get_follow_up_msgs(
                 },
             )?;
             sub_msgs.push(SubMsg::reply_on_error(convert_msg, CONVERT_FAILURE_ID));
-            minimum_receive = return_asset.amount;
+            ibc_transfer_amount = return_asset.amount;
 
             to = None;
             send_converted_msg = Some(
@@ -684,7 +687,7 @@ pub fn get_follow_up_msgs(
     let mut build_ibc_msg_result = build_ibc_msg(
         env,
         orai_receiver,
-        minimum_receive.clone(),
+        ibc_transfer_amount,
         &ibc_sender,
         &destination,
         config.default_timeout,
