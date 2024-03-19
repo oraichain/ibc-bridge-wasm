@@ -9,7 +9,6 @@ use cw20::{Cw20Coin, Cw20ReceiveMsg};
 use cw20_ics20_msg::converter::ConverterController;
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
-use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
@@ -430,12 +429,7 @@ pub fn execute_transfer_back_to_remote_chain(
     // should be in form port/channel/denom
     let mappings = get_mappings_from_asset_info(
         deps.as_ref().storage,
-        match amount.clone() {
-            Amount::Native(coin) => AssetInfo::NativeToken { denom: coin.denom },
-            Amount::Cw20(cw20_coin) => AssetInfo::Token {
-                contract_addr: deps.api.addr_validate(cw20_coin.address.as_str())?,
-            },
-        },
+        amount.into_asset_info(deps.api)?,
     )?;
 
     // parse denom & compare with user input. Should not use string.includes() because hacker can fake a port that has the same remote denom to return true
@@ -445,7 +439,7 @@ pub fn execute_transfer_back_to_remote_chain(
             let (denom, is_native) = parse_voucher_denom(
                 pair.key.as_str(),
                 &IbcEndpoint {
-                    port_id: parse_ibc_wasm_port_id(env.contract.address.clone().into_string()),
+                    port_id: parse_ibc_wasm_port_id(env.contract.address.as_str()),
                     channel_id: msg.local_channel_id.clone(), // also verify local channel id
                 },
             )
@@ -608,7 +602,7 @@ pub fn execute_update_mapping_pair(
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
 
     let ibc_denom = get_key_ics20_ibc_denom(
-        &parse_ibc_wasm_port_id(env.contract.address.into_string()),
+        &parse_ibc_wasm_port_id(env.contract.address.as_str()),
         &mapping_pair_msg.local_channel_id,
         &mapping_pair_msg.denom,
     );
@@ -647,7 +641,7 @@ pub fn execute_delete_mapping_pair(
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
 
     let ibc_denom = get_key_ics20_ibc_denom(
-        &parse_ibc_wasm_port_id(env.contract.address.into_string()),
+        &parse_ibc_wasm_port_id(env.contract.address.as_str()),
         &mapping_pair_msg.local_channel_id,
         &mapping_pair_msg.denom,
     );

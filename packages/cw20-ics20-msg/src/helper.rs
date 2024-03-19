@@ -19,7 +19,7 @@ pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
     }
 }
 
-pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
+pub fn parse_ibc_wasm_port_id(contract_addr: &str) -> String {
     format!("wasm.{}", contract_addr)
 }
 

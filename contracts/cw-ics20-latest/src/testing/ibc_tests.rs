@@ -2576,8 +2576,8 @@ fn test_get_destination_info_on_orai() {
         deps.as_ref().storage,
         deps.as_ref().api,
         &mock_env(),
-        "".to_string(),
-        "orai1lus0f0rhx8s03gdllx2n6vhkmf0536dv57wfge".to_string(),
+        "",
+        "orai1lus0f0rhx8s03gdllx2n6vhkmf0536dv57wfge",
     );
     assert_eq!(
         destination_info.0,
@@ -2592,8 +2592,8 @@ fn test_get_destination_info_on_orai() {
         deps.as_ref().storage,
         deps.as_ref().api,
         &mock_env(),
-        "mars-channel".to_string(),
-        "earth".to_string(),
+        "mars-channel",
+        "earth",
     );
     assert_eq!(
         destination_info.0,
@@ -2625,8 +2625,8 @@ fn test_get_destination_info_on_orai() {
         deps.as_ref().storage,
         deps.as_ref().api,
         &mock_env(),
-        "channel-15".to_string(),
-        "uatom".to_string(),
+        "channel-15",
+        "uatom",
     );
     assert_eq!(
         destination_info.0,

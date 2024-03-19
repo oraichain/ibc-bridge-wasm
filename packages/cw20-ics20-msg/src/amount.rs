@@ -1,8 +1,10 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    to_binary, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128, WasmMsg,
+    to_binary, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128,
+    WasmMsg,
 };
 use cw20::{Cw20Coin, Cw20ExecuteMsg};
+use oraiswap::asset::AssetInfo;
 use std::convert::TryInto;
 
 #[cw_serde]
@@ -34,6 +36,17 @@ impl Amount {
             denom: denom.to_string(),
             amount: Uint128::new(amount),
         })
+    }
+
+    pub fn into_asset_info(&self, api: &dyn Api) -> StdResult<AssetInfo> {
+        match self {
+            Amount::Native(coin) => Ok(AssetInfo::NativeToken {
+                denom: coin.denom.to_owned(),
+            }),
+            Amount::Cw20(cw20_coin) => Ok(AssetInfo::Token {
+                contract_addr: api.addr_validate(cw20_coin.address.as_str())?,
+            }),
+        }
     }
 }
 
@@ -105,6 +118,17 @@ impl Amount {
                 .into()
             }
         }
+    }
+}
+
+impl Amount {
+    pub fn checked_add(&self, add_amount: Uint128) -> Self {
+        Amount::from_parts(
+            self.denom(),
+            self.amount()
+                .checked_add(add_amount)
+                .unwrap_or(self.amount()),
+        )
     }
 }
 

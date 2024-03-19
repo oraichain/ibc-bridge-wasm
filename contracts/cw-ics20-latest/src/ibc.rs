@@ -112,7 +112,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
         NATIVE_RECEIVE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
-            // so no undo increase
+            // so no undo increase channel balance
             SubMsgResult::Err(err) => Ok(Response::new()
                 .set_data(ack_success())
                 .add_attribute("action", "native_receive_id")
@@ -122,7 +122,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
         SWAP_OPS_FAILURE_ID => match reply.result {
             SubMsgResult::Ok(_) => Ok(Response::new()),
             // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
-            // so no undo increase
+            // so no undo increase channel balance
             SubMsgResult::Err(err) => {
                 let reply_args = REPLY_ARGS.load(deps.storage)?;
                 REPLY_ARGS.remove(deps.storage);
@@ -437,17 +437,15 @@ fn handle_ibc_packet_receive_native_remote_chain(
     let pair_mapping = ics20_denoms()
         .load(storage, &ibc_denom)
         .map_err(|_| ContractError::NotOnMappingList {})?;
-
+    let initial_receive_asset_info = pair_mapping.asset_info.clone();
     let to_send = Amount::from_parts(
-        parse_asset_info_denom(pair_mapping.asset_info.clone()),
+        parse_asset_info_denom(initial_receive_asset_info.clone()),
         convert_remote_to_local(
             msg.amount,
             pair_mapping.remote_decimals,
             pair_mapping.asset_info_decimals,
         )?,
     );
-
-    let initial_receive_asset_info = pair_mapping.asset_info.clone();
 
     let mut fee_data = process_deduct_fee(
         storage,
@@ -458,25 +456,19 @@ fn handle_ibc_packet_receive_native_remote_chain(
         to_send.clone(),
         &config.swap_router_contract,
     )?;
-
-    // let destination = DestinationInfo::from_str(&msg.memo.clone().unwrap_or_default());
     let destination =
-        DestinationInfo::from_binary(&Binary::from_base64(&msg.memo.clone().unwrap_or_default())?)
-            .map_err(|err| ContractError::InvalidDestinationMemo {
-                error: err.to_string(),
-            })?;
-
+        DestinationInfo::from_base64(&msg.memo.clone().unwrap_or_default()).unwrap_or_default();
     // if destination denom is empty, set destination denom to ibc denom receive
     let (destination_asset_info_on_orai, destination_pair_mapping) =
         if destination.destination_denom.is_empty() {
-            (pair_mapping.asset_info.clone(), None)
+            (initial_receive_asset_info.clone(), None)
         } else {
             get_destination_info_on_orai(
                 storage,
                 api,
                 &env,
-                destination.destination_channel.clone(),
-                destination.destination_denom.clone(),
+                &destination.destination_channel,
+                &destination.destination_denom,
             )
         };
 
@@ -486,13 +478,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         // for relayer fee, we need to deduct using the destination network
         let (_, additional_token_fee) =
             deduct_token_fee(storage, &destination.destination_denom, to_send.amount())?;
-        fee_data.token_fee = Amount::from_parts(
-            fee_data.token_fee.denom(),
-            fee_data
-                .token_fee
-                .amount()
-                .checked_add(additional_token_fee)?,
-        );
+        fee_data.token_fee = fee_data.token_fee.checked_add(additional_token_fee);
         let mut additional_relayer_fee = deduct_relayer_fee(
             storage,
             api,
@@ -505,9 +491,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
         // if initial asset info is different with destination asset info,
         // we need convert relayer fee from destination_asset_info_on_orai to initial token receive
-
         let swap_operations = build_swap_operations(
-            initial_receive_asset_info,
+            initial_receive_asset_info.clone(),
             destination_asset_info_on_orai.clone(),
             config.fee_denom.as_str(),
         );
@@ -524,17 +509,14 @@ fn handle_ibc_packet_receive_native_remote_chain(
             };
         }
 
-        fee_data.relayer_fee = Amount::from_parts(
-            fee_data.relayer_fee.denom(),
-            fee_data
-                .relayer_fee
-                .amount()
-                .checked_add(additional_relayer_fee)?,
-        );
-
+        fee_data.relayer_fee = fee_data.relayer_fee.checked_add(additional_relayer_fee);
         fee_data.deducted_amount = fee_data
             .deducted_amount
-            .checked_sub(additional_token_fee.checked_add(additional_relayer_fee)?)
+            .checked_sub(
+                additional_token_fee
+                    .checked_add(additional_relayer_fee)
+                    .unwrap_or(additional_token_fee),
+            )
             .unwrap_or_default();
     }
 
@@ -567,7 +549,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         querier,
         env.clone(),
         new_deducted_to_send,
-        pair_mapping.asset_info,
+        initial_receive_asset_info,
         destination_asset_info_on_orai,
         &msg.sender,
         &msg.receiver,
@@ -626,23 +608,24 @@ pub fn get_follow_up_msgs(
         follow_up_msg: "".to_string(),
         is_success: true,
     };
-
     if destination.destination_denom.is_empty() {
         return Ok(follow_up_msgs_data);
     }
-
     // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
-    let mut target_asset_info_on_swap = destination_asset_info_on_orai.clone();
+    // by default, the receiver is the original address sent in ics20packet
+    let mut to = Some(api.addr_validate(orai_receiver)?);
+    // build convert msg
+    let mut send_converted_msg: Option<CosmosMsg> = None;
 
     // check destination_asset_info_on_orai should convert before ibc transfer
     let converter_info = config
         .converter_contract
         .converter_info(querier, &destination_asset_info_on_orai);
 
-    if let Some(converter_info) = converter_info.clone() {
-        target_asset_info_on_swap = converter_info.token_ratio.info;
-    }
-
+    let target_asset_info_on_swap = match converter_info.clone() {
+        Some(converter_info) => converter_info.token_ratio.info,
+        None => destination_asset_info_on_orai.clone(),
+    };
     let swap_operations = build_swap_operations(
         target_asset_info_on_swap.clone(),
         initial_receive_asset_info.clone(),
@@ -666,14 +649,7 @@ pub fn get_follow_up_msgs(
             return Ok(follow_up_msgs_data);
         }
         minimum_receive = response.unwrap().amount;
-    }
 
-    // by default, the receiver is the original address sent in ics20packet
-    let mut to = Some(api.addr_validate(orai_receiver)?);
-
-    // build convert msg
-    let mut send_converted_msg: Option<CosmosMsg> = None;
-    if converter_info.is_some() {
         let from_asset = Asset {
             amount: minimum_receive,
             info: target_asset_info_on_swap,
@@ -1058,9 +1034,7 @@ pub fn deduct_relayer_fee(
             prefix
         }
     };
-    // api.debug(format!("prefix after evm prefix: {}", prefix).as_str());
     let relayer_fee = RELAYER_FEE.may_load(storage, &prefix)?;
-    // api.debug(format!("relayer fee: {}", relayer_fee.unwrap_or_default()).as_str());
     // no need to deduct fee if no fee is found in the mapping
     if relayer_fee.is_none() {
         return Ok(Uint128::from(0u64));

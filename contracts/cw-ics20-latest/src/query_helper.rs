@@ -33,17 +33,17 @@ pub fn get_destination_info_on_orai(
     storage: &dyn Storage,
     api: &dyn Api,
     env: &Env,
-    destination_channel: String,
-    destination_denom: String,
+    destination_channel: &str,
+    destination_denom: &str,
 ) -> (AssetInfo, Option<PairQuery>) {
     // destination is Oraichain
     if destination_channel.is_empty() {
         return (denom_to_asset_info(api, &destination_denom), None);
     }
 
-    // case 1: port is ibc wasm, must be register in mapping
+    // case 1: port is ibc wasm, must be registered in mapping
     let ibc_denom = get_key_ics20_ibc_denom(
-        &parse_ibc_wasm_port_id(env.contract.address.clone().into_string()),
+        &parse_ibc_wasm_port_id(env.contract.address.as_str()),
         &destination_channel,
         &destination_denom,
     );
@@ -60,9 +60,10 @@ pub fn get_destination_info_on_orai(
     // case 2: port is transfer
     let ibc_denom = format!(
         "ibc/{}",
-        digest(format!(
-            "transfer/{}/{}",
-            destination_channel, destination_denom
+        digest(get_key_ics20_ibc_denom(
+            "transfer",
+            destination_channel,
+            destination_denom
         ))
         .to_uppercase()
     );

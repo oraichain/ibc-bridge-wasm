@@ -12,6 +12,16 @@ pub struct DestinationInfo {
     pub destination_denom: String,
 }
 
+impl Default for DestinationInfo {
+    fn default() -> Self {
+        DestinationInfo {
+            receiver: "".to_string(),
+            destination_channel: "".to_string(),
+            destination_denom: "".to_string(),
+        }
+    }
+}
+
 impl DestinationInfo {
     // destination string format: <destination-channel>/<receiver>:<denom>
     pub fn from_str(value: &str) -> Self {
@@ -32,7 +42,11 @@ impl DestinationInfo {
         }
     }
 
-    pub fn from_binary(value: &Binary) -> StdResult<Self> {
+    pub fn from_base64(encoded: &str) -> StdResult<Self> {
+        DestinationInfo::from_binary(&Binary::from_base64(encoded)?)
+    }
+
+    fn from_binary(value: &Binary) -> StdResult<Self> {
         let deserialized = match Bufany::deserialize(&value) {
             Ok(val) => val,
             Err(err) => {

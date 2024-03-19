@@ -72,8 +72,8 @@ pub fn ibc_hooks_universal_swap(
                 deps.storage,
                 deps.api,
                 &env,
-                destination.destination_channel.clone(),
-                destination.destination_denom.clone(),
+                &destination.destination_channel,
+                &destination.destination_denom,
             )
         };
 
