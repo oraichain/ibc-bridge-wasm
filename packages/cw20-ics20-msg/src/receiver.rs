@@ -296,7 +296,7 @@ mod tests {
         )
         .to_base64();
 
-        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap());
+        let res = DestinationInfo::from_base64(&memo);
 
         assert_eq!(
             res.unwrap_err(),
@@ -314,7 +314,7 @@ mod tests {
         )
         .to_base64();
 
-        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap());
+        let res = DestinationInfo::from_base64(&memo);
         assert_eq!(
             res.unwrap_err(),
             StdError::generic_err("Error on deserialize destination_channel")
@@ -331,7 +331,7 @@ mod tests {
         )
         .to_base64();
 
-        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap());
+        let res = DestinationInfo::from_base64(&memo);
         assert_eq!(
             res.unwrap_err(),
             StdError::generic_err("Error on deserialize destination_denom")
@@ -352,7 +352,7 @@ mod tests {
         .to_base64();
         println!("{:?}", memo);
 
-        let res = DestinationInfo::from_binary(&Binary::from_base64(&memo).unwrap()).unwrap();
+        let res = DestinationInfo::from_base64(&memo).unwrap();
         assert_eq!(
             res,
             DestinationInfo {

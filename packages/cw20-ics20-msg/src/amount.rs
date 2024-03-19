@@ -176,6 +176,8 @@ pub fn convert_local_to_remote(
 #[cfg(test)]
 mod tests {
 
+    use cosmwasm_std::{testing::mock_dependencies, Addr};
+
     use super::*;
 
     #[test]
@@ -184,5 +186,37 @@ mod tests {
         assert_eq!(new_amount, Uint128::from(10000000000000u128));
         let new_amount = convert_remote_to_local(Uint128::from(1000000000000u128), 18, 6).unwrap();
         assert_eq!(new_amount, Uint128::from(1u128))
+    }
+
+    #[test]
+    pub fn test_into_asset_info() {
+        let deps = mock_dependencies();
+        let amount = Amount::cw20(1u128, "addr");
+        assert_eq!(
+            amount.into_asset_info(deps.as_ref().api).unwrap(),
+            AssetInfo::Token {
+                contract_addr: Addr::unchecked("addr")
+            }
+        );
+        let amount = Amount::native(1u128, "native");
+        assert_eq!(
+            amount.into_asset_info(deps.as_ref().api).unwrap(),
+            AssetInfo::NativeToken {
+                denom: "native".to_string()
+            }
+        )
+    }
+
+    #[test]
+    pub fn test_checked_add() {
+        assert_eq!(
+            Amount::cw20(1u128, "addr").checked_add(Uint128::one()),
+            Amount::cw20(2u128, "addr")
+        );
+
+        assert_eq!(
+            Amount::cw20(1u128, "addr").checked_add(Uint128::MAX),
+            Amount::cw20(1u128, "addr")
+        )
     }
 }
