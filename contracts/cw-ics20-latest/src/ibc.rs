@@ -649,6 +649,7 @@ pub fn get_follow_up_msgs(
         config.fee_denom.as_str(),
     );
     let mut minimum_receive = to_send.amount();
+
     if swap_operations.len() > 0 {
         let response = config.swap_router_contract.simulate_swap(
             querier,
@@ -667,6 +668,8 @@ pub fn get_follow_up_msgs(
         }
         minimum_receive = response.unwrap().amount;
     }
+
+    let mut ibc_transfer_amount = minimum_receive;
 
     // by default, the receiver is the original address sent in ics20packet
     let mut to = Some(api.addr_validate(orai_receiver)?);
@@ -695,7 +698,7 @@ pub fn get_follow_up_msgs(
                 },
             )?;
             sub_msgs.push(SubMsg::reply_on_error(convert_msg, CONVERT_FAILURE_ID));
-            minimum_receive = return_asset.amount;
+            ibc_transfer_amount = return_asset.amount;
 
             to = None;
             send_converted_msg = Some(
@@ -708,7 +711,7 @@ pub fn get_follow_up_msgs(
     let mut build_ibc_msg_result = build_ibc_msg(
         env,
         orai_receiver,
-        minimum_receive.clone(),
+        ibc_transfer_amount,
         &ibc_sender,
         &destination,
         config.default_timeout,
