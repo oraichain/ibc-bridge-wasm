@@ -86,4 +86,5 @@ jobs:
       - name: Run test
         run: |
           cd simulate-tests
+          cp .env.example .env
           yarn test
