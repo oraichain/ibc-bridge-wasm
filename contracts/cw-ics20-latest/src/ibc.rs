@@ -694,6 +694,7 @@ pub fn get_follow_up_msgs(
     } else {
         follow_up_msgs_data.follow_up_msg = build_ibc_msg_result.unwrap_err().to_string();
         // if has converter message, but don't have ibc messages, then we simply dont convert & send the destination_asset_info_on_orai to user's orai_receiver
+        CONVERT_REPLY_ARGS.remove(storage);
         sub_msgs.pop();
 
         // if destination_channel is not empty then it means there's something wrong with the build_ibc_msg -> is_success = false
