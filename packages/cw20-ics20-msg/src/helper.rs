@@ -1,5 +1,4 @@
-use cosmwasm_std::{Api, QuerierWrapper, StdError, StdResult};
-use cw20::{Cw20QueryMsg, TokenInfoResponse};
+use cosmwasm_std::{Api, StdError, StdResult};
 use oraiswap::asset::AssetInfo;
 
 pub fn get_prefix_decode_bech32(address: &str) -> StdResult<String> {
@@ -20,32 +19,70 @@ pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
     }
 }
 
-pub fn parse_ibc_wasm_port_id(contract_addr: String) -> String {
+pub fn parse_ibc_wasm_port_id(contract_addr: &str) -> String {
     format!("wasm.{}", contract_addr)
 }
 
-pub fn denom_to_asset_info(
-    querier: &QuerierWrapper,
-    api: &dyn Api,
-    denom: &str,
-) -> StdResult<AssetInfo> {
-    let info = if querier
-        .query_wasm_smart::<TokenInfoResponse>(denom.clone(), &Cw20QueryMsg::TokenInfo {})
-        .is_ok()
-    {
-        AssetInfo::Token {
-            contract_addr: api.addr_validate(denom)?,
-        }
+pub fn denom_to_asset_info(api: &dyn Api, denom: &str) -> AssetInfo {
+    if let Ok(contract_addr) = api.addr_validate(denom) {
+        AssetInfo::Token { contract_addr }
     } else {
         AssetInfo::NativeToken {
             denom: denom.to_string(),
         }
-    };
-    Ok(info)
+    }
 }
 
-#[test]
-fn test_get_prefix_decode_bech32() {
-    let result = get_prefix_decode_bech32("cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm").unwrap();
-    assert_eq!(result, "cosmos".to_string());
+pub fn to_orai_bridge_address(address: &str) -> StdResult<String> {
+    let decode_result = bech32::decode(address).map_err(|_| {
+        StdError::generic_err(format!(
+            "Cannot decode sender address in to_orai_bridge_address: {}",
+            address
+        ))
+    })?;
+    let oraib_address =
+        bech32::encode("oraib", decode_result.1, bech32::Variant::Bech32).map_err(|_| {
+            StdError::generic_err(format!(
+                "Cannot encode sender address to oraibridge address in to_orai_bridge_address: {}",
+                address
+            ))
+        })?;
+
+    Ok(oraib_address)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        helper::{get_prefix_decode_bech32, to_orai_bridge_address},
+        receiver::DestinationInfo,
+    };
+
+    #[test]
+    fn test_get_prefix_decode_bech32() {
+        let result =
+            get_prefix_decode_bech32("cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm").unwrap();
+        assert_eq!(result, "cosmos".to_string());
+    }
+
+    #[test]
+    fn test_to_orai_bridge_address() {
+        let result = to_orai_bridge_address("orai1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejvfgs7g").unwrap();
+        assert_eq!(
+            result,
+            "oraib1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejmgvu0t".to_string()
+        );
+    }
+
+    #[test]
+    fn test_destination_info_default() {
+        assert_eq!(
+            DestinationInfo::default(),
+            DestinationInfo {
+                receiver: "".to_string(),
+                destination_channel: "".to_string(),
+                destination_denom: "".to_string()
+            }
+        )
+    }
 }

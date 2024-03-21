@@ -1,7 +1,12 @@
 [workspace]
-members = ["contracts/*"]
+members = ["contracts/*", "packages/*"]
 
 resolver = "2"
+
+[workspace.dependencies]
+cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "24c138c" }
+oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "03f4955b" }
+# osmosis-test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
 
 [profile.release]
 opt-level = 3

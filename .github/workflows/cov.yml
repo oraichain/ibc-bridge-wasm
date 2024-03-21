@@ -1,0 +1,92 @@
+name: Code Coverage
+
+on:
+  pull_request:
+    types: ["opened", "synchronize", "ready_for_review"]
+
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  check-coverage:
+    name: check-coverage
+    runs-on: ubuntu-latest
+    container:
+      image: xd009642/tarpaulin:develop
+      options: --security-opt seccomp=unconfined
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Caching
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate code coverage
+        run: |
+          cargo tarpaulin --skip-clean --ignore-tests --frozen --engine llvm --out xml --exclude-files contracts/*/src/error.rs --exclude-files contracts/*/src/bin/*
+
+      - name: Produce the coverage report
+        uses: insightsengineering/coverage-action@v2
+        with:
+          # Path to the Cobertura XML report.
+          path: ./cobertura.xml
+          # Minimum total coverage, if you want to the
+          # workflow to enforce it as a standard.
+          # This has no effect if the `fail` arg is set to `false`.
+          threshold: 90
+          # Fail the workflow if the minimum code coverage
+          # reuqirements are not satisfied.
+          fail: false
+          # Publish the rendered output as a PR comment
+          publish: true
+          # Create a coverage diff report.
+          diff: true
+          # Branch to diff against.
+          # Compare the current coverage to the coverage
+          # determined on this branch.
+          diff-branch: master
+          # This is where the coverage reports for the
+          # `diff-branch` are stored.
+          # Branch is created if it doesn't already exist'.
+          # diff-storage: _xml_coverage_reports
+          coverage-summary-title: "Code Coverage Summary"
+          new-uncovered-statements-failure: true
+          # new-uncovered-statements-failure: true
+
+  simulate-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.12.0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Nodejs
+        uses: actions/setup-node@v3
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+      - uses: actions/cache@v2
+        id: yarn-cache
+        with:
+          path: |
+            ${{ steps.yarn-cache-dir-path.outputs.dir }}
+            ./simulate-tests/node_modules/
+          key: ${{ runner.os }}-yarn-${{ hashFiles('./simulate-tests/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+      - name: Install Dependencies
+        if: steps.yarn-cache.outputs.cache-hit != 'true'
+        run: |
+          npm install -g yarn
+          cd simulate-tests
+          yarn
+
+      - name: Run test
+        run: |
+          cd simulate-tests
+          cp .env.example .env
+          yarn test

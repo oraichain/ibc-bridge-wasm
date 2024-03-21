@@ -3,8 +3,8 @@ use cosmwasm_std::{Addr, Binary, IbcEndpoint, SubMsg, Uint128};
 use cw20::Cw20ReceiveMsg;
 use oraiswap::asset::AssetInfo;
 
-use crate::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
-use cw20_ics20_msg::amount::Amount;
+use crate::state::{ChannelInfo, MappingMetadata, RelayerFee, TokenFee};
+use cw20_ics20_msg::{amount::Amount, ibc_hooks::HookMethods};
 
 #[cw_serde]
 pub struct InitMsg {
@@ -19,6 +19,8 @@ pub struct InitMsg {
     pub default_gas_limit: Option<u64>,
     /// router contract for fee swap
     pub swap_router_contract: String,
+    /// converter contract for convert token
+    pub converter_contract: String,
 }
 
 #[cw_serde]
@@ -29,12 +31,13 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
-    // pub default_timeout: u64,
-    // pub default_gas_limit: Option<u64>,
-    // pub fee_denom: String,
-    // pub swap_router_contract: String,
-    // pub token_fee_receiver: String,
-    // pub relayer_fee_receiver: String,
+    pub default_timeout: u64,
+    pub default_gas_limit: Option<u64>,
+    pub fee_denom: String,
+    pub swap_router_contract: String,
+    pub token_fee_receiver: String,
+    pub relayer_fee_receiver: String,
+    pub converter_contract: String,
 }
 
 #[cw_serde]
@@ -59,6 +62,7 @@ pub enum ExecuteMsg {
         relayer_fee: Option<Vec<RelayerFee>>,
         fee_receiver: Option<String>,
         relayer_fee_receiver: Option<String>,
+        converter_contract: Option<String>,
     },
     // self-call msgs to deal with on_ibc_receive reentrancy error
     IncreaseChannelBalanceIbcReceive {
@@ -78,6 +82,10 @@ pub enum ExecuteMsg {
         ibc_denom: String,
         outstanding: Uint128,
         total_sent: Option<Uint128>,
+    },
+    IbcHooksReceive {
+        func: HookMethods,
+        args: Binary,
     },
 }
 
@@ -183,7 +191,7 @@ pub enum QueryMsg {
     PairMapping { key: String },
     #[returns(Vec<PairQuery>)]
     PairMappingsFromAssetInfo { asset_info: AssetInfo },
-    #[returns(Ratio)]
+    #[returns(crate::state::Ratio)]
     GetTransferTokenFee { remote_token_denom: String },
 }
 
@@ -230,6 +238,7 @@ pub struct ConfigResponse {
     pub relayer_fee_receiver: Addr,
     pub token_fees: Vec<TokenFee>,
     pub relayer_fees: Vec<RelayerFeeResponse>,
+    pub converter_contract: String,
 }
 
 #[cw_serde]
@@ -277,4 +286,5 @@ pub struct FeeData {
 pub struct FollowUpMsgsData {
     pub sub_msgs: Vec<SubMsg>,
     pub follow_up_msg: String,
+    pub is_success: bool,
 }

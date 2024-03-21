@@ -14,11 +14,13 @@ For more information on this contract, please check out the
 pub mod contract;
 mod error;
 pub mod ibc;
-mod ibc_tests;
-mod integration_tests;
+pub mod ibc_hooks;
 mod migrations;
 pub mod msg;
+pub mod query_helper;
 pub mod state;
-mod test_helpers;
 
 pub use crate::error::ContractError;
+
+#[cfg(test)]
+mod testing;

@@ -11,11 +11,15 @@ documentation = "https://docs.orai.io"
 readme = "README.md"
 
 [dependencies]
-cosmwasm-schema = "1.1.9"
-cosmwasm-std = { version = "1.1.9", default-features = false }
+cosmwasm-schema = "=1.2"
+cosmwasm-std = { version = "=1.2", default-features = false }
 cw-storage-plus = "1.0.1"
 cw20 = "1.0.1"
-schemars = "0.8.1"
 bech32 = "0.8.1"
-oraiswap = "1.0.1"
-serde = { version = "1.0.103", default-features = false, features = ["derive"] }
+oraiswap = { workspace = true }
+anybuf = "0.3.0"
+
+[dev-dependencies]
+cw-multi-test = "0.16.0"
+cosmwasm-testing-util = { workspace = true }
+cosmwasm-vm = { version = "=1.2" }
