@@ -453,6 +453,18 @@ fn handle_ibc_packet_receive_native_remote_chain(
         )?,
     );
 
+    // increase channel balance submsg. We increase it first before doing other tasks
+    cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
+        contract_addr: env.contract.address.to_string(),
+        msg: to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id: packet.dest.channel_id.clone(),
+            ibc_denom: ibc_denom.clone(),
+            amount: msg.amount,
+            local_receiver: msg.receiver.clone(),
+        })?,
+        funds: vec![],
+    }));
+
     let mint_msg = build_mint_cw20_mapping_msg(
         storage,
         ibc_denom.clone(),
@@ -575,17 +587,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         destination_pair_mapping,
     )?;
 
-    // increase channel balance submsg. We increase it first before doing other tasks
-    cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
-        contract_addr: env.contract.address.to_string(),
-        msg: to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
-            dest_channel_id: packet.dest.channel_id.clone(),
-            ibc_denom,
-            amount: msg.amount,
-            local_receiver: msg.receiver.clone(),
-        })?,
-        funds: vec![],
-    }));
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_messages(cosmos_msgs)
