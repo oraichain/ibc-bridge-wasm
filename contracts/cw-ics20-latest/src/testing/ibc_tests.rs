@@ -289,6 +289,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     let _ = execute(
@@ -430,6 +431,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
         },
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     execute(
@@ -528,6 +530,7 @@ fn send_from_remote_to_local_receive_happy_path() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     contract_instance
@@ -872,6 +875,7 @@ fn test_get_ibc_msg_evm_case() {
         local_asset_info: receiver_asset_info.clone(),
         remote_decimals,
         local_asset_info_decimals: asset_info_decimals,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -899,6 +903,7 @@ fn test_get_ibc_msg_evm_case() {
                 asset_info: receiver_asset_info.clone(),
                 remote_decimals,
                 asset_info_decimals: asset_info_decimals.clone(),
+                is_mint_burn: false,
             },
         }),
         destination_asset_info_on_orai,
@@ -1031,6 +1036,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
         local_asset_info: receiver_asset_info.clone(),
         remote_decimals,
         local_asset_info_decimals: asset_info_decimals,
+        is_mint_burn: None,
     };
 
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
@@ -1063,6 +1069,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
                 asset_info: receiver_asset_info.clone(),
                 remote_decimals,
                 asset_info_decimals,
+                is_mint_burn: false,
             },
         }),
         destination_asset_info_on_orai,
@@ -1501,6 +1508,7 @@ fn test_process_ibc_msg() {
             },
             remote_decimals: 18,
             asset_info_decimals: 6,
+            is_mint_burn: false,
         },
     };
     let local_channel_id = "channel";
@@ -1644,6 +1652,7 @@ fn test_query_pair_mapping_by_asset_info() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -1727,6 +1736,7 @@ fn test_update_cw20_mapping() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -1815,6 +1825,7 @@ fn test_delete_cw20_mapping() {
         local_asset_info: cw20_denom.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -2089,6 +2100,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     let _ = execute(
@@ -2214,6 +2226,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         },
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     execute(
@@ -2325,8 +2338,8 @@ fn test_handle_packet_refund() {
     };
     let mapping_denom = format!("wasm.cosmos2contract/{}/{}", local_channel_id, native_denom);
 
-    let result =
-        handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount).unwrap_err();
+    let result = handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount, false)
+        .unwrap_err();
     assert_eq!(
         result.to_string(),
         "cw_ics20_latest::state::MappingMetadata not found"
@@ -2341,6 +2354,7 @@ fn test_handle_packet_refund() {
         local_asset_info: local_asset_info.clone(),
         remote_decimals: 6,
         local_asset_info_decimals: 6,
+        is_mint_burn: None,
     };
 
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
@@ -2350,7 +2364,7 @@ fn test_handle_packet_refund() {
 
     // now we handle packet failure. should get sub msg
     let result =
-        handle_packet_refund(deps.as_mut().storage, sender, &mapping_denom, amount).unwrap();
+        handle_packet_refund(deps.as_mut().storage, sender, &mapping_denom, amount, false).unwrap();
     assert_eq!(
         result,
         SubMsg::reply_on_error(
@@ -2418,13 +2432,41 @@ fn test_reduce_channel_balance_ibc_receive() {
     let ibc_denom = "foobar";
     let local_receiver = "receiver";
     let mut deps = setup(&[local_channel_id], &[]);
+    let local_asset_info = AssetInfo::NativeToken {
+        denom: "orai".to_string(),
+    };
+
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
+    );
+
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 6,
+        local_asset_info_decimals: 6,
+        is_mint_burn: None,
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
+
     execute(
         deps.as_mut(),
         mock_env(),
         mock_info(mock_env().contract.address.as_str(), &vec![]),
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
             dest_channel_id: local_channel_id.to_string(),
-            ibc_denom: ibc_denom.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
             amount: amount.clone(),
             local_receiver: local_receiver.to_string(),
         },
@@ -2438,7 +2480,7 @@ fn test_reduce_channel_balance_ibc_receive() {
             mock_info("attacker", &vec![]),
             ExecuteMsg::ReduceChannelBalanceIbcReceive {
                 src_channel_id: local_channel_id.to_string(),
-                ibc_denom: ibc_denom.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
                 amount: amount.clone(),
                 local_receiver: local_receiver.to_string(),
             },
@@ -2453,21 +2495,21 @@ fn test_reduce_channel_balance_ibc_receive() {
         mock_info(mock_env().contract.address.as_str(), &vec![]),
         ExecuteMsg::ReduceChannelBalanceIbcReceive {
             src_channel_id: local_channel_id.to_string(),
-            ibc_denom: ibc_denom.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
             amount: amount.clone(),
             local_receiver: local_receiver.to_string(),
         },
     )
     .unwrap();
     let channel_state = CHANNEL_REVERSE_STATE
-        .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
         .unwrap();
     assert_eq!(channel_state.outstanding, Uint128::zero());
     assert_eq!(channel_state.total_sent, Uint128::from(10u128));
     let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
     assert_eq!(reply_args.amount, amount.clone());
     assert_eq!(reply_args.channel, local_channel_id);
-    assert_eq!(reply_args.denom, ibc_denom.to_string());
+    assert_eq!(reply_args.denom, ibc_denom_keys);
     assert_eq!(reply_args.local_receiver, local_receiver.to_string());
 }
 
@@ -2563,6 +2605,7 @@ fn test_get_destination_info_on_orai() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -2615,7 +2658,8 @@ fn test_get_destination_info_on_orai() {
                     contract_addr: Addr::unchecked("cw20:foobar".to_string())
                 },
                 remote_decimals: 18,
-                asset_info_decimals: 18
+                asset_info_decimals: 18,
+                is_mint_burn: false
             }
         })
     );

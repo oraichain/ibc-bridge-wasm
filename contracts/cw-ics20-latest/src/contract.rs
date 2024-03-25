@@ -3,12 +3,14 @@ use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
     IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
+    WasmMsg,
 };
 use cw2::set_contract_version;
-use cw20::{Cw20Coin, Cw20ReceiveMsg};
+use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw20_ics20_msg::converter::ConverterController;
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
+use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
@@ -27,7 +29,7 @@ use crate::state::{
     ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS,
     SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
-use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
+use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
 
 // version info for migration info
@@ -211,6 +213,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
         &ibc_denom,
         remote_amount.clone(),
     )?;
+
     // we need to save the data to update the balances in reply
     let reply_args = ReplyArgs {
         channel: dst_channel_id.clone(),
@@ -253,13 +256,32 @@ pub fn handle_reduce_channel_balance_ibc_receive(
             local_receiver: local_receiver.to_string(),
         },
     )?;
-    Ok(Response::default().add_attributes(vec![
-        ("action", "reduce_channel_balance_ibc_receive"),
-        ("channel_id", src_channel_id.as_str()),
-        ("ibc_denom", ibc_denom.as_str()),
-        ("amount", remote_amount.to_string().as_str()),
-        ("local_receiver", local_receiver.as_str()),
-    ]))
+
+    //  burn cw20 token if the mechanism is mint burn
+
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+    let pair_mapping = ics20_denoms()
+        .load(storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
+    let burn_amount = convert_remote_to_local(
+        remote_amount,
+        pair_mapping.remote_decimals,
+        pair_mapping.asset_info_decimals,
+    )?;
+    let burn_msg = build_burn_cw20_mapping_msg(storage, ibc_denom.clone(), burn_amount)?;
+    if let Some(burn_msg) = burn_msg {
+        cosmos_msgs.push(burn_msg);
+    }
+
+    Ok(Response::default()
+        .add_attributes(vec![
+            ("action", "reduce_channel_balance_ibc_receive"),
+            ("channel_id", src_channel_id.as_str()),
+            ("ibc_denom", ibc_denom.as_str()),
+            ("amount", remote_amount.to_string().as_str()),
+            ("local_receiver", local_receiver.as_str()),
+        ])
+        .add_messages(cosmos_msgs))
 }
 
 pub fn update_config(
@@ -427,10 +449,8 @@ pub fn execute_transfer_back_to_remote_chain(
     let config = CONFIG.load(deps.storage)?;
 
     // should be in form port/channel/denom
-    let mappings = get_mappings_from_asset_info(
-        deps.as_ref().storage,
-        amount.into_asset_info(deps.api)?,
-    )?;
+    let mappings =
+        get_mappings_from_asset_info(deps.as_ref().storage, amount.into_asset_info(deps.api)?)?;
 
     // parse denom & compare with user input. Should not use string.includes() because hacker can fake a port that has the same remote denom to return true
     let mapping = mappings
@@ -540,6 +560,14 @@ pub fn execute_transfer_back_to_remote_chain(
         &msg.local_channel_id,
         timeout.into(),
     )?;
+
+    // build burn msg if the mechanism is mint/burn
+    let burn_msg =
+        build_burn_cw20_mapping_msg(deps.storage, ibc_denom.clone(), fee_data.deducted_amount)?;
+    if let Some(burn_msg) = burn_msg {
+        cosmos_msgs.push(burn_msg);
+    }
+
     Ok(Response::new()
         .add_messages(cosmos_msgs)
         .add_message(ibc_msg)
@@ -548,6 +576,74 @@ pub fn execute_transfer_back_to_remote_chain(
             ("denom", &ibc_denom),
             ("amount", &amount_remote.to_string()),
         ]))
+}
+
+pub fn build_burn_cw20_mapping_msg(
+    storage: &dyn Storage,
+    ibc_denom: String,
+    amount_local: Uint128,
+) -> Result<Option<CosmosMsg>, ContractError> {
+    //  burn cw20 token if the mechanism is mint burn
+    let pair_mapping = ics20_denoms()
+        .load(storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
+
+    if pair_mapping.is_mint_burn {
+        match pair_mapping.asset_info {
+            AssetInfo::NativeToken { denom } => {
+                return Err(ContractError::Std(StdError::generic_err(format!(
+                    "Mapping token must be cw20 token. Got {}",
+                    denom
+                ))));
+            }
+            AssetInfo::Token { contract_addr } => {
+                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Burn {
+                        amount: amount_local,
+                    })?,
+                    funds: vec![],
+                })));
+            }
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn build_mint_cw20_mapping_msg(
+    storage: &dyn Storage,
+    ibc_denom: String,
+    amount_local: Uint128,
+    receiver: String,
+) -> Result<Option<CosmosMsg>, ContractError> {
+    //  mint cw20 token if the mechanism is mint burn
+    let pair_mapping = ics20_denoms()
+        .load(storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
+
+    if pair_mapping.is_mint_burn {
+        match pair_mapping.asset_info {
+            AssetInfo::NativeToken { denom } => {
+                return Err(ContractError::Std(StdError::generic_err(format!(
+                    "Mapping token must be cw20 token. Got {}",
+                    denom
+                ))));
+            }
+            AssetInfo::Token { contract_addr } => {
+                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Mint {
+                        recipient: receiver,
+                        amount: amount_local,
+                    })?,
+                    funds: vec![],
+                })));
+            }
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 /// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
@@ -619,6 +715,7 @@ pub fn execute_update_mapping_pair(
             asset_info: mapping_pair_msg.local_asset_info.clone(),
             remote_decimals: mapping_pair_msg.remote_decimals,
             asset_info_decimals: mapping_pair_msg.local_asset_info_decimals,
+            is_mint_burn: mapping_pair_msg.is_mint_burn.unwrap_or_default(),
         },
     )?;
 

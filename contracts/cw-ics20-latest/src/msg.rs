@@ -98,6 +98,7 @@ pub struct UpdatePairMsg {
     pub local_asset_info: AssetInfo,
     pub remote_decimals: u8,
     pub local_asset_info_decimals: u8,
+    pub is_mint_burn: Option<bool>,
 }
 
 #[cw_serde]
