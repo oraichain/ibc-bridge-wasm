@@ -541,6 +541,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     if fee_data.deducted_amount.is_zero() {
         return Ok(IbcReceiveResponse::new()
             .set_ack(ack_success())
+            .add_messages(cosmos_msgs)
             .add_message(to_send.send_amount(config.token_fee_receiver.into_string(), None))
             .add_attributes(attributes)
             .add_attributes(vec![
