@@ -2348,7 +2348,7 @@ fn test_handle_packet_refund() {
     // update mapping pair so that we can get refunded
     // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
     // add a pair mapping so we can test the happy case evm based happy case
-    let update = UpdatePairMsg {
+    let mut update = UpdatePairMsg {
         local_channel_id: local_channel_id.to_string(),
         denom: native_denom.to_string(),
         local_asset_info: local_asset_info.clone(),
@@ -2371,6 +2371,33 @@ fn test_handle_packet_refund() {
             CosmosMsg::Bank(BankMsg::Send {
                 to_address: sender.to_string(),
                 amount: coins(amount.u128(), "orai")
+            }),
+            REFUND_FAILURE_ID
+        )
+    );
+
+    // case 2: refunds with mint msg
+    let local_asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked("token0"),
+    };
+    update.local_asset_info = local_asset_info;
+    update.is_mint_burn = Some(true);
+    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+    let info = mock_info("gov", &coins(1234567, "ucosm"));
+    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+    let result =
+        handle_packet_refund(deps.as_mut().storage, sender, &mapping_denom, amount, true).unwrap();
+    assert_eq!(
+        result,
+        SubMsg::reply_on_error(
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "token0".to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: sender.to_string(),
+                    amount
+                })
+                .unwrap(),
+                funds: vec![]
             }),
             REFUND_FAILURE_ID
         )
