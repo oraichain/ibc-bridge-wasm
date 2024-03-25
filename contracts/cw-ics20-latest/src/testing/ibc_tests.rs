@@ -567,7 +567,7 @@ fn send_from_remote_to_local_receive_happy_path() {
 
     // TODO: fix test cases. Possibly because we are adding two add_submessages?
     assert_eq!(res.messages.len(), 3); // 3 messages because we also have deduct fee msg and increase channel balance msg
-    match res.messages[0].msg.clone() {
+    match res.messages[1].msg.clone() {
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
             msg,
@@ -590,7 +590,7 @@ fn send_from_remote_to_local_receive_happy_path() {
     assert!(matches!(ack, Ics20Ack::Result(_)));
 
     // query channel state|_|
-    match res.messages[1].msg.clone() {
+    match res.messages[0].msg.clone() {
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
             msg,
