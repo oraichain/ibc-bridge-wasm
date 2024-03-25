@@ -1224,7 +1224,7 @@ pub fn handle_packet_refund(
     packet_sender: &str,
     packet_denom: &str,
     packet_amount: Uint128,
-    maybe_mint_burn: bool,
+    with_mint_burn: bool,
 ) -> Result<SubMsg, ContractError> {
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
     let pair_mapping = ics20_denoms().load(storage, &packet_denom)?;
@@ -1235,7 +1235,8 @@ pub fn handle_packet_refund(
         pair_mapping.asset_info_decimals,
     )?;
 
-    let cosmos_msg = if maybe_mint_burn && pair_mapping.is_mint_burn {
+    // check if mint_burn mechanism, then mint token for packet sender, if not, send from contract
+    let cosmos_msg = if with_mint_burn && pair_mapping.is_mint_burn {
         match pair_mapping.asset_info {
             AssetInfo::NativeToken { denom } => {
                 return Err(ContractError::Std(StdError::generic_err(format!(
@@ -1245,7 +1246,8 @@ pub fn handle_packet_refund(
             }
             AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: contract_addr.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Burn {
+                msg: to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: packet_sender.to_string(),
                     amount: local_amount,
                 })?,
                 funds: vec![],
