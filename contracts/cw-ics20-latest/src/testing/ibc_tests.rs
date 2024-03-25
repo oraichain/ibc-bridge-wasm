@@ -35,7 +35,7 @@ use crate::state::{
     TOKEN_FEE,
 };
 use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20ReceiveMsg};
-use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
+use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
 use crate::contract::{
     build_burn_cw20_mapping_msg, build_mint_cw20_mapping_msg, execute,
@@ -2837,4 +2837,181 @@ fn test_build_burn_cw20_mapping_msg() {
             funds: vec![]
         })),
     );
+}
+
+#[test]
+fn send_from_remote_to_local_receive_with_mint_mechanism() {
+    let mut contract_instance = MockContract::new(
+        WASM_BYTES,
+        Addr::unchecked(CONTRACT),
+        MockInstanceOptions {
+            balances: &[(SENDER, &coins(100_000_000_000, "orai"))],
+            gas_limit: 40_000_000_000_000_000,
+            ..MockInstanceOptions::default()
+        },
+    );
+    let cw20_addr = "orai1lus0f0rhx8s03gdllx2n6vhkmf0536dv57wfge";
+    let relayer = Addr::unchecked("orai12zyu8w93h0q2lcnt50g3fn0w3yqnhy4fvawaqz");
+    let send_channel = "channel-9";
+    let custom_addr = "orai12zyu8w93h0q2lcnt50g3fn0w3yqnhy4fvawaqz";
+    let denom = "uatom0x";
+    let asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked(cw20_addr),
+    };
+    let contract_port = format!("wasm.{}", CONTRACT);
+    let gas_limit = 1234567;
+    let send_amount = Uint128::from(876543210u128 * 1_000_000_000_000);
+    let channels = &["channel-1", "channel-7", send_channel];
+
+    let allow = &[(cw20_addr, gas_limit)];
+
+    let allowlist = allow
+        .iter()
+        .map(|(contract, gas)| AllowMsg {
+            contract: contract.to_string(),
+            gas_limit: Some(*gas),
+        })
+        .collect();
+
+    // instantiate an empty contract
+    let instantiate_msg = InitMsg {
+        default_gas_limit: None,
+        default_timeout: DEFAULT_TIMEOUT,
+        gov_contract: SENDER.to_string(),
+        allowlist,
+        swap_router_contract: "router".to_string(),
+        converter_contract: "converter".to_string(),
+    };
+
+    contract_instance
+        .instantiate(instantiate_msg, SENDER, &[])
+        .unwrap();
+
+    for channel_id in channels {
+        let channel = mock_channel(channel_id);
+        let open_msg = IbcChannelOpenMsg::new_init(channel.clone());
+        contract_instance.ibc_channel_open(open_msg).unwrap();
+        let connect_msg = IbcChannelConnectMsg::new_ack(channel, ICS20_VERSION);
+        contract_instance.ibc_channel_connect(connect_msg).unwrap();
+    }
+
+    contract_instance
+        .with_storage(|storage| {
+            TOKEN_FEE
+                .save(
+                    storage,
+                    denom,
+                    &Ratio {
+                        nominator: 1,
+                        denominator: 10,
+                    },
+                )
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+    let pair = UpdatePairMsg {
+        local_channel_id: send_channel.to_string(),
+        denom: denom.to_string(),
+        local_asset_info: asset_info.clone(),
+        remote_decimals: 18u8,
+        local_asset_info_decimals: 6u8,
+        is_mint_burn: Some(true),
+    };
+
+    contract_instance
+        .execute(ExecuteMsg::UpdateMappingPair(pair), SENDER, &[])
+        .unwrap();
+
+    let data = Ics20Packet {
+        // this is returning a foreign native token, thus denom is <denom>, eg: uatom
+        denom: denom.to_string(),
+        amount: send_amount,
+        sender: SENDER.to_string(),
+        receiver: custom_addr.to_string(),
+        memo: None,
+    };
+    let recv_packet = IbcPacket::new(
+        to_binary(&data).unwrap(),
+        IbcEndpoint {
+            port_id: REMOTE_PORT.to_string(),
+            channel_id: "channel-1234".to_string(),
+        },
+        IbcEndpoint {
+            port_id: contract_port.clone(),
+            channel_id: send_channel.to_string(),
+        },
+        3,
+        Timestamp::from_seconds(1665321069).into(),
+    );
+
+    // we can receive this denom, channel balance should increase
+    let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
+
+    let (res, _gas_used) = contract_instance.ibc_packet_receive(ibc_msg).unwrap();
+
+    assert_eq!(res.messages.len(), 4); // 4 messages because we also have deduct fee msg, increase channel balance msg and mint
+
+    match res.messages[0].msg.clone() {
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg,
+            funds: _,
+        }) => {
+            assert_eq!(contract_addr, CONTRACT); // self-call msg
+            assert_eq!(
+                msg,
+                to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                    dest_channel_id: send_channel.to_string(),
+                    ibc_denom: get_key_ics20_ibc_denom(contract_port.as_str(), send_channel, denom),
+                    amount: send_amount,
+                    local_receiver: custom_addr.to_string(),
+                })
+                .unwrap()
+            );
+        }
+        _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+    }
+
+    match res.messages[1].msg.clone() {
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg,
+            funds: _,
+        }) => {
+            assert_eq!(contract_addr, cw20_addr);
+            assert_eq!(
+                msg,
+                to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: CONTRACT.to_string(),
+                    amount: convert_remote_to_local(send_amount, 18, 6).unwrap()
+                })
+                .unwrap()
+            )
+        }
+        _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+    }
+
+    match res.messages[2].msg.clone() {
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg,
+            funds: _,
+        }) => {
+            assert_eq!(contract_addr, cw20_addr);
+            assert_eq!(
+                msg,
+                to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: SENDER.to_string(),
+                    amount: Uint128::from(87654321u64) // send amount / token fee
+                })
+                .unwrap()
+            );
+        }
+        _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+    }
+
+    let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
+    assert!(matches!(ack, Ics20Ack::Result(_)));
 }
