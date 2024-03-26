@@ -17,8 +17,8 @@ use crate::error::ContractError;
 use crate::ibc::{build_ibc_send_packet, parse_voucher_denom, process_deduct_fee};
 use crate::ibc_hooks::ibc_hooks_receive;
 use crate::msg::{
-    AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse,
-    ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
+    AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse, ConfigResponse,
+    DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
     ListMappingResponse, MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse,
     TransferBackMsg, UpdatePairMsg,
 };
@@ -88,7 +88,7 @@ pub fn execute(
         }
         ExecuteMsg::UpdateMappingPair(msg) => execute_update_mapping_pair(deps, env, info, msg),
         ExecuteMsg::DeleteMappingPair(msg) => execute_delete_mapping_pair(deps, env, info, msg),
-        ExecuteMsg::Allow(allow) => execute_allow(deps, env, info, allow),
+        // ExecuteMsg::Allow(allow) => execute_allow(deps, env, info, allow),
         ExecuteMsg::UpdateConfig {
             default_timeout,
             default_gas_limit,
@@ -268,7 +268,11 @@ pub fn handle_reduce_channel_balance_ibc_receive(
         pair_mapping.remote_decimals,
         pair_mapping.asset_info_decimals,
     )?;
-    let burn_msg = build_burn_cw20_mapping_msg(storage, ibc_denom.clone(), burn_amount)?;
+    let burn_msg = build_burn_cw20_mapping_msg(
+        pair_mapping.is_mint_burn,
+        pair_mapping.asset_info,
+        burn_amount,
+    )?;
     if let Some(burn_msg) = burn_msg {
         cosmos_msgs.push(burn_msg);
     }
@@ -562,8 +566,11 @@ pub fn execute_transfer_back_to_remote_chain(
     )?;
 
     // build burn msg if the mechanism is mint/burn
-    let burn_msg =
-        build_burn_cw20_mapping_msg(deps.storage, ibc_denom.clone(), fee_data.deducted_amount)?;
+    let burn_msg = build_burn_cw20_mapping_msg(
+        mapping.pair_mapping.is_mint_burn,
+        mapping.pair_mapping.asset_info,
+        fee_data.deducted_amount,
+    )?;
     if let Some(burn_msg) = burn_msg {
         cosmos_msgs.push(burn_msg);
     }
@@ -579,17 +586,13 @@ pub fn execute_transfer_back_to_remote_chain(
 }
 
 pub fn build_burn_cw20_mapping_msg(
-    storage: &dyn Storage,
-    ibc_denom: String,
+    is_mint_burn: bool,
+    burn_asset_info: AssetInfo,
     amount_local: Uint128,
 ) -> Result<Option<CosmosMsg>, ContractError> {
     //  burn cw20 token if the mechanism is mint burn
-    let pair_mapping = ics20_denoms()
-        .load(storage, &ibc_denom)
-        .map_err(|_| ContractError::NotOnMappingList {})?;
-
-    if pair_mapping.is_mint_burn {
-        match pair_mapping.asset_info {
+    if is_mint_burn {
+        match burn_asset_info {
             AssetInfo::NativeToken { denom } => {
                 return Err(ContractError::Std(StdError::generic_err(format!(
                     "Mapping token must be cw20 token. Got {}",
@@ -612,18 +615,13 @@ pub fn build_burn_cw20_mapping_msg(
 }
 
 pub fn build_mint_cw20_mapping_msg(
-    storage: &dyn Storage,
-    ibc_denom: String,
+    is_mint_burn: bool,
+    mint_asset_info: AssetInfo,
     amount_local: Uint128,
     receiver: String,
 ) -> Result<Option<CosmosMsg>, ContractError> {
-    //  mint cw20 token if the mechanism is mint burn
-    let pair_mapping = ics20_denoms()
-        .load(storage, &ibc_denom)
-        .map_err(|_| ContractError::NotOnMappingList {})?;
-
-    if pair_mapping.is_mint_burn {
-        match pair_mapping.asset_info {
+    if is_mint_burn {
+        match mint_asset_info {
             AssetInfo::NativeToken { denom } => {
                 return Err(ContractError::Std(StdError::generic_err(format!(
                     "Mapping token must be cw20 token. Got {}",
@@ -646,46 +644,46 @@ pub fn build_mint_cw20_mapping_msg(
     }
 }
 
-/// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
-/// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
-pub fn execute_allow(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    allow: AllowMsg,
-) -> Result<Response, ContractError> {
-    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+// /// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
+// /// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
+// pub fn execute_allow(
+//     deps: DepsMut,
+//     _env: Env,
+//     info: MessageInfo,
+//     allow: AllowMsg,
+// ) -> Result<Response, ContractError> {
+//     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
 
-    let contract = deps.api.addr_validate(&allow.contract)?;
-    let set = AllowInfo {
-        gas_limit: allow.gas_limit,
-    };
-    ALLOW_LIST.update(deps.storage, &contract, |old| {
-        if let Some(old) = old {
-            // we must ensure it increases the limit
-            match (old.gas_limit, set.gas_limit) {
-                (None, Some(_)) => return Err(ContractError::CannotLowerGas),
-                (Some(old), Some(new)) if new < old => return Err(ContractError::CannotLowerGas),
-                _ => {}
-            };
-        }
-        Ok(AllowInfo {
-            gas_limit: allow.gas_limit,
-        })
-    })?;
+//     let contract = deps.api.addr_validate(&allow.contract)?;
+//     let set = AllowInfo {
+//         gas_limit: allow.gas_limit,
+//     };
+//     ALLOW_LIST.update(deps.storage, &contract, |old| {
+//         if let Some(old) = old {
+//             // we must ensure it increases the limit
+//             match (old.gas_limit, set.gas_limit) {
+//                 (None, Some(_)) => return Err(ContractError::CannotLowerGas),
+//                 (Some(old), Some(new)) if new < old => return Err(ContractError::CannotLowerGas),
+//                 _ => {}
+//             };
+//         }
+//         Ok(AllowInfo {
+//             gas_limit: allow.gas_limit,
+//         })
+//     })?;
 
-    let gas = if let Some(gas) = allow.gas_limit {
-        gas.to_string()
-    } else {
-        "None".to_string()
-    };
+//     let gas = if let Some(gas) = allow.gas_limit {
+//         gas.to_string()
+//     } else {
+//         "None".to_string()
+//     };
 
-    let res = Response::new()
-        .add_attribute("action", "allow")
-        .add_attribute("contract", allow.contract)
-        .add_attribute("gas_limit", gas);
-    Ok(res)
-}
+//     let res = Response::new()
+//         .add_attribute("action", "allow")
+//         .add_attribute("contract", allow.contract)
+//         .add_attribute("gas_limit", gas);
+//     Ok(res)
+// }
 
 /// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
 /// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.

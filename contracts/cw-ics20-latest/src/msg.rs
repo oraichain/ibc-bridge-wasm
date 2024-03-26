@@ -50,7 +50,7 @@ pub enum ExecuteMsg {
     UpdateMappingPair(UpdatePairMsg),
     DeleteMappingPair(DeletePairMsg),
     /// This must be called by gov_contract, will allow a new cw20 token to be sent
-    Allow(AllowMsg),
+    // Allow(AllowMsg),
     /// Change the admin (must be called by current admin)
     UpdateConfig {
         admin: Option<String>,

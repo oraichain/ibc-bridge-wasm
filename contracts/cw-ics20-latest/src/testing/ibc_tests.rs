@@ -2715,12 +2715,6 @@ fn test_build_mint_cw20_mapping_msg() {
     let mut deps = setup(&["channel-3", "channel-7"], &[]);
     let ibc_denom = "cosmos";
     let local_channel_id = "channel-3";
-    let ibc_denom_keys = format!(
-        "wasm.{}/{}/{}",
-        mock_env().contract.address.to_string(),
-        local_channel_id,
-        ibc_denom
-    );
     let asset_info = AssetInfo::Token {
         contract_addr: Addr::unchecked("cw20:foobar".to_string()),
     };
@@ -2728,16 +2722,7 @@ fn test_build_mint_cw20_mapping_msg() {
     let amount_local = Uint128::from(10000u128);
     let receiver = "receiver";
 
-    // case 1: failed, not register in mapping lít
-    let res = build_mint_cw20_mapping_msg(
-        &deps.storage,
-        ibc_denom_keys.clone(),
-        amount_local,
-        receiver.to_string(),
-    );
-    assert_eq!(res, Err(ContractError::NotOnMappingList));
-
-    // case 2: on mappinglist, but mapping mechanism is not mint burn
+    // case 1: on mappinglist, but mapping mechanism is not mint burn
     let mut update = UpdatePairMsg {
         local_channel_id: local_channel_id.to_string(),
         denom: ibc_denom.to_string(),
@@ -2750,25 +2735,39 @@ fn test_build_mint_cw20_mapping_msg() {
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
     let res = build_mint_cw20_mapping_msg(
-        &deps.storage,
-        ibc_denom_keys.clone(),
+        false,
+        asset_info.clone(),
         amount_local,
         receiver.to_string(),
     );
     assert_eq!(res, Ok(None));
+
+    // case 2: on mappinglist, is mint burn but asset info is native
+    let err = build_mint_cw20_mapping_msg(
+        true,
+        AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        }
+        .clone(),
+        amount_local,
+        receiver.to_string(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        ContractError::Std(StdError::generic_err(format!(
+            "Mapping token must be cw20 token. Got {}",
+            "orai"
+        )))
+    );
 
     // case 3: got mint msg
     update.is_mint_burn = Some(true);
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let res = build_mint_cw20_mapping_msg(
-        &deps.storage,
-        ibc_denom_keys.clone(),
-        amount_local,
-        receiver.to_string(),
-    )
-    .unwrap();
+    let res =
+        build_mint_cw20_mapping_msg(true, asset_info, amount_local, receiver.to_string()).unwrap();
     assert_eq!(
         res,
         Some(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -2788,23 +2787,13 @@ fn test_build_burn_cw20_mapping_msg() {
     let mut deps = setup(&["channel-3", "channel-7"], &[]);
     let ibc_denom = "cosmos";
     let local_channel_id = "channel-3";
-    let ibc_denom_keys = format!(
-        "wasm.{}/{}/{}",
-        mock_env().contract.address.to_string(),
-        local_channel_id,
-        ibc_denom
-    );
     let asset_info = AssetInfo::Token {
         contract_addr: Addr::unchecked("cw20:foobar".to_string()),
     };
 
     let amount_local = Uint128::from(10000u128);
 
-    // case 1: failed, not register in mapping lít
-    let res = build_burn_cw20_mapping_msg(&deps.storage, ibc_denom_keys.clone(), amount_local);
-    assert_eq!(res, Err(ContractError::NotOnMappingList));
-
-    // case 2: on mappinglist, but mapping mechanism is not mint burn
+    // case 1: on mappinglist, but mapping mechanism is not mint burn
     let mut update = UpdatePairMsg {
         local_channel_id: local_channel_id.to_string(),
         denom: ibc_denom.to_string(),
@@ -2816,16 +2805,33 @@ fn test_build_burn_cw20_mapping_msg() {
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let res = build_burn_cw20_mapping_msg(&deps.storage, ibc_denom_keys.clone(), amount_local);
+    let res = build_burn_cw20_mapping_msg(false, asset_info.clone(), amount_local);
     assert_eq!(res, Ok(None));
+
+    // case 2: on mappinglist, is mint burn but asset info is native
+    let err = build_burn_cw20_mapping_msg(
+        true,
+        AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        }
+        .clone(),
+        amount_local,
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        ContractError::Std(StdError::generic_err(format!(
+            "Mapping token must be cw20 token. Got {}",
+            "orai"
+        )))
+    );
 
     // case 3: got mint msg
     update.is_mint_burn = Some(true);
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let res =
-        build_burn_cw20_mapping_msg(&deps.storage, ibc_denom_keys.clone(), amount_local).unwrap();
+    let res = build_burn_cw20_mapping_msg(true, asset_info.clone(), amount_local).unwrap();
     assert_eq!(
         res,
         Some(CosmosMsg::Wasm(WasmMsg::Execute {

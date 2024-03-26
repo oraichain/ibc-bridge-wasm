@@ -7,10 +7,9 @@ use cosmwasm_std::{
     IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
     IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
     Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
-    Timestamp, Uint128, WasmMsg,
+    Timestamp, Uint128,
 };
 
-use cw20::Cw20ExecuteMsg;
 use cw20_ics20_msg::converter::ConvertType;
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
@@ -466,8 +465,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
     }));
 
     let mint_msg = build_mint_cw20_mapping_msg(
-        storage,
-        ibc_denom.clone(),
+        pair_mapping.is_mint_burn,
+        pair_mapping.asset_info,
         to_send.amount(),
         env.contract.address.to_string(),
     )?;
@@ -1238,29 +1237,25 @@ pub fn handle_packet_refund(
     )?;
 
     // check if mint_burn mechanism, then mint token for packet sender, if not, send from contract
-    let cosmos_msg = if with_mint_burn && pair_mapping.is_mint_burn {
-        match pair_mapping.asset_info {
-            AssetInfo::NativeToken { denom } => {
-                return Err(ContractError::Std(StdError::generic_err(format!(
-                    "Mapping token must be cw20 token. Got {}",
-                    denom
-                ))));
+    let send_amount_msg = Amount::from_parts(
+        parse_asset_info_denom(pair_mapping.asset_info.to_owned()),
+        local_amount,
+    )
+    .send_amount(packet_sender.to_string(), None);
+    let cosmos_msg = match build_mint_cw20_mapping_msg(
+        pair_mapping.is_mint_burn,
+        pair_mapping.asset_info,
+        local_amount,
+        packet_sender.to_string(),
+    )? {
+        Some(cosmos_msg) => {
+            if with_mint_burn {
+                cosmos_msg
+            } else {
+                send_amount_msg
             }
-            AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: contract_addr.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Mint {
-                    recipient: packet_sender.to_string(),
-                    amount: local_amount,
-                })?,
-                funds: vec![],
-            }),
         }
-    } else {
-        let to_send = Amount::from_parts(
-            parse_asset_info_denom(pair_mapping.asset_info),
-            local_amount,
-        );
-        to_send.send_amount(packet_sender.to_string(), None)
+        None => send_amount_msg,
     };
 
     // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
