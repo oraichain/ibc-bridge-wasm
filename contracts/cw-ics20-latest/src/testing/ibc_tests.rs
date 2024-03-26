@@ -35,10 +35,11 @@ use crate::state::{
     TOKEN_FEE,
 };
 use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20ReceiveMsg};
-use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
+use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
 use crate::contract::{
-    execute, handle_override_channel_balance, query, query_channel, query_channel_with_key,
+    build_burn_cw20_mapping_msg, build_mint_cw20_mapping_msg, execute,
+    handle_override_channel_balance, query, query_channel, query_channel_with_key,
 };
 use crate::msg::{
     AllowMsg, ChannelResponse, ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg,
@@ -289,6 +290,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     let _ = execute(
@@ -430,6 +432,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
         },
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     execute(
@@ -528,6 +531,7 @@ fn send_from_remote_to_local_receive_happy_path() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     contract_instance
@@ -563,7 +567,7 @@ fn send_from_remote_to_local_receive_happy_path() {
 
     // TODO: fix test cases. Possibly because we are adding two add_submessages?
     assert_eq!(res.messages.len(), 3); // 3 messages because we also have deduct fee msg and increase channel balance msg
-    match res.messages[0].msg.clone() {
+    match res.messages[1].msg.clone() {
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
             msg,
@@ -586,7 +590,7 @@ fn send_from_remote_to_local_receive_happy_path() {
     assert!(matches!(ack, Ics20Ack::Result(_)));
 
     // query channel state|_|
-    match res.messages[1].msg.clone() {
+    match res.messages[0].msg.clone() {
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
             msg,
@@ -872,6 +876,7 @@ fn test_get_ibc_msg_evm_case() {
         local_asset_info: receiver_asset_info.clone(),
         remote_decimals,
         local_asset_info_decimals: asset_info_decimals,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -899,6 +904,7 @@ fn test_get_ibc_msg_evm_case() {
                 asset_info: receiver_asset_info.clone(),
                 remote_decimals,
                 asset_info_decimals: asset_info_decimals.clone(),
+                is_mint_burn: false,
             },
         }),
         destination_asset_info_on_orai,
@@ -1031,6 +1037,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
         local_asset_info: receiver_asset_info.clone(),
         remote_decimals,
         local_asset_info_decimals: asset_info_decimals,
+        is_mint_burn: None,
     };
 
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
@@ -1063,6 +1070,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
                 asset_info: receiver_asset_info.clone(),
                 remote_decimals,
                 asset_info_decimals,
+                is_mint_burn: false,
             },
         }),
         destination_asset_info_on_orai,
@@ -1501,6 +1509,7 @@ fn test_process_ibc_msg() {
             },
             remote_decimals: 18,
             asset_info_decimals: 6,
+            is_mint_burn: false,
         },
     };
     let local_channel_id = "channel";
@@ -1644,6 +1653,7 @@ fn test_query_pair_mapping_by_asset_info() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -1727,6 +1737,7 @@ fn test_update_cw20_mapping() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -1815,6 +1826,7 @@ fn test_delete_cw20_mapping() {
         local_asset_info: cw20_denom.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -2089,6 +2101,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     let _ = execute(
@@ -2214,6 +2227,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         },
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     execute(
@@ -2325,8 +2339,8 @@ fn test_handle_packet_refund() {
     };
     let mapping_denom = format!("wasm.cosmos2contract/{}/{}", local_channel_id, native_denom);
 
-    let result =
-        handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount).unwrap_err();
+    let result = handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount, false)
+        .unwrap_err();
     assert_eq!(
         result.to_string(),
         "cw_ics20_latest::state::MappingMetadata not found"
@@ -2335,12 +2349,13 @@ fn test_handle_packet_refund() {
     // update mapping pair so that we can get refunded
     // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
     // add a pair mapping so we can test the happy case evm based happy case
-    let update = UpdatePairMsg {
+    let mut update = UpdatePairMsg {
         local_channel_id: local_channel_id.to_string(),
         denom: native_denom.to_string(),
         local_asset_info: local_asset_info.clone(),
         remote_decimals: 6,
         local_asset_info_decimals: 6,
+        is_mint_burn: None,
     };
 
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
@@ -2350,13 +2365,40 @@ fn test_handle_packet_refund() {
 
     // now we handle packet failure. should get sub msg
     let result =
-        handle_packet_refund(deps.as_mut().storage, sender, &mapping_denom, amount).unwrap();
+        handle_packet_refund(deps.as_mut().storage, sender, &mapping_denom, amount, false).unwrap();
     assert_eq!(
         result,
         SubMsg::reply_on_error(
             CosmosMsg::Bank(BankMsg::Send {
                 to_address: sender.to_string(),
                 amount: coins(amount.u128(), "orai")
+            }),
+            REFUND_FAILURE_ID
+        )
+    );
+
+    // case 2: refunds with mint msg
+    let local_asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked("token0"),
+    };
+    update.local_asset_info = local_asset_info;
+    update.is_mint_burn = Some(true);
+    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+    let info = mock_info("gov", &coins(1234567, "ucosm"));
+    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+    let result =
+        handle_packet_refund(deps.as_mut().storage, sender, &mapping_denom, amount, true).unwrap();
+    assert_eq!(
+        result,
+        SubMsg::reply_on_error(
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "token0".to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: sender.to_string(),
+                    amount
+                })
+                .unwrap(),
+                funds: vec![]
             }),
             REFUND_FAILURE_ID
         )
@@ -2371,6 +2413,33 @@ fn test_increase_channel_balance_ibc_receive() {
     let local_receiver = "receiver";
     let mut deps = setup(&[local_channel_id], &[]);
 
+    let local_asset_info = AssetInfo::NativeToken {
+        denom: "orai".to_string(),
+    };
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
+    );
+
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 6,
+        local_asset_info_decimals: 6,
+        is_mint_burn: None,
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
+
     assert_eq!(
         execute(
             deps.as_mut(),
@@ -2378,7 +2447,7 @@ fn test_increase_channel_balance_ibc_receive() {
             mock_info("attacker", &vec![]),
             ExecuteMsg::IncreaseChannelBalanceIbcReceive {
                 dest_channel_id: local_channel_id.to_string(),
-                ibc_denom: ibc_denom.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
                 amount: amount.clone(),
                 local_receiver: local_receiver.to_string(),
             },
@@ -2393,21 +2462,21 @@ fn test_increase_channel_balance_ibc_receive() {
         mock_info(mock_env().contract.address.as_str(), &vec![]),
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
             dest_channel_id: local_channel_id.to_string(),
-            ibc_denom: ibc_denom.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
             amount: amount.clone(),
             local_receiver: local_receiver.to_string(),
         },
     )
     .unwrap();
     let channel_state = CHANNEL_REVERSE_STATE
-        .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
         .unwrap();
     assert_eq!(channel_state.outstanding, amount.clone());
     assert_eq!(channel_state.total_sent, amount.clone());
     let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
     assert_eq!(reply_args.amount, amount.clone());
     assert_eq!(reply_args.channel, local_channel_id);
-    assert_eq!(reply_args.denom, ibc_denom.to_string());
+    assert_eq!(reply_args.denom, ibc_denom_keys.to_string());
     assert_eq!(reply_args.local_receiver, local_receiver.to_string());
 }
 
@@ -2418,13 +2487,41 @@ fn test_reduce_channel_balance_ibc_receive() {
     let ibc_denom = "foobar";
     let local_receiver = "receiver";
     let mut deps = setup(&[local_channel_id], &[]);
+    let local_asset_info = AssetInfo::NativeToken {
+        denom: "orai".to_string(),
+    };
+
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
+    );
+
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 6,
+        local_asset_info_decimals: 6,
+        is_mint_burn: None,
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
+
     execute(
         deps.as_mut(),
         mock_env(),
         mock_info(mock_env().contract.address.as_str(), &vec![]),
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
             dest_channel_id: local_channel_id.to_string(),
-            ibc_denom: ibc_denom.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
             amount: amount.clone(),
             local_receiver: local_receiver.to_string(),
         },
@@ -2438,7 +2535,7 @@ fn test_reduce_channel_balance_ibc_receive() {
             mock_info("attacker", &vec![]),
             ExecuteMsg::ReduceChannelBalanceIbcReceive {
                 src_channel_id: local_channel_id.to_string(),
-                ibc_denom: ibc_denom.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
                 amount: amount.clone(),
                 local_receiver: local_receiver.to_string(),
             },
@@ -2453,21 +2550,21 @@ fn test_reduce_channel_balance_ibc_receive() {
         mock_info(mock_env().contract.address.as_str(), &vec![]),
         ExecuteMsg::ReduceChannelBalanceIbcReceive {
             src_channel_id: local_channel_id.to_string(),
-            ibc_denom: ibc_denom.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
             amount: amount.clone(),
             local_receiver: local_receiver.to_string(),
         },
     )
     .unwrap();
     let channel_state = CHANNEL_REVERSE_STATE
-        .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
         .unwrap();
     assert_eq!(channel_state.outstanding, Uint128::zero());
     assert_eq!(channel_state.total_sent, Uint128::from(10u128));
     let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
     assert_eq!(reply_args.amount, amount.clone());
     assert_eq!(reply_args.channel, local_channel_id);
-    assert_eq!(reply_args.denom, ibc_denom.to_string());
+    assert_eq!(reply_args.denom, ibc_denom_keys);
     assert_eq!(reply_args.local_receiver, local_receiver.to_string());
 }
 
@@ -2563,6 +2660,7 @@ fn test_get_destination_info_on_orai() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18,
         local_asset_info_decimals: 18,
+        is_mint_burn: None,
     };
 
     // works with proper funds
@@ -2615,7 +2713,8 @@ fn test_get_destination_info_on_orai() {
                     contract_addr: Addr::unchecked("cw20:foobar".to_string())
                 },
                 remote_decimals: 18,
-                asset_info_decimals: 18
+                asset_info_decimals: 18,
+                is_mint_burn: false
             }
         })
     );
@@ -2636,4 +2735,345 @@ fn test_get_destination_info_on_orai() {
         }
     );
     assert_eq!(destination_info.1, None);
+}
+
+#[test]
+fn test_build_mint_cw20_mapping_msg() {
+    let mut deps = setup(&["channel-3", "channel-7"], &[]);
+    let ibc_denom = "cosmos";
+    let local_channel_id = "channel-3";
+    let asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked("cw20:foobar".to_string()),
+    };
+
+    let amount_local = Uint128::from(10000u128);
+    let receiver = "receiver";
+
+    // case 1: on mappinglist, but mapping mechanism is not mint burn
+    let mut update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: asset_info.clone(),
+        remote_decimals: 18,
+        local_asset_info_decimals: 18,
+        is_mint_burn: None,
+    };
+    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+    let info = mock_info("gov", &coins(1234567, "ucosm"));
+    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+    let res = build_mint_cw20_mapping_msg(
+        false,
+        asset_info.clone(),
+        amount_local,
+        receiver.to_string(),
+    );
+    assert_eq!(res, Ok(None));
+
+    // case 2: on mappinglist, is mint burn but asset info is native
+    let err = build_mint_cw20_mapping_msg(
+        true,
+        AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        }
+        .clone(),
+        amount_local,
+        receiver.to_string(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        ContractError::Std(StdError::generic_err(format!(
+            "Mapping token must be cw20 token. Got {}",
+            "orai"
+        )))
+    );
+
+    // case 3: got mint msg
+    update.is_mint_burn = Some(true);
+    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+    let info = mock_info("gov", &coins(1234567, "ucosm"));
+    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+    let res =
+        build_mint_cw20_mapping_msg(true, asset_info, amount_local, receiver.to_string()).unwrap();
+    assert_eq!(
+        res,
+        Some(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: "cw20:foobar".to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Mint {
+                recipient: receiver.to_string(),
+                amount: amount_local
+            })
+            .unwrap(),
+            funds: vec![]
+        })),
+    );
+}
+
+#[test]
+fn test_build_burn_cw20_mapping_msg() {
+    let mut deps = setup(&["channel-3", "channel-7"], &[]);
+    let ibc_denom = "cosmos";
+    let local_channel_id = "channel-3";
+    let asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked("cw20:foobar".to_string()),
+    };
+
+    let amount_local = Uint128::from(10000u128);
+
+    // case 1: on mappinglist, but mapping mechanism is not mint burn
+    let mut update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: asset_info.clone(),
+        remote_decimals: 18,
+        local_asset_info_decimals: 18,
+        is_mint_burn: None,
+    };
+    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+    let info = mock_info("gov", &coins(1234567, "ucosm"));
+    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+    let res = build_burn_cw20_mapping_msg(false, asset_info.clone(), amount_local);
+    assert_eq!(res, Ok(None));
+
+    // case 2: on mappinglist, is mint burn but asset info is native
+    let err = build_burn_cw20_mapping_msg(
+        true,
+        AssetInfo::NativeToken {
+            denom: "orai".to_string(),
+        }
+        .clone(),
+        amount_local,
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        ContractError::Std(StdError::generic_err(format!(
+            "Mapping token must be cw20 token. Got {}",
+            "orai"
+        )))
+    );
+
+    // case 3: got mint msg
+    update.is_mint_burn = Some(true);
+    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
+    let info = mock_info("gov", &coins(1234567, "ucosm"));
+    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+    let res = build_burn_cw20_mapping_msg(true, asset_info.clone(), amount_local).unwrap();
+    assert_eq!(
+        res,
+        Some(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: "cw20:foobar".to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Burn {
+                amount: amount_local
+            })
+            .unwrap(),
+            funds: vec![]
+        })),
+    );
+}
+
+#[test]
+fn test_increase_channel_balance_ibc_receive_with_mint_burn() {
+    let local_channel_id = "channel-0";
+    let amount = Uint128::from(1_000_000_000_000_000_000u128);
+    let ibc_denom = "foobar";
+    let local_receiver = "receiver";
+    let mut deps = setup(&[local_channel_id], &[]);
+    let cw20_addr = "cw20";
+
+    let local_asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked(cw20_addr),
+    };
+
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
+    );
+
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 18,
+        local_asset_info_decimals: 6,
+        is_mint_burn: Some(true),
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
+
+    assert_eq!(
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("attacker", &vec![]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap_err(),
+        ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+    );
+
+    let res = execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info(mock_env().contract.address.as_str(), &vec![]),
+        ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id: local_channel_id.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
+            amount: amount.clone(),
+            local_receiver: local_receiver.to_string(),
+        },
+    )
+    .unwrap();
+
+    match res.messages[0].msg.clone() {
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg,
+            funds: _,
+        }) => {
+            assert_eq!(contract_addr, cw20_addr);
+            assert_eq!(
+                msg,
+                to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: mock_env().contract.address.to_string(),
+                    amount: convert_remote_to_local(amount, 18, 6).unwrap()
+                })
+                .unwrap()
+            )
+        }
+        _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+    }
+
+    let channel_state = CHANNEL_REVERSE_STATE
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
+        .unwrap();
+    assert_eq!(channel_state.outstanding, amount.clone());
+    assert_eq!(channel_state.total_sent, amount.clone());
+    let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+    assert_eq!(reply_args.amount, amount.clone());
+    assert_eq!(reply_args.channel, local_channel_id);
+    assert_eq!(reply_args.denom, ibc_denom_keys.to_string());
+    assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+}
+
+#[test]
+fn test_reduce_channel_balance_ibc_receive_with_mint_burn() {
+    let local_channel_id = "channel-0";
+    let amount = Uint128::from(1_000_000_000_000_000_000u128);
+    let ibc_denom = "foobar";
+    let local_receiver = "receiver";
+    let mut deps = setup(&[local_channel_id], &[]);
+    let cw20_addr = "cw20";
+
+    let local_asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked(cw20_addr),
+    };
+
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
+    );
+
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 18,
+        local_asset_info_decimals: 6,
+        is_mint_burn: Some(true),
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
+
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info(mock_env().contract.address.as_str(), &vec![]),
+        ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id: local_channel_id.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
+            amount: amount.clone(),
+            local_receiver: local_receiver.to_string(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("attacker", &vec![]),
+            ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                src_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap_err(),
+        ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+    );
+
+    let res = execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info(mock_env().contract.address.as_str(), &vec![]),
+        ExecuteMsg::ReduceChannelBalanceIbcReceive {
+            src_channel_id: local_channel_id.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
+            amount: amount.clone(),
+            local_receiver: local_receiver.to_string(),
+        },
+    )
+    .unwrap();
+
+    match res.messages[0].msg.clone() {
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg,
+            funds: _,
+        }) => {
+            assert_eq!(contract_addr, cw20_addr);
+            assert_eq!(
+                msg,
+                to_binary(&Cw20ExecuteMsg::Burn {
+                    amount: convert_remote_to_local(amount, 18, 6).unwrap()
+                })
+                .unwrap()
+            )
+        }
+        _ => panic!("Unexpected return message: {:?}", res.messages[0]),
+    }
+
+    let channel_state = CHANNEL_REVERSE_STATE
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
+        .unwrap();
+    assert_eq!(channel_state.outstanding, Uint128::zero());
+    assert_eq!(channel_state.total_sent, Uint128::from(amount));
+    let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+    assert_eq!(reply_args.amount, amount.clone());
+    assert_eq!(reply_args.channel, local_channel_id);
+    assert_eq!(reply_args.denom, ibc_denom_keys);
+    assert_eq!(reply_args.local_receiver, local_receiver.to_string());
 }

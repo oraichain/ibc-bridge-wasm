@@ -134,6 +134,8 @@ pub struct MappingMetadata {
     pub asset_info: AssetInfo,
     pub remote_decimals: u8,
     pub asset_info_decimals: u8,
+    #[serde(default)]
+    pub is_mint_burn: bool,
 }
 
 #[cw_serde]
