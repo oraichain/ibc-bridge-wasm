@@ -2413,6 +2413,33 @@ fn test_increase_channel_balance_ibc_receive() {
     let local_receiver = "receiver";
     let mut deps = setup(&[local_channel_id], &[]);
 
+    let local_asset_info = AssetInfo::NativeToken {
+        denom: "orai".to_string(),
+    };
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
+    );
+
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 6,
+        local_asset_info_decimals: 6,
+        is_mint_burn: None,
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
+
     assert_eq!(
         execute(
             deps.as_mut(),
@@ -2420,7 +2447,7 @@ fn test_increase_channel_balance_ibc_receive() {
             mock_info("attacker", &vec![]),
             ExecuteMsg::IncreaseChannelBalanceIbcReceive {
                 dest_channel_id: local_channel_id.to_string(),
-                ibc_denom: ibc_denom.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
                 amount: amount.clone(),
                 local_receiver: local_receiver.to_string(),
             },
@@ -2435,21 +2462,21 @@ fn test_increase_channel_balance_ibc_receive() {
         mock_info(mock_env().contract.address.as_str(), &vec![]),
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
             dest_channel_id: local_channel_id.to_string(),
-            ibc_denom: ibc_denom.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
             amount: amount.clone(),
             local_receiver: local_receiver.to_string(),
         },
     )
     .unwrap();
     let channel_state = CHANNEL_REVERSE_STATE
-        .load(deps.as_ref().storage, (local_channel_id, ibc_denom))
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
         .unwrap();
     assert_eq!(channel_state.outstanding, amount.clone());
     assert_eq!(channel_state.total_sent, amount.clone());
     let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
     assert_eq!(reply_args.amount, amount.clone());
     assert_eq!(reply_args.channel, local_channel_id);
-    assert_eq!(reply_args.denom, ibc_denom.to_string());
+    assert_eq!(reply_args.denom, ibc_denom_keys.to_string());
     assert_eq!(reply_args.local_receiver, local_receiver.to_string());
 }
 
@@ -2846,141 +2873,72 @@ fn test_build_burn_cw20_mapping_msg() {
 }
 
 #[test]
-fn send_from_remote_to_local_receive_with_mint_mechanism() {
-    let mut contract_instance = MockContract::new(
-        WASM_BYTES,
-        Addr::unchecked(CONTRACT),
-        MockInstanceOptions {
-            balances: &[(SENDER, &coins(100_000_000_000, "orai"))],
-            gas_limit: 40_000_000_000_000_000,
-            ..MockInstanceOptions::default()
-        },
-    );
-    let cw20_addr = "orai1lus0f0rhx8s03gdllx2n6vhkmf0536dv57wfge";
-    let relayer = Addr::unchecked("orai12zyu8w93h0q2lcnt50g3fn0w3yqnhy4fvawaqz");
-    let send_channel = "channel-9";
-    let custom_addr = "orai12zyu8w93h0q2lcnt50g3fn0w3yqnhy4fvawaqz";
-    let denom = "uatom0x";
-    let asset_info = AssetInfo::Token {
+fn test_increase_channel_balance_ibc_receive_with_mint_burn() {
+    let local_channel_id = "channel-0";
+    let amount = Uint128::from(1_000_000_000_000_000_000u128);
+    let ibc_denom = "foobar";
+    let local_receiver = "receiver";
+    let mut deps = setup(&[local_channel_id], &[]);
+    let cw20_addr = "cw20";
+
+    let local_asset_info = AssetInfo::Token {
         contract_addr: Addr::unchecked(cw20_addr),
     };
-    let contract_port = format!("wasm.{}", CONTRACT);
-    let gas_limit = 1234567;
-    let send_amount = Uint128::from(876543210u128 * 1_000_000_000_000);
-    let channels = &["channel-1", "channel-7", send_channel];
 
-    let allow = &[(cw20_addr, gas_limit)];
-
-    let allowlist = allow
-        .iter()
-        .map(|(contract, gas)| AllowMsg {
-            contract: contract.to_string(),
-            gas_limit: Some(*gas),
-        })
-        .collect();
-
-    // instantiate an empty contract
-    let instantiate_msg = InitMsg {
-        default_gas_limit: None,
-        default_timeout: DEFAULT_TIMEOUT,
-        gov_contract: SENDER.to_string(),
-        allowlist,
-        swap_router_contract: "router".to_string(),
-        converter_contract: "converter".to_string(),
-    };
-
-    contract_instance
-        .instantiate(instantiate_msg, SENDER, &[])
-        .unwrap();
-
-    for channel_id in channels {
-        let channel = mock_channel(channel_id);
-        let open_msg = IbcChannelOpenMsg::new_init(channel.clone());
-        contract_instance.ibc_channel_open(open_msg).unwrap();
-        let connect_msg = IbcChannelConnectMsg::new_ack(channel, ICS20_VERSION);
-        contract_instance.ibc_channel_connect(connect_msg).unwrap();
-    }
-
-    contract_instance
-        .with_storage(|storage| {
-            TOKEN_FEE
-                .save(
-                    storage,
-                    denom,
-                    &Ratio {
-                        nominator: 1,
-                        denominator: 10,
-                    },
-                )
-                .unwrap();
-            Ok(())
-        })
-        .unwrap();
-
-    let pair = UpdatePairMsg {
-        local_channel_id: send_channel.to_string(),
-        denom: denom.to_string(),
-        local_asset_info: asset_info.clone(),
-        remote_decimals: 18u8,
-        local_asset_info_decimals: 6u8,
-        is_mint_burn: Some(true),
-    };
-
-    contract_instance
-        .execute(ExecuteMsg::UpdateMappingPair(pair), SENDER, &[])
-        .unwrap();
-
-    let data = Ics20Packet {
-        // this is returning a foreign native token, thus denom is <denom>, eg: uatom
-        denom: denom.to_string(),
-        amount: send_amount,
-        sender: SENDER.to_string(),
-        receiver: custom_addr.to_string(),
-        memo: None,
-    };
-    let recv_packet = IbcPacket::new(
-        to_binary(&data).unwrap(),
-        IbcEndpoint {
-            port_id: REMOTE_PORT.to_string(),
-            channel_id: "channel-1234".to_string(),
-        },
-        IbcEndpoint {
-            port_id: contract_port.clone(),
-            channel_id: send_channel.to_string(),
-        },
-        3,
-        Timestamp::from_seconds(1665321069).into(),
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
     );
 
-    // we can receive this denom, channel balance should increase
-    let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 18,
+        local_asset_info_decimals: 6,
+        is_mint_burn: Some(true),
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
 
-    let (res, _gas_used) = contract_instance.ibc_packet_receive(ibc_msg).unwrap();
+    assert_eq!(
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("attacker", &vec![]),
+            ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap_err(),
+        ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+    );
 
-    assert_eq!(res.messages.len(), 4); // 4 messages because we also have deduct fee msg, increase channel balance msg and mint
+    let res = execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info(mock_env().contract.address.as_str(), &vec![]),
+        ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id: local_channel_id.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
+            amount: amount.clone(),
+            local_receiver: local_receiver.to_string(),
+        },
+    )
+    .unwrap();
 
     match res.messages[0].msg.clone() {
-        CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr,
-            msg,
-            funds: _,
-        }) => {
-            assert_eq!(contract_addr, CONTRACT); // self-call msg
-            assert_eq!(
-                msg,
-                to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
-                    dest_channel_id: send_channel.to_string(),
-                    ibc_denom: get_key_ics20_ibc_denom(contract_port.as_str(), send_channel, denom),
-                    amount: send_amount,
-                    local_receiver: custom_addr.to_string(),
-                })
-                .unwrap()
-            );
-        }
-        _ => panic!("Unexpected return message: {:?}", res.messages[0]),
-    }
-
-    match res.messages[1].msg.clone() {
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
             msg,
@@ -2990,8 +2948,8 @@ fn send_from_remote_to_local_receive_with_mint_mechanism() {
             assert_eq!(
                 msg,
                 to_binary(&Cw20ExecuteMsg::Mint {
-                    recipient: CONTRACT.to_string(),
-                    amount: convert_remote_to_local(send_amount, 18, 6).unwrap()
+                    recipient: mock_env().contract.address.to_string(),
+                    amount: convert_remote_to_local(amount, 18, 6).unwrap()
                 })
                 .unwrap()
             )
@@ -2999,7 +2957,98 @@ fn send_from_remote_to_local_receive_with_mint_mechanism() {
         _ => panic!("Unexpected return message: {:?}", res.messages[0]),
     }
 
-    match res.messages[2].msg.clone() {
+    let channel_state = CHANNEL_REVERSE_STATE
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
+        .unwrap();
+    assert_eq!(channel_state.outstanding, amount.clone());
+    assert_eq!(channel_state.total_sent, amount.clone());
+    let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+    assert_eq!(reply_args.amount, amount.clone());
+    assert_eq!(reply_args.channel, local_channel_id);
+    assert_eq!(reply_args.denom, ibc_denom_keys.to_string());
+    assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+}
+
+#[test]
+fn test_reduce_channel_balance_ibc_receive_with_mint_burn() {
+    let local_channel_id = "channel-0";
+    let amount = Uint128::from(1_000_000_000_000_000_000u128);
+    let ibc_denom = "foobar";
+    let local_receiver = "receiver";
+    let mut deps = setup(&[local_channel_id], &[]);
+    let cw20_addr = "cw20";
+
+    let local_asset_info = AssetInfo::Token {
+        contract_addr: Addr::unchecked(cw20_addr),
+    };
+
+    let ibc_denom_keys = format!(
+        "wasm.{}/{}/{}",
+        mock_env().contract.address.to_string(),
+        local_channel_id,
+        ibc_denom
+    );
+
+    // register mapping
+    let update = UpdatePairMsg {
+        local_channel_id: local_channel_id.to_string(),
+        denom: ibc_denom.to_string(),
+        local_asset_info: local_asset_info.clone(),
+        remote_decimals: 18,
+        local_asset_info_decimals: 6,
+        is_mint_burn: Some(true),
+    };
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("gov", &vec![]),
+        ExecuteMsg::UpdateMappingPair(update),
+    )
+    .unwrap();
+
+    execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info(mock_env().contract.address.as_str(), &vec![]),
+        ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id: local_channel_id.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
+            amount: amount.clone(),
+            local_receiver: local_receiver.to_string(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("attacker", &vec![]),
+            ExecuteMsg::ReduceChannelBalanceIbcReceive {
+                src_channel_id: local_channel_id.to_string(),
+                ibc_denom: ibc_denom_keys.to_string(),
+                amount: amount.clone(),
+                local_receiver: local_receiver.to_string(),
+            },
+        )
+        .unwrap_err(),
+        ContractError::Std(StdError::generic_err("Caller is not the contract itself!"))
+    );
+
+    let res = execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info(mock_env().contract.address.as_str(), &vec![]),
+        ExecuteMsg::ReduceChannelBalanceIbcReceive {
+            src_channel_id: local_channel_id.to_string(),
+            ibc_denom: ibc_denom_keys.to_string(),
+            amount: amount.clone(),
+            local_receiver: local_receiver.to_string(),
+        },
+    )
+    .unwrap();
+
+    match res.messages[0].msg.clone() {
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
             msg,
@@ -3008,16 +3057,23 @@ fn send_from_remote_to_local_receive_with_mint_mechanism() {
             assert_eq!(contract_addr, cw20_addr);
             assert_eq!(
                 msg,
-                to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: SENDER.to_string(),
-                    amount: Uint128::from(87654321u64) // send amount / token fee
+                to_binary(&Cw20ExecuteMsg::Burn {
+                    amount: convert_remote_to_local(amount, 18, 6).unwrap()
                 })
                 .unwrap()
-            );
+            )
         }
         _ => panic!("Unexpected return message: {:?}", res.messages[0]),
     }
 
-    let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
-    assert!(matches!(ack, Ics20Ack::Result(_)));
+    let channel_state = CHANNEL_REVERSE_STATE
+        .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
+        .unwrap();
+    assert_eq!(channel_state.outstanding, Uint128::zero());
+    assert_eq!(channel_state.total_sent, Uint128::from(amount));
+    let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
+    assert_eq!(reply_args.amount, amount.clone());
+    assert_eq!(reply_args.channel, local_channel_id);
+    assert_eq!(reply_args.denom, ibc_denom_keys);
+    assert_eq!(reply_args.local_receiver, local_receiver.to_string());
 }

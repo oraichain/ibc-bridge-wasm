@@ -205,7 +205,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
     remote_amount: Uint128,
     local_receiver: String,
 ) -> Result<Response, ContractError> {
-    is_caller_contract(caller, contract_addr)?;
+    is_caller_contract(caller, contract_addr.clone())?;
     // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
     increase_channel_balance(
         deps.storage,
@@ -213,6 +213,27 @@ pub fn handle_increase_channel_balance_ibc_receive(
         &ibc_denom,
         remote_amount.clone(),
     )?;
+
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+    let pair_mapping = ics20_denoms()
+        .load(deps.storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
+
+    let mint_amount = convert_remote_to_local(
+        remote_amount,
+        pair_mapping.remote_decimals,
+        pair_mapping.asset_info_decimals,
+    )?;
+    let mint_msg = build_mint_cw20_mapping_msg(
+        pair_mapping.is_mint_burn,
+        pair_mapping.asset_info,
+        mint_amount,
+        contract_addr.to_string(),
+    )?;
+
+    if let Some(mint_msg) = mint_msg {
+        cosmos_msgs.push(mint_msg);
+    }
 
     // we need to save the data to update the balances in reply
     let reply_args = ReplyArgs {
@@ -222,13 +243,15 @@ pub fn handle_increase_channel_balance_ibc_receive(
         local_receiver: local_receiver.clone(),
     };
     REPLY_ARGS.save(deps.storage, &reply_args)?;
-    Ok(Response::default().add_attributes(vec![
-        ("action", "increase_channel_balance_ibc_receive"),
-        ("channel_id", dst_channel_id.as_str()),
-        ("ibc_denom", ibc_denom.as_str()),
-        ("amount", remote_amount.to_string().as_str()),
-        ("local_receiver", local_receiver.as_str()),
-    ]))
+    Ok(Response::default()
+        .add_attributes(vec![
+            ("action", "increase_channel_balance_ibc_receive"),
+            ("channel_id", dst_channel_id.as_str()),
+            ("ibc_denom", ibc_denom.as_str()),
+            ("amount", remote_amount.to_string().as_str()),
+            ("local_receiver", local_receiver.as_str()),
+        ])
+        .add_messages(cosmos_msgs))
 }
 
 pub fn handle_reduce_channel_balance_ibc_receive(

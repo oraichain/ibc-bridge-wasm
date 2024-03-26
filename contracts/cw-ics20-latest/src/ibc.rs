@@ -464,17 +464,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         funds: vec![],
     }));
 
-    let mint_msg = build_mint_cw20_mapping_msg(
-        pair_mapping.is_mint_burn,
-        pair_mapping.asset_info,
-        to_send.amount(),
-        env.contract.address.to_string(),
-    )?;
-
-    if let Some(mint_msg) = mint_msg {
-        cosmos_msgs.push(mint_msg);
-    }
-
     let mut fee_data = process_deduct_fee(
         storage,
         querier,
