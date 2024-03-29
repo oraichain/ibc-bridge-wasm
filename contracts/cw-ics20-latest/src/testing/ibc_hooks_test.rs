@@ -102,6 +102,7 @@ fn test_ibc_hooks_receive() {
         local_asset_info: asset_info.clone(),
         remote_decimals: 18u8,
         local_asset_info_decimals: 18u8,
+        is_mint_burn: None,
     };
 
     contract_instance

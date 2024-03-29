@@ -3,20 +3,22 @@ use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
     IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
+    WasmMsg,
 };
 use cw2::set_contract_version;
-use cw20::{Cw20Coin, Cw20ReceiveMsg};
+use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw20_ics20_msg::converter::ConverterController;
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
+use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
 
 use crate::error::ContractError;
 use crate::ibc::{build_ibc_send_packet, parse_voucher_denom, process_deduct_fee};
 use crate::ibc_hooks::ibc_hooks_receive;
 use crate::msg::{
-    AllowMsg, AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse,
-    ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
+    AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse, ConfigResponse,
+    DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
     ListMappingResponse, MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse,
     TransferBackMsg, UpdatePairMsg,
 };
@@ -27,7 +29,7 @@ use crate::state::{
     ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS,
     SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
-use cw20_ics20_msg::amount::{convert_local_to_remote, Amount};
+use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
 
 // version info for migration info
@@ -86,7 +88,7 @@ pub fn execute(
         }
         ExecuteMsg::UpdateMappingPair(msg) => execute_update_mapping_pair(deps, env, info, msg),
         ExecuteMsg::DeleteMappingPair(msg) => execute_delete_mapping_pair(deps, env, info, msg),
-        ExecuteMsg::Allow(allow) => execute_allow(deps, env, info, allow),
+        // ExecuteMsg::Allow(allow) => execute_allow(deps, env, info, allow),
         ExecuteMsg::UpdateConfig {
             default_timeout,
             default_gas_limit,
@@ -203,7 +205,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
     remote_amount: Uint128,
     local_receiver: String,
 ) -> Result<Response, ContractError> {
-    is_caller_contract(caller, contract_addr)?;
+    is_caller_contract(caller, contract_addr.clone())?;
     // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
     increase_channel_balance(
         deps.storage,
@@ -211,6 +213,28 @@ pub fn handle_increase_channel_balance_ibc_receive(
         &ibc_denom,
         remote_amount.clone(),
     )?;
+
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+    let pair_mapping = ics20_denoms()
+        .load(deps.storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
+
+    let mint_amount = convert_remote_to_local(
+        remote_amount,
+        pair_mapping.remote_decimals,
+        pair_mapping.asset_info_decimals,
+    )?;
+    let mint_msg = build_mint_cw20_mapping_msg(
+        pair_mapping.is_mint_burn,
+        pair_mapping.asset_info,
+        mint_amount,
+        contract_addr.to_string(),
+    )?;
+
+    if let Some(mint_msg) = mint_msg {
+        cosmos_msgs.push(mint_msg);
+    }
+
     // we need to save the data to update the balances in reply
     let reply_args = ReplyArgs {
         channel: dst_channel_id.clone(),
@@ -219,13 +243,15 @@ pub fn handle_increase_channel_balance_ibc_receive(
         local_receiver: local_receiver.clone(),
     };
     REPLY_ARGS.save(deps.storage, &reply_args)?;
-    Ok(Response::default().add_attributes(vec![
-        ("action", "increase_channel_balance_ibc_receive"),
-        ("channel_id", dst_channel_id.as_str()),
-        ("ibc_denom", ibc_denom.as_str()),
-        ("amount", remote_amount.to_string().as_str()),
-        ("local_receiver", local_receiver.as_str()),
-    ]))
+    Ok(Response::default()
+        .add_attributes(vec![
+            ("action", "increase_channel_balance_ibc_receive"),
+            ("channel_id", dst_channel_id.as_str()),
+            ("ibc_denom", ibc_denom.as_str()),
+            ("amount", remote_amount.to_string().as_str()),
+            ("local_receiver", local_receiver.as_str()),
+        ])
+        .add_messages(cosmos_msgs))
 }
 
 pub fn handle_reduce_channel_balance_ibc_receive(
@@ -253,13 +279,36 @@ pub fn handle_reduce_channel_balance_ibc_receive(
             local_receiver: local_receiver.to_string(),
         },
     )?;
-    Ok(Response::default().add_attributes(vec![
-        ("action", "reduce_channel_balance_ibc_receive"),
-        ("channel_id", src_channel_id.as_str()),
-        ("ibc_denom", ibc_denom.as_str()),
-        ("amount", remote_amount.to_string().as_str()),
-        ("local_receiver", local_receiver.as_str()),
-    ]))
+
+    //  burn cw20 token if the mechanism is mint burn
+
+    let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
+    let pair_mapping = ics20_denoms()
+        .load(storage, &ibc_denom)
+        .map_err(|_| ContractError::NotOnMappingList {})?;
+    let burn_amount = convert_remote_to_local(
+        remote_amount,
+        pair_mapping.remote_decimals,
+        pair_mapping.asset_info_decimals,
+    )?;
+    let burn_msg = build_burn_cw20_mapping_msg(
+        pair_mapping.is_mint_burn,
+        pair_mapping.asset_info,
+        burn_amount,
+    )?;
+    if let Some(burn_msg) = burn_msg {
+        cosmos_msgs.push(burn_msg);
+    }
+
+    Ok(Response::default()
+        .add_attributes(vec![
+            ("action", "reduce_channel_balance_ibc_receive"),
+            ("channel_id", src_channel_id.as_str()),
+            ("ibc_denom", ibc_denom.as_str()),
+            ("amount", remote_amount.to_string().as_str()),
+            ("local_receiver", local_receiver.as_str()),
+        ])
+        .add_messages(cosmos_msgs))
 }
 
 pub fn update_config(
@@ -427,10 +476,8 @@ pub fn execute_transfer_back_to_remote_chain(
     let config = CONFIG.load(deps.storage)?;
 
     // should be in form port/channel/denom
-    let mappings = get_mappings_from_asset_info(
-        deps.as_ref().storage,
-        amount.into_asset_info(deps.api)?,
-    )?;
+    let mappings =
+        get_mappings_from_asset_info(deps.as_ref().storage, amount.into_asset_info(deps.api)?)?;
 
     // parse denom & compare with user input. Should not use string.includes() because hacker can fake a port that has the same remote denom to return true
     let mapping = mappings
@@ -540,6 +587,17 @@ pub fn execute_transfer_back_to_remote_chain(
         &msg.local_channel_id,
         timeout.into(),
     )?;
+
+    // build burn msg if the mechanism is mint/burn
+    let burn_msg = build_burn_cw20_mapping_msg(
+        mapping.pair_mapping.is_mint_burn,
+        mapping.pair_mapping.asset_info,
+        fee_data.deducted_amount,
+    )?;
+    if let Some(burn_msg) = burn_msg {
+        cosmos_msgs.push(burn_msg);
+    }
+
     Ok(Response::new()
         .add_messages(cosmos_msgs)
         .add_message(ibc_msg)
@@ -550,46 +608,105 @@ pub fn execute_transfer_back_to_remote_chain(
         ]))
 }
 
-/// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
-/// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
-pub fn execute_allow(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    allow: AllowMsg,
-) -> Result<Response, ContractError> {
-    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
-
-    let contract = deps.api.addr_validate(&allow.contract)?;
-    let set = AllowInfo {
-        gas_limit: allow.gas_limit,
-    };
-    ALLOW_LIST.update(deps.storage, &contract, |old| {
-        if let Some(old) = old {
-            // we must ensure it increases the limit
-            match (old.gas_limit, set.gas_limit) {
-                (None, Some(_)) => return Err(ContractError::CannotLowerGas),
-                (Some(old), Some(new)) if new < old => return Err(ContractError::CannotLowerGas),
-                _ => {}
-            };
+pub fn build_burn_cw20_mapping_msg(
+    is_mint_burn: bool,
+    burn_asset_info: AssetInfo,
+    amount_local: Uint128,
+) -> Result<Option<CosmosMsg>, ContractError> {
+    //  burn cw20 token if the mechanism is mint burn
+    if is_mint_burn {
+        match burn_asset_info {
+            AssetInfo::NativeToken { denom } => {
+                return Err(ContractError::Std(StdError::generic_err(format!(
+                    "Mapping token must be cw20 token. Got {}",
+                    denom
+                ))));
+            }
+            AssetInfo::Token { contract_addr } => {
+                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Burn {
+                        amount: amount_local,
+                    })?,
+                    funds: vec![],
+                })));
+            }
         }
-        Ok(AllowInfo {
-            gas_limit: allow.gas_limit,
-        })
-    })?;
-
-    let gas = if let Some(gas) = allow.gas_limit {
-        gas.to_string()
     } else {
-        "None".to_string()
-    };
-
-    let res = Response::new()
-        .add_attribute("action", "allow")
-        .add_attribute("contract", allow.contract)
-        .add_attribute("gas_limit", gas);
-    Ok(res)
+        Ok(None)
+    }
 }
+
+pub fn build_mint_cw20_mapping_msg(
+    is_mint_burn: bool,
+    mint_asset_info: AssetInfo,
+    amount_local: Uint128,
+    receiver: String,
+) -> Result<Option<CosmosMsg>, ContractError> {
+    if is_mint_burn {
+        match mint_asset_info {
+            AssetInfo::NativeToken { denom } => {
+                return Err(ContractError::Std(StdError::generic_err(format!(
+                    "Mapping token must be cw20 token. Got {}",
+                    denom
+                ))));
+            }
+            AssetInfo::Token { contract_addr } => {
+                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Mint {
+                        recipient: receiver,
+                        amount: amount_local,
+                    })?,
+                    funds: vec![],
+                })));
+            }
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+// /// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
+// /// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
+// pub fn execute_allow(
+//     deps: DepsMut,
+//     _env: Env,
+//     info: MessageInfo,
+//     allow: AllowMsg,
+// ) -> Result<Response, ContractError> {
+//     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+//     let contract = deps.api.addr_validate(&allow.contract)?;
+//     let set = AllowInfo {
+//         gas_limit: allow.gas_limit,
+//     };
+//     ALLOW_LIST.update(deps.storage, &contract, |old| {
+//         if let Some(old) = old {
+//             // we must ensure it increases the limit
+//             match (old.gas_limit, set.gas_limit) {
+//                 (None, Some(_)) => return Err(ContractError::CannotLowerGas),
+//                 (Some(old), Some(new)) if new < old => return Err(ContractError::CannotLowerGas),
+//                 _ => {}
+//             };
+//         }
+//         Ok(AllowInfo {
+//             gas_limit: allow.gas_limit,
+//         })
+//     })?;
+
+//     let gas = if let Some(gas) = allow.gas_limit {
+//         gas.to_string()
+//     } else {
+//         "None".to_string()
+//     };
+
+//     let res = Response::new()
+//         .add_attribute("action", "allow")
+//         .add_attribute("contract", allow.contract)
+//         .add_attribute("gas_limit", gas);
+//     Ok(res)
+// }
 
 /// The gov contract can allow new contracts, or increase the gas limit on existing contracts.
 /// It cannot block or reduce the limit to avoid forcible sticking tokens in the channel.
@@ -619,6 +736,7 @@ pub fn execute_update_mapping_pair(
             asset_info: mapping_pair_msg.local_asset_info.clone(),
             remote_decimals: mapping_pair_msg.remote_decimals,
             asset_info_decimals: mapping_pair_msg.local_asset_info_decimals,
+            is_mint_burn: mapping_pair_msg.is_mint_burn.unwrap_or_default(),
         },
     )?;
 

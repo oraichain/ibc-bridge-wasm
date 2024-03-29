@@ -58,7 +58,7 @@ console.log({ cosmosSenderAddress });
 const ibcTransferAmount = "100000000";
 const initialBalanceAmount = "10000000000000";
 
-describe.only("IBCModule", () => {
+describe.only("IBCModuleWithMintBurn", () => {
   let oraiPort: string;
   let oraiIbcDenom: string =
     "tron-testnet0xA325Ad6D9c92B55A3Fc5aD7e412B1518F96441C0";
@@ -115,12 +115,8 @@ describe.only("IBCModule", () => {
       decimals: 6,
       symbol: "AIRI",
       name: "Airight token",
-      initial_balances: [
-        {
-          address: ics20Contract.contractAddress,
-          amount: initialBalanceAmount,
-        },
-      ],
+      initial_balances: [],
+      minter: ics20Contract.contractAddress,
     });
 
     // init ibc channel between two chains
@@ -190,10 +186,11 @@ describe.only("IBCModule", () => {
       denom: airiIbcDenom,
       remoteDecimals: 6,
       localChannelId: channel,
+      isMintBurn: true,
     });
   });
 
-  it("demo-getting-channel-state-ibc-wasm-should-increase-balances-and-total-sent", async () => {
+  it("mint-burn-demo-getting-channel-state-ibc-wasm-should-increase-balances-and-total-sent", async () => {
     // fixture. Setup everything from the ics 20 contract to ibc relayer
     const oraiClient = new SimulateCosmWasmClient({
       chainId: "Oraichain",
@@ -352,6 +349,7 @@ describe.only("IBCModule", () => {
   // TODO: test with native_token
   it.each([
     [
+      false,
       {
         native_token: {
           denom: ORAI,
@@ -363,6 +361,7 @@ describe.only("IBCModule", () => {
       "cw-ics20-success-should-increase-native-balance-remote-to-local",
     ],
     [
+      false,
       null,
       ibcTransferAmount,
       oraiIbcDenom,
@@ -370,6 +369,7 @@ describe.only("IBCModule", () => {
       "cw-ics20-fail-no-pair-mapping-should-not-send-balance-remote-to-local",
     ],
     [
+      false,
       {
         native_token: {
           denom: ORAI,
@@ -381,6 +381,7 @@ describe.only("IBCModule", () => {
       "cw-ics20-fail-transfer-native-fail-insufficient-funds-should-not-send-balance-remote-to-local",
     ],
     [
+      true,
       {
         token: {
           contract_addr: "orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu", // has to hard-code address airi due to jest issue: https://github.com/facebook/jest/issues/6888
@@ -391,20 +392,10 @@ describe.only("IBCModule", () => {
       [{ amount: ibcTransferAmount, denom: "" }],
       "cw-ics20-success-transfer-cw20-should-increase-cw20-balance-remote-to-local",
     ],
-    [
-      {
-        token: {
-          contract_addr: "orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu", // has to hard-code address airi due to jest issue: https://github.com/facebook/jest/issues/6888
-        },
-      },
-      "10000000000001",
-      airiIbcDenom,
-      [{ amount: "0", denom: "" }],
-      "cw-ics20-fail-transfer-cw20-fail-insufficient-funds-should-not-send-balance-remote-to-local",
-    ],
   ])(
-    "bridge-test-cw-ics20-transfer-remote-to-local-given %j %s %s should return expected amount %j", //reference: https://jestjs.io/docs/api#1-testeachtablename-fn-timeout
+    "mint-burn-bridge-test-cw-ics20-transfer-remote-to-local-given %j %s %s should return expected amount %j", //reference: https://jestjs.io/docs/api#1-testeachtablename-fn-timeout
     async (
+      isMintBurn: boolean,
       assetInfo: AssetInfo,
       transferAmount: string,
       transferDenom: string,
@@ -419,6 +410,7 @@ describe.only("IBCModule", () => {
           denom: transferDenom,
           remoteDecimals: 6,
           localChannelId: channel,
+          isMintBurn,
         };
         await ics20Contract.updateMappingPair(pair);
       }
@@ -448,47 +440,11 @@ describe.only("IBCModule", () => {
     }
   );
 
-  it("cw-ics20-fail-outcoming-channel-larger-than-incoming-should-not-transfer-balance-local-to-remote", async () => {
-    // now send ibc package
-    const icsPackage: FungibleTokenPacketData = {
-      amount: ibcTransferAmount,
-      denom: airiIbcDenom,
-      receiver: bobAddress,
-      sender: cosmosSenderAddress,
-      memo: "",
-    };
-    // transfer from cosmos to oraichain, should pass
-    await cosmosChain.ibc.sendPacketReceive({
-      packet: {
-        data: toBinary(icsPackage),
-        ...packetData,
-      },
-      relayer: relayerAddress,
+  it("mint-burn-cw-ics20-success-cw20-should-transfer-balance-to-ibc-wasm-contract-local-to-remote", async () => {
+    let ibcWasmAiriBalance = await airiToken.balance({
+      address: ics20Contract.contractAddress,
     });
-
-    // mint new cw20 token to bob
-    await airiToken.mint({ amount: "1", recipient: bobAddress });
-    // try to send back to cosmos from oraichain, which will fail because outcoming channel balance is greater
-    const transferBackMsg: TransferBackMsg = {
-      local_channel_id: channel,
-      remote_address: cosmosSenderAddress,
-      remote_denom: airiIbcDenom,
-    };
-    airiToken.sender = bobAddress;
-    try {
-      const packetReceiveRes = await airiToken.send({
-        amount: (parseInt(ibcTransferAmount) + 1).toString(),
-        contract: ics20Contract.contractAddress,
-        msg: Buffer.from(JSON.stringify(transferBackMsg)).toString("base64"),
-      });
-    } catch (error) {
-      expect(error.message).toContain(
-        "Insufficient funds to redeem voucher on channel"
-      );
-    }
-  });
-
-  it("cw-ics20-success-cw20-should-transfer-balance-to-ibc-wasm-contract-local-to-remote", async () => {
+    expect(ibcWasmAiriBalance.balance).toEqual("0");
     // now send ibc package
     const icsPackage: FungibleTokenPacketData = {
       amount: ibcTransferAmount,
@@ -517,10 +473,10 @@ describe.only("IBCModule", () => {
       contract: ics20Contract.contractAddress,
       msg: Buffer.from(JSON.stringify(transferBackMsg)).toString("base64"),
     });
-    const ibcWasmAiriBalance = await airiToken.balance({
+    ibcWasmAiriBalance = await airiToken.balance({
       address: ics20Contract.contractAddress,
     });
-    expect(ibcWasmAiriBalance.balance).toEqual(initialBalanceAmount);
+    expect(ibcWasmAiriBalance.balance).toEqual("0");
   });
 
   it.each([
@@ -540,7 +496,7 @@ describe.only("IBCModule", () => {
       "receiver-and-channel-memo-should-fallback-to-transfer-to-receiver",
     ],
   ])(
-    "cw-ics20-test-single-step-invalid-dest-denom-memo-remote-to-local-given %s should-get-expected-amount %s",
+    "mint-burn-cw-ics20-test-single-step-invalid-dest-denom-memo-remote-to-local-given %s should-get-expected-amount %s",
     async (memo: string, expectedAmount: string, _name: string) => {
       // now send ibc package
       const icsPackage: FungibleTokenPacketData = {
@@ -565,7 +521,7 @@ describe.only("IBCModule", () => {
     }
   );
 
-  describe("cw-ics20-test-single-step-swap-to-tokens", () => {
+  describe("mint-burn-cw-ics20-test-single-step-swap-to-tokens", () => {
     let factoryContract: OraiswapFactoryClient;
     let routerContract: OraiswapRouterClient;
     let usdtToken: OraiswapTokenClient;
@@ -612,14 +568,9 @@ describe.only("IBCModule", () => {
           decimals: 6,
           symbol: "USDT",
           name: "USDT token",
-          initial_balances: [
-            {
-              address: ics20Contract.contractAddress,
-              amount: initialBalanceAmount,
-            },
-          ],
+          initial_balances: [],
           mint: {
-            minter: oraiSenderAddress,
+            minter: ics20Contract.contractAddress,
           },
         },
         "cw20-usdt"
@@ -696,6 +647,7 @@ describe.only("IBCModule", () => {
         denom: airiIbcDenom,
         remoteDecimals: 6,
         localChannelId: channel,
+        isMintBurn: true,
       });
       await ics20Contract.updateMappingPair({
         localAssetInfo: {
@@ -707,6 +659,7 @@ describe.only("IBCModule", () => {
         denom: usdtIbcDenom,
         remoteDecimals: 6,
         localChannelId: channel,
+        isMintBurn: true,
       });
       await factoryContract.createPair({
         assetInfos,
@@ -754,6 +707,8 @@ describe.only("IBCModule", () => {
         firstPairInfo.contract_addr,
         coins(initialBalanceAmount, ORAI)
       );
+
+      airiToken.sender = ics20Contract.contractAddress;
       await airiToken.mint({
         amount: initialBalanceAmount,
         recipient: firstPairInfo.contract_addr,
@@ -762,6 +717,8 @@ describe.only("IBCModule", () => {
         secondPairInfo.contract_addr,
         coins(initialBalanceAmount, ORAI)
       );
+
+      usdtToken.sender = ics20Contract.contractAddress;
       await usdtToken.mint({
         amount: initialBalanceAmount,
         recipient: secondPairInfo.contract_addr,
@@ -772,7 +729,7 @@ describe.only("IBCModule", () => {
       ]);
     });
 
-    it("test-simulate-withdraw-liquidity", async () => {
+    it("mint-burn-test-simulate-withdraw-liquidity", async () => {
       // deploy another cw20 for oraiswap testing
       let scatomToken: OraiswapTokenClient;
       const atomIbc =
@@ -863,7 +820,7 @@ describe.only("IBCModule", () => {
       });
     });
 
-    it("cw-ics20-test-simulate-swap-ops-mock-pair-contract", async () => {
+    it("mint-burn-cw-ics20-test-simulate-swap-ops-mock-pair-contract", async () => {
       const simulateResult = await routerContract.simulateSwapOperations({
         offerAmount: "1",
         operations: [
@@ -902,7 +859,7 @@ describe.only("IBCModule", () => {
         "Generic error: The destination info is neither evm or cosmos based",
       ],
     ])(
-      "cw-ics20-test-single-step-native-token-swap-operations-to-dest-denom memo %s expected recipient %s",
+      "mint-burn-cw-ics20-test-single-step-native-token-swap-operations-to-dest-denom memo %s expected recipient %s",
       async (
         memo: string,
         expectedRecipient: string,
@@ -918,10 +875,12 @@ describe.only("IBCModule", () => {
           denom: oraiIbcDenom,
           remoteDecimals: 6,
           localChannelId: channel,
+          isMintBurn: false,
         });
 
         // now send ibc package
         icsPackage.memo = memo;
+        console.log(icsPackage);
         // transfer from cosmos to oraichain, should pass
         const result = await cosmosChain.ibc.sendPacketReceive({
           packet: {
@@ -966,7 +925,7 @@ describe.only("IBCModule", () => {
         "Generic error: Destination channel empty in build ibc msg",
       ], // edge case, dest denom is also airi
     ])(
-      "cw-ics20-test-single-step-cw20-token-swap-operations-to-dest-denom memo %s dest denom %s expected recipient %s",
+      "mint-burn-cw-ics20-test-single-step-cw20-token-swap-operations-to-dest-denom memo %s dest denom %s expected recipient %s",
       async (
         destReceiver: string,
         destDenom: string,
@@ -997,7 +956,7 @@ describe.only("IBCModule", () => {
       }
     );
 
-    it("cw-ics20-test-single-step-cw20-token-swap-operations-to-dest-denom-FAILED-cannot-simulate-swap", async () => {
+    it("mint-burn-cw-ics20-test-single-step-cw20-token-swap-operations-to-dest-denom-FAILED-cannot-simulate-swap", async () => {
       // now send ibc package
 
       // => dest token on Orai = ibc/EB7094899ACFB7A6F2A67DB084DEE2E9A83DEFAA5DEF92D9A9814FFD9FF673FA
@@ -1017,84 +976,7 @@ describe.only("IBCModule", () => {
       );
     });
 
-    it("cw-ics20-test-single-step-cw20-FAILED-NATIVE_RECEIVE_ID-ack-SUCCESS", async () => {
-      // now send ibc package
-      icsPackage.memo = "";
-      icsPackage.amount = initialBalanceAmount + "0";
-      // transfer from cosmos to oraichain, should pass
-      const result = await cosmosChain.ibc.sendPacketReceive({
-        packet: {
-          data: toBinary(icsPackage),
-          ...packetData,
-        },
-        relayer: relayerAddress,
-      });
-      expect(
-        findWasmEvent(result.events, "action", "native_receive_id")
-      ).not.toBeUndefined();
-      // ack should be successful
-      expect(result.acknowledgement).toEqual(
-        Buffer.from('{"result":"MQ=="}').toString("base64")
-      );
-
-      // other types of reply id must not be called
-      expect(
-        findWasmEvent(result.events, "action", "swap_ops_failure_id")
-      ).toBeUndefined();
-      expect(
-        findWasmEvent(result.events, "action", "follow_up_failure_id")
-      ).toBeUndefined();
-      expect(
-        findWasmEvent(result.events, "action", "refund_failure_id")
-      ).toBeUndefined();
-      expect(
-        findWasmEvent(result.events, "action", "ibc_transfer_native_error_id")
-      ).toBeUndefined();
-    });
-
-    it("cw-ics20-test-single-step-cw20-FAILED-SWAP_OPS_FAILURE_ID-ack-SUCCESS", async () => {
-      // fixture
-      // icsPackage.memo = `${bobAddress}:${usdtToken.contractAddress}`;
-      icsPackage.memo = parseToIbcWasmMemo(
-        bobAddress,
-        "",
-        usdtToken.contractAddress
-      );
-      console.log(icsPackage.memo);
-      icsPackage.amount = initialBalanceAmount + "0";
-      // transfer from cosmos to oraichain, should pass
-      const result = await cosmosChain.ibc.sendPacketReceive({
-        packet: {
-          data: toBinary(icsPackage),
-          ...packetData,
-        },
-        relayer: relayerAddress,
-      });
-      expect(
-        findWasmEvent(result.events, "action", "swap_ops_failure_id")
-      ).not.toBeUndefined();
-      // ack should be successful
-      expect(result.acknowledgement).toEqual(
-        Buffer.from('{"result":"MQ=="}').toString("base64")
-      );
-      // refunding also fails because of not enough balance to refund
-      expect(
-        findWasmEvent(result.events, "action", "refund_failure_id")
-      ).not.toBeUndefined();
-
-      // other types of reply id must not be called
-      expect(
-        findWasmEvent(result.events, "action", "native_receive_id")
-      ).toBeUndefined();
-      expect(
-        findWasmEvent(result.events, "action", "follow_up_failure_id")
-      ).toBeUndefined();
-      expect(
-        findWasmEvent(result.events, "action", "ibc_transfer_native_error_id")
-      ).toBeUndefined();
-    });
-
-    it("cw-ics20-test-single-step-cw20-FAILED-IBC_TRANSFER_NATIVE_ERROR_ID-ack-SUCCESS", async () => {
+    it("mint-burn-cw-ics20-test-single-step-cw20-FAILED-IBC_TRANSFER_NATIVE_ERROR_ID-ack-SUCCESS", async () => {
       // fixture
       // icsPackage.memo = `unknown-channel/${bobAddress}:${usdtToken.contractAddress}`;
 
@@ -1152,48 +1034,7 @@ describe.only("IBCModule", () => {
       ).toBeUndefined();
     });
 
-    it("cw-ics20-test-single-step-cw20-FAILED-REFUND_FAILURE_ID-ack-SUCCESS", async () => {
-      // fixture
-
-      icsPackage.memo = parseToIbcWasmMemo(
-        bobAddress,
-        "",
-        usdtToken.contractAddress
-      );
-      icsPackage.amount = initialBalanceAmount + "0";
-      // transfer from cosmos to oraichain, should pass
-      const result = await cosmosChain.ibc.sendPacketReceive({
-        packet: {
-          data: toBinary(icsPackage),
-          ...packetData,
-        },
-        relayer: relayerAddress,
-      });
-      expect(
-        findWasmEvent(result.events, "action", "swap_ops_failure_id")
-      ).not.toBeUndefined();
-      // ack should be successful
-      expect(result.acknowledgement).toEqual(
-        Buffer.from('{"result":"MQ=="}').toString("base64")
-      );
-      // refunding also fails because of not enough balance to refund
-      expect(
-        findWasmEvent(result.events, "action", "refund_failure_id")
-      ).not.toBeUndefined();
-
-      // other types of reply id must not be called
-      expect(
-        findWasmEvent(result.events, "action", "native_receive_id")
-      ).toBeUndefined();
-      expect(
-        findWasmEvent(result.events, "action", "follow_up_failure_id")
-      ).toBeUndefined();
-      expect(
-        findWasmEvent(result.events, "action", "ibc_transfer_native_error_id")
-      ).toBeUndefined();
-    });
-
-    it("cw-ics20-test-single-step-cw20-success-FOLLOW_UP_IBC_SEND_FAILURE_ID-must-not-have-SWAP_OPS_FAILURE_ID-or-on_packet_failure-ack-SUCCESS", async () => {
+    it("mint-burn-cw-ics20-test-single-step-cw20-success-FOLLOW_UP_IBC_SEND_FAILURE_ID-must-not-have-SWAP_OPS_FAILURE_ID-or-on_packet_failure-ack-SUCCESS", async () => {
       // fixture
       // icsPackage.memo = `${channel}/${bobAddress}:${airiToken.contractAddress}`;
       icsPackage.memo = parseToIbcWasmMemo(bobAddress, channel, airiIbcDenom);
@@ -1254,7 +1095,7 @@ describe.only("IBCModule", () => {
       [channel, "0xabcd", usdtIbcDenom],
       [channel, "tron-testnet0xabcd", airiIbcDenom], // bad evm address case
     ])(
-      "cw-ics20-test-single-step-has-ibc-msg-dest-fail memo %s dest denom %s expected error",
+      "mint-burn-cw-ics20-test-single-step-has-ibc-msg-dest-fail memo %s dest denom %s expected error",
       async (destChannel: string, destReceiver: string, destDenom: string) => {
         // now send ibc package
         // icsPackage.memo = `${destChannel}/${destReceiver}:${destDenom}`;
@@ -1291,7 +1132,7 @@ describe.only("IBCModule", () => {
     it.each([
       [channel, bridgeReceiver, airiIbcDenom], // hard-coded airi
     ])(
-      "cw-ics20-test-single-step-has-ibc-msg-dest-receiver-evm-based memo %s dest denom %s expected recipient %s",
+      "mint-burn-cw-ics20-test-single-step-has-ibc-msg-dest-receiver-evm-based memo %s dest denom %s expected recipient %s",
       async (destChannel: string, destReceiver: string, destDenom: string) => {
         // now send ibc package
         // icsPackage.memo = `${destChannel}/${destReceiver}:${destDenom}`;
@@ -1343,7 +1184,7 @@ describe.only("IBCModule", () => {
       }
     );
 
-    it("cw-ics20-test-single-step-ibc-msg-map-with-fee-denom-orai-and-airi-destination-denom-should-swap-normally", async () => {
+    it("mint-burn-cw-ics20-test-single-step-ibc-msg-map-with-fee-denom-orai-and-airi-destination-denom-should-swap-normally", async () => {
       await ics20Contract.updateMappingPair({
         localAssetInfo: {
           native_token: {
@@ -1408,7 +1249,7 @@ describe.only("IBCModule", () => {
       ).toBeGreaterThan(0);
     });
 
-    it("cw-ics20-test-single-step-ibc-msg-map-with-fee-denom-orai-and-orai-destination-denom-should-transfer-normally", async () => {
+    it("mint-burn-cw-ics20-test-single-step-ibc-msg-map-with-fee-denom-orai-and-orai-destination-denom-should-transfer-normally", async () => {
       await ics20Contract.updateMappingPair({
         localAssetInfo: {
           native_token: {
@@ -1535,7 +1376,7 @@ describe.only("IBCModule", () => {
       it.each([
         ["channel-15", "orai1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejvfgs7g", "uatom"], // edge case, dest denom is also airi
       ])(
-        "cw-ics20-test-single-step-has-ibc-msg-dest-receiver-cosmos-based dest channel %s dest denom %s expected recipient %s",
+        "mint-burn-cw-ics20-test-single-step-has-ibc-msg-dest-receiver-cosmos-based dest channel %s dest denom %s expected recipient %s",
         async (
           destChannel: string,
           destReceiver: string,
@@ -1580,7 +1421,7 @@ describe.only("IBCModule", () => {
         }
       );
 
-      it("cw-ics20-test-single-step-ibc-msg-SUCCESS-map-with-fee-denom-orai-and-orai-destination-denom-with-dest-channel-not-matched-with-mapping-pair-should-do-ibctransfer", async () => {
+      it("mint-burn-cw-ics20-test-single-step-ibc-msg-SUCCESS-map-with-fee-denom-orai-and-orai-destination-denom-with-dest-channel-not-matched-with-mapping-pair-should-do-ibctransfer", async () => {
         await ics20Contract.updateMappingPair({
           localAssetInfo: {
             native_token: {
@@ -1651,7 +1492,7 @@ describe.only("IBCModule", () => {
       });
     });
 
-    it("cw-ics20-test-single-step-handle_ibc_packet_receive_native_remote_chain-has-relayer-fee-should-be-deducted", async () => {
+    it("mint-burn-cw-ics20-test-single-step-handle_ibc_packet_receive_native_remote_chain-has-relayer-fee-should-be-deducted", async () => {
       // setup relayer fee
       const relayerFee = "100000";
       await ics20Contract.updateConfig({
@@ -1695,7 +1536,7 @@ describe.only("IBCModule", () => {
       [parseToIbcWasmMemo(bobAddress, channel, oraiIbcDenom), "20000000"],
       [parseToIbcWasmMemo(bobAddress, "", "orai"), "10000000"],
     ])(
-      "cw-ics20-test-single-step-ibc-handle_ibc_packet_receive_native_remote_chain-has-token-fee-should-be-deducted",
+      "mint-burn-cw-ics20-test-single-step-ibc-handle_ibc_packet_receive_native_remote_chain-has-token-fee-should-be-deducted",
       async (memo, expectedTokenFee) => {
         // setup relayer fee
         await ics20Contract.updateConfig({
@@ -1751,7 +1592,7 @@ describe.only("IBCModule", () => {
       ], // double deducted when there's an outgoing ibc msg after receiving the packet
       [parseToIbcWasmMemo(bobAddress, "", "orai"), "10000000", "100000"],
     ])(
-      "test-handle_ibc_packet_receive_native_remote_chain-has-both-token-fee-and-relayer-fee-should-be-both-deducted-given memo %s should give expected token fee %s and expected relayer fee %s",
+      "mint-burn-test-handle_ibc_packet_receive_native_remote_chain-has-both-token-fee-and-relayer-fee-should-be-both-deducted-given memo %s should give expected token fee %s and expected relayer fee %s",
       async (memo, expectedTokenFee, expectedRelayerFee) => {
         // setup relayer fee
         const relayerFee = "100000";
@@ -1830,7 +1671,7 @@ describe.only("IBCModule", () => {
         ibcTransferAmount,
       ],
     ])(
-      "cw-ics20-test-single-step-handle_ibc_packet_receive_native_remote_chain-deducted-amount-is-zero-should-still-charge-fees",
+      "mint-burn-cw-ics20-test-single-step-handle_ibc_packet_receive_native_remote_chain-deducted-amount-is-zero-should-still-charge-fees",
       async (
         transferAmount,
         relayerFee,
@@ -1892,7 +1733,7 @@ describe.only("IBCModule", () => {
     );
 
     // execute transfer to remote test cases
-    it("test-execute_transfer_back_to_remote_chain-native-FAILED-no-funds-sent", async () => {
+    it("mint-burn-test-execute_transfer_back_to_remote_chain-native-FAILED-no-funds-sent", async () => {
       oraiClient.app.bank.setBalance(
         senderAddress,
         coins(initialBalanceAmount, ORAI)
@@ -1914,7 +1755,7 @@ describe.only("IBCModule", () => {
       }
     });
 
-    it("test-execute_transfer_back_to_remote_chain-native-FAILED-no-mapping-found", async () => {
+    it("mint-burn-test-execute_transfer_back_to_remote_chain-native-FAILED-no-mapping-found", async () => {
       oraiClient.app.bank.setBalance(
         senderAddress,
         coins(initialBalanceAmount, ORAI)
@@ -1937,7 +1778,7 @@ describe.only("IBCModule", () => {
       }
     });
 
-    it("test-execute_transfer_back_to_remote_chain-native-FAILED-no-mapping-found", async () => {
+    it("mint-burn-test-execute_transfer_back_to_remote_chain-native-FAILED-no-mapping-found", async () => {
       oraiClient.app.bank.setBalance(
         senderAddress,
         coins(initialBalanceAmount, ORAI)

@@ -1,6 +1,7 @@
 import { SimulateCosmWasmClient } from "@oraichain/cw-simulate";
 import { OraiswapTokenClient } from "@oraichain/oraidex-contracts-sdk";
-import { CwIcs20LatestClient } from "@oraichain/common-contracts-sdk";
+// import { CwIcs20LatestClient } from "@oraichain/common-contracts-sdk";
+import { CwIcs20LatestClient } from "./contracts-sdk/CwIcs20Latest.client";
 import * as oraidexArtifacts from "@oraichain/oraidex-contracts-build";
 import * as commonArtifacts from "@oraichain/common-contracts-build";
 import { readFileSync } from "fs";
@@ -27,11 +28,13 @@ export const deployToken = async (
     name,
     decimals = 6,
     initial_balances = [{ address: senderAddress, amount: "1000000000" }],
+    minter = senderAddress,
   }: {
     symbol: string;
     name: string;
     decimals?: number;
     initial_balances?: Cw20Coin[];
+    minter?: string;
   }
 ): Promise<OraiswapTokenClient> => {
   return new OraiswapTokenClient(
@@ -46,7 +49,7 @@ export const deployToken = async (
           decimals,
           symbol,
           name,
-          mint: { minter: senderAddress },
+          mint: { minter: minter },
           initial_balances,
         },
         "token",

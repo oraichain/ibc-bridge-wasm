@@ -9,6 +9,7 @@ use cosmwasm_std::{
     Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
     Timestamp, Uint128,
 };
+
 use cw20_ics20_msg::converter::ConvertType;
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
@@ -18,6 +19,7 @@ use cw_storage_plus::Map;
 use oraiswap::asset::{Asset, AssetInfo};
 use oraiswap::router::{RouterController, SwapOperation};
 
+use crate::contract::build_mint_cw20_mapping_msg;
 use crate::error::{ContractError, Never};
 use crate::msg::{ExecuteMsg, FeeData, FollowUpMsgsData, PairQuery};
 use crate::query_helper::get_destination_info_on_orai;
@@ -131,6 +133,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     &reply_args.local_receiver,
                     &reply_args.denom,
                     reply_args.amount,
+                    false,
                 )?;
 
                 Ok(Response::new()
@@ -146,6 +149,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
             SubMsgResult::Ok(_) => Ok(Response::new()),
             SubMsgResult::Err(err) => {
                 let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
+
                 SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
                 // only time where we undo reduce chann balance because this message is sent and reduced optimistically on Oraichain. If fail then we undo and then refund
                 undo_reduce_channel_balance(
@@ -160,6 +164,7 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     &reply_args.local_receiver,
                     &reply_args.denom,
                     reply_args.amount,
+                    true,
                 )?;
                 Ok(Response::new()
                     // we all set ack success so that this token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
@@ -447,6 +452,18 @@ fn handle_ibc_packet_receive_native_remote_chain(
         )?,
     );
 
+    // increase channel balance submsg. We increase it first before doing other tasks
+    cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
+        contract_addr: env.contract.address.to_string(),
+        msg: to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+            dest_channel_id: packet.dest.channel_id.clone(),
+            ibc_denom: ibc_denom.clone(),
+            amount: msg.amount,
+            local_receiver: msg.receiver.clone(),
+        })?,
+        funds: vec![],
+    }));
+
     let mut fee_data = process_deduct_fee(
         storage,
         querier,
@@ -524,6 +541,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     if fee_data.deducted_amount.is_zero() {
         return Ok(IbcReceiveResponse::new()
             .set_ack(ack_success())
+            .add_messages(cosmos_msgs)
             .add_message(to_send.send_amount(config.token_fee_receiver.into_string(), None))
             .add_attributes(attributes)
             .add_attributes(vec![
@@ -557,17 +575,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         destination_pair_mapping,
     )?;
 
-    // increase channel balance submsg. We increase it first before doing other tasks
-    cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
-        contract_addr: env.contract.address.to_string(),
-        msg: to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
-            dest_channel_id: packet.dest.channel_id.clone(),
-            ibc_denom,
-            amount: msg.amount,
-            local_receiver: msg.receiver.clone(),
-        })?,
-        funds: vec![],
-    }));
     let mut res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_messages(cosmos_msgs)
@@ -1183,7 +1190,7 @@ fn on_packet_failure(
         return Ok(IbcBasicResponse::new());
     }
 
-    let sub_msg = handle_packet_refund(deps.storage, &msg.sender, &msg.denom, msg.amount)?;
+    let sub_msg = handle_packet_refund(deps.storage, &msg.sender, &msg.denom, msg.amount, true)?;
     // since we reduce the channel's balance optimistically when transferring back, we undo reduce it again when receiving failed ack
     undo_reduce_channel_balance(deps.storage, &packet.src.channel_id, &msg.denom, msg.amount)?;
 
@@ -1207,18 +1214,38 @@ pub fn handle_packet_refund(
     packet_sender: &str,
     packet_denom: &str,
     packet_amount: Uint128,
+    with_mint_burn: bool,
 ) -> Result<SubMsg, ContractError> {
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
     let pair_mapping = ics20_denoms().load(storage, &packet_denom)?;
-    let to_send = Amount::from_parts(
-        parse_asset_info_denom(pair_mapping.asset_info),
-        convert_remote_to_local(
-            packet_amount,
-            pair_mapping.remote_decimals,
-            pair_mapping.asset_info_decimals,
-        )?,
-    );
-    let cosmos_msg = to_send.send_amount(packet_sender.to_string(), None);
+
+    let local_amount = convert_remote_to_local(
+        packet_amount,
+        pair_mapping.remote_decimals,
+        pair_mapping.asset_info_decimals,
+    )?;
+
+    // check if mint_burn mechanism, then mint token for packet sender, if not, send from contract
+    let send_amount_msg = Amount::from_parts(
+        parse_asset_info_denom(pair_mapping.asset_info.to_owned()),
+        local_amount,
+    )
+    .send_amount(packet_sender.to_string(), None);
+    let cosmos_msg = match build_mint_cw20_mapping_msg(
+        pair_mapping.is_mint_burn,
+        pair_mapping.asset_info,
+        local_amount,
+        packet_sender.to_string(),
+    )? {
+        Some(cosmos_msg) => {
+            if with_mint_burn {
+                cosmos_msg
+            } else {
+                send_amount_msg
+            }
+        }
+        None => send_amount_msg,
+    };
 
     // used submsg here & reply on error. This means that if the refund process fails => tokens will be locked in this IBC Wasm contract. We will manually handle that case. No retry
     // similar event messages like ibctransfer module
