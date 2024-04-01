@@ -1,6 +1,6 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, IbcEndpoint, StdResult, Storage, Uint128};
-use cw20_ics20_msg::converter::ConverterController;
+use cw20_ics20_msg::{converter::ConverterController, smart_router::SmartRouterController};
 use cw_controllers::Admin;
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use oraiswap::{
@@ -43,7 +43,7 @@ pub const TOKEN_FEE: Map<&str, Ratio> = Map::new("token_fee");
 
 // relayer fee. This fee depends on the network type, not token type
 // decimals of relayer fee should always be 10^6 because we use ORAI as relayer fee
-pub const RELAYER_FEE: Map<&str, Uint128> = Map::new("relayer_fee");
+pub const RELAYER_FEE: Map<&str, RelayerFee> = Map::new("relayer_fee");
 
 // // accumulated token fee
 // pub const TOKEN_FEE_ACCUMULATOR: Map<&str, Uint128> = Map::new("token_fee_accumulator");
@@ -93,6 +93,7 @@ pub struct Config {
     pub token_fee_receiver: Addr,
     pub relayer_fee_receiver: Addr,
     pub converter_contract: ConverterController,
+    pub swap_smart_router: SmartRouterController,
 }
 
 #[cw_serde]
@@ -120,6 +121,7 @@ pub struct TokenFee {
 pub struct RelayerFee {
     pub prefix: String,
     pub fee: Uint128,
+    pub fee_token: Option<AssetInfo>,
 }
 
 #[cw_serde]

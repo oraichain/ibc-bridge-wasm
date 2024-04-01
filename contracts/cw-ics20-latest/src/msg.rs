@@ -21,6 +21,8 @@ pub struct InitMsg {
     pub swap_router_contract: String,
     /// converter contract for convert token
     pub converter_contract: String,
+    /// smart router contract, use to query route swap
+    pub swap_smart_router: String,
 }
 
 #[cw_serde]
@@ -38,6 +40,7 @@ pub struct MigrateMsg {
     pub token_fee_receiver: String,
     pub relayer_fee_receiver: String,
     pub converter_contract: String,
+    pub swap_smart_router: String,
 }
 
 #[cw_serde]
@@ -240,12 +243,14 @@ pub struct ConfigResponse {
     pub token_fees: Vec<TokenFee>,
     pub relayer_fees: Vec<RelayerFeeResponse>,
     pub converter_contract: String,
+    pub smart_router: String,
 }
 
 #[cw_serde]
 pub struct RelayerFeeResponse {
     pub prefix: String,
     pub amount: Uint128,
+    pub fee_token: AssetInfo,
 }
 
 #[cw_serde]

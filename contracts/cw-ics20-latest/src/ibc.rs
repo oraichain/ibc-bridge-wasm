@@ -15,6 +15,7 @@ use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
+use cw20_ics20_msg::smart_router::SmartRouterController;
 use cw_storage_plus::Map;
 use oraiswap::asset::{Asset, AssetInfo};
 use oraiswap::router::{RouterController, SwapOperation};
@@ -472,6 +473,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
         &msg.denom,
         to_send.clone(),
         &config.swap_router_contract,
+        &config.swap_smart_router,
+        config.fee_denom.clone(),
     )?;
     let destination =
         DestinationInfo::from_base64(&msg.memo.clone().unwrap_or_default()).unwrap_or_default();
@@ -504,6 +507,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
             &destination.destination_denom,
             destination_asset_info_on_orai.clone(),
             &config.swap_router_contract,
+            &config.swap_smart_router,
+            config.fee_denom.clone(),
         )?;
 
         // if initial asset info is different with destination asset info,
@@ -948,6 +953,8 @@ pub fn process_deduct_fee(
     remote_token_denom: &str,
     local_amount: Amount, // local amount
     swap_router_contract: &RouterController,
+    smart_router: &SmartRouterController,
+    fee_denom_default: String,
 ) -> StdResult<FeeData> {
     let local_denom = local_amount.denom();
     let (deducted_amount, token_fee) =
@@ -963,6 +970,8 @@ pub fn process_deduct_fee(
         remote_token_denom,
         ask_asset_info,
         swap_router_contract,
+        smart_router,
+        fee_denom_default,
     )?;
 
     let mut fee_data = FeeData {
@@ -1010,6 +1019,8 @@ pub fn deduct_relayer_fee(
     remote_token_denom: &str,
     ask_asset_info: AssetInfo,
     swap_router_contract: &RouterController,
+    smart_router: &SmartRouterController,
+    fee_denom_default: String,
 ) -> StdResult<Uint128> {
     // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
     // evm case, need to filter remote token denom since prefix is always oraib
@@ -1031,14 +1042,28 @@ pub fn deduct_relayer_fee(
         return Ok(Uint128::from(0u64));
     }
 
-    let relayer_fee = get_swap_token_amount_out_from_orai(
-        querier,
-        relayer_fee.unwrap(),
-        swap_router_contract,
-        ask_asset_info,
-    );
+    match relayer_fee {
+        Some(relayer_fee) => {
+            let fee_token = relayer_fee.fee_token.unwrap_or(AssetInfo::NativeToken {
+                denom: fee_denom_default.clone(),
+            });
 
-    Ok(relayer_fee)
+            let res = smart_router.build_swap_operations(
+                querier,
+                swap_router_contract,
+                fee_token,
+                ask_asset_info,
+                Some(relayer_fee.fee),
+                fee_denom_default,
+            );
+
+            if res.is_err() {
+                return Ok(Uint128::from(0u64));
+            }
+            Ok(res.unwrap().actual_minimum_receive)
+        }
+        None => Ok(Uint128::from(0u64)),
+    }
 }
 
 pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {

@@ -2273,6 +2273,7 @@ fn test_update_config() {
         relayer_fee: Some(vec![RelayerFee {
             prefix: "foo".to_string(),
             fee: Uint128::from(1000000u64),
+            fee_token: None,
         }]),
         fee_receiver: Some("token_fee_receiver".to_string()),
         relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),

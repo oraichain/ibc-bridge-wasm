@@ -122,6 +122,8 @@ pub fn ibc_hooks_universal_swap(
                 &destination.destination_denom,
                 to_send_amount.clone(),
                 &config.swap_router_contract,
+                &config.swap_smart_router,
+                config.fee_denom,
             )?;
 
             // if the fees have consumed all user funds, we send all the fees to our token fee receiver

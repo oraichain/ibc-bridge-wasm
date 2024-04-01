@@ -9,6 +9,7 @@ use cw2::set_contract_version;
 use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw20_ics20_msg::converter::ConverterController;
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
+use cw20_ics20_msg::smart_router::SmartRouterController;
 use cw_storage_plus::Bound;
 use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
@@ -54,6 +55,7 @@ pub fn instantiate(
         token_fee_receiver: admin.clone(),
         relayer_fee_receiver: admin,
         converter_contract: ConverterController(msg.converter_contract),
+        swap_smart_router: SmartRouterController(msg.swap_smart_router),
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -333,7 +335,7 @@ pub fn update_config(
     }
     if let Some(relayer_fee) = relayer_fee {
         for fee in relayer_fee {
-            RELAYER_FEE.save(deps.storage, &fee.prefix, &fee.fee)?;
+            RELAYER_FEE.save(deps.storage, &fee.prefix, &fee)?;
         }
     }
     CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
@@ -510,6 +512,8 @@ pub fn execute_transfer_back_to_remote_chain(
         &msg.remote_denom,
         amount,
         &config.swap_router_contract,
+        &config.swap_smart_router,
+        config.fee_denom,
     )?;
 
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
@@ -786,6 +790,7 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
             token_fee_receiver: deps.api.addr_validate(&msg.token_fee_receiver)?,
             relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
             converter_contract: ConverterController(msg.converter_contract),
+            swap_smart_router: SmartRouterController(msg.swap_smart_router),
         },
     )?;
 
@@ -895,7 +900,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let res = ConfigResponse {
         default_timeout: cfg.default_timeout,
         default_gas_limit: cfg.default_gas_limit,
-        fee_denom: cfg.fee_denom,
+        fee_denom: cfg.fee_denom.clone(),
         swap_router_contract: cfg.swap_router_contract.addr(),
         gov_contract: admin.into(),
         relayer_fee_receiver: cfg.relayer_fee_receiver,
@@ -910,11 +915,18 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         relayer_fees: RELAYER_FEE
             .range(deps.storage, None, None, Order::Ascending)
             .map(|data_result| {
-                let (prefix, amount) = data_result?;
-                Ok(RelayerFeeResponse { prefix, amount })
+                let (prefix, relayer_fee) = data_result?;
+                Ok(RelayerFeeResponse {
+                    prefix,
+                    amount: relayer_fee.fee,
+                    fee_token: relayer_fee.fee_token.unwrap_or(AssetInfo::NativeToken {
+                        denom: cfg.fee_denom.clone(),
+                    }),
+                })
             })
             .collect::<StdResult<_>>()?,
         converter_contract: cfg.converter_contract.addr(),
+        smart_router: cfg.swap_smart_router.addr(),
     };
     Ok(res)
 }
