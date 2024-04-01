@@ -74,6 +74,7 @@ fn test_ibc_hooks_receive() {
         allowlist,
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
+        swap_smart_router: "smart_router".to_string(),
     };
 
     contract_instance

@@ -7,20 +7,20 @@ use cosmwasm_std::{
 use cosmwasm_testing_util::mock::MockContract;
 use cosmwasm_vm::testing::MockInstanceOptions;
 use cw20_ics20_msg::receiver::DestinationInfo;
+use cw20_ics20_msg::smart_router::SmartRouterController;
 use cw_controllers::AdminError;
 use oraiswap::asset::AssetInfo;
 use oraiswap::router::{RouterController, SwapOperation};
 
+use crate::ibc::get_follow_up_msgs;
 use crate::ibc::{
     build_ibc_msg, build_swap_msgs, convert_remote_denom_to_evm_prefix, deduct_fee,
-    deduct_relayer_fee, deduct_token_fee, get_swap_token_amount_out_from_orai,
-    handle_packet_refund, ibc_packet_receive, parse_ibc_channel_without_sanity_checks,
-    parse_ibc_denom_without_sanity_checks, parse_ibc_info_without_sanity_checks,
-    parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID,
-    IBC_TRANSFER_NATIVE_ERROR_ID, ICS20_VERSION, NATIVE_RECEIVE_ID, REFUND_FAILURE_ID,
-    SWAP_OPS_FAILURE_ID,
+    deduct_relayer_fee, deduct_token_fee, handle_packet_refund, ibc_packet_receive,
+    parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
+    parse_ibc_info_without_sanity_checks, parse_voucher_denom, process_ibc_msg, Ics20Ack,
+    Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID, IBC_TRANSFER_NATIVE_ERROR_ID, ICS20_VERSION,
+    NATIVE_RECEIVE_ID, REFUND_FAILURE_ID, SWAP_OPS_FAILURE_ID,
 };
-use crate::ibc::{build_swap_operations, get_follow_up_msgs};
 use crate::query_helper::get_destination_info_on_orai;
 use crate::testing::test_helpers::*;
 use cosmwasm_std::{
@@ -495,6 +495,7 @@ fn send_from_remote_to_local_receive_happy_path() {
         allowlist,
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
+        swap_smart_router: "smart_router".to_string(),
     };
 
     contract_instance
@@ -612,81 +613,81 @@ fn send_from_remote_to_local_receive_happy_path() {
     }
 }
 
-#[test]
-fn test_swap_operations() {
-    let mut receiver_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("contract"),
-    };
-    let mut initial_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("addr"),
-    };
-    let fee_denom = "orai".to_string();
+// #[test]
+// fn test_swap_operations() {
+//     let mut receiver_asset_info = AssetInfo::Token {
+//         contract_addr: Addr::unchecked("contract"),
+//     };
+//     let mut initial_asset_info = AssetInfo::Token {
+//         contract_addr: Addr::unchecked("addr"),
+//     };
+//     let fee_denom = "orai".to_string();
 
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        fee_denom.as_str(),
-    );
-    assert_eq!(operations.len(), 2);
+//     let operations = build_swap_operations(
+//         receiver_asset_info.clone(),
+//         initial_asset_info.clone(),
+//         fee_denom.as_str(),
+//     );
+//     assert_eq!(operations.len(), 2);
 
-    let fee_denom = "contract".to_string();
-    receiver_asset_info = AssetInfo::NativeToken {
-        denom: "contract".to_string(),
-    };
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        &fee_denom,
-    );
-    assert_eq!(operations.len(), 1);
-    assert_eq!(
-        operations[0],
-        SwapOperation::OraiSwap {
-            offer_asset_info: initial_asset_info.clone(),
-            ask_asset_info: AssetInfo::NativeToken {
-                denom: fee_denom.clone()
-            }
-        }
-    );
-    initial_asset_info = AssetInfo::NativeToken {
-        denom: "contract".to_string(),
-    };
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        &fee_denom,
-    );
-    assert_eq!(operations.len(), 0);
+//     let fee_denom = "contract".to_string();
+//     receiver_asset_info = AssetInfo::NativeToken {
+//         denom: "contract".to_string(),
+//     };
+//     let operations = build_swap_operations(
+//         receiver_asset_info.clone(),
+//         initial_asset_info.clone(),
+//         &fee_denom,
+//     );
+//     assert_eq!(operations.len(), 1);
+//     assert_eq!(
+//         operations[0],
+//         SwapOperation::OraiSwap {
+//             offer_asset_info: initial_asset_info.clone(),
+//             ask_asset_info: AssetInfo::NativeToken {
+//                 denom: fee_denom.clone()
+//             }
+//         }
+//     );
+//     initial_asset_info = AssetInfo::NativeToken {
+//         denom: "contract".to_string(),
+//     };
+//     let operations = build_swap_operations(
+//         receiver_asset_info.clone(),
+//         initial_asset_info.clone(),
+//         &fee_denom,
+//     );
+//     assert_eq!(operations.len(), 0);
 
-    initial_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("addr"),
-    };
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        &fee_denom,
-    );
-    assert_eq!(operations.len(), 1);
-    assert_eq!(
-        operations[0],
-        SwapOperation::OraiSwap {
-            offer_asset_info: initial_asset_info.clone(),
-            ask_asset_info: AssetInfo::NativeToken { denom: fee_denom }
-        }
-    );
+//     initial_asset_info = AssetInfo::Token {
+//         contract_addr: Addr::unchecked("addr"),
+//     };
+//     let operations = build_swap_operations(
+//         receiver_asset_info.clone(),
+//         initial_asset_info.clone(),
+//         &fee_denom,
+//     );
+//     assert_eq!(operations.len(), 1);
+//     assert_eq!(
+//         operations[0],
+//         SwapOperation::OraiSwap {
+//             offer_asset_info: initial_asset_info.clone(),
+//             ask_asset_info: AssetInfo::NativeToken { denom: fee_denom }
+//         }
+//     );
 
-    // initial = receiver => build swap ops length = 0
-    let operations = build_swap_operations(
-        AssetInfo::NativeToken {
-            denom: "foobar".to_string(),
-        },
-        AssetInfo::NativeToken {
-            denom: "foobar".to_string(),
-        },
-        "not_foo_bar",
-    );
-    assert_eq!(operations.len(), 0);
-}
+//     // initial = receiver => build swap ops length = 0
+//     let operations = build_swap_operations(
+//         AssetInfo::NativeToken {
+//             denom: "foobar".to_string(),
+//         },
+//         AssetInfo::NativeToken {
+//             denom: "foobar".to_string(),
+//         },
+//         "not_foo_bar",
+//     );
+//     assert_eq!(operations.len(), 0);
+// }
 
 #[test]
 fn test_build_swap_msgs() {
@@ -1411,7 +1412,10 @@ fn test_deduct_relayer_fee() {
     let destination_asset_on_orai = AssetInfo::NativeToken {
         denom: "orai".to_string(),
     };
+    let fee_denom_default = "orai".to_string();
+
     let swap_router_contract = RouterController("foo".to_string());
+    let smart_router_contract = SmartRouterController("smart_router".to_string());
     // token price empty case. Should return zero fee
     let result = deduct_relayer_fee(
         deps_mut.storage,
@@ -1421,6 +1425,8 @@ fn test_deduct_relayer_fee() {
         token_fee_denom,
         destination_asset_on_orai.clone(),
         &swap_router_contract,
+        &smart_router_contract,
+        fee_denom_default.clone().clone(),
     )
     .unwrap();
     assert_eq!(result, Uint128::from(0u64));
@@ -1435,6 +1441,8 @@ fn test_deduct_relayer_fee() {
             token_fee_denom,
             destination_asset_on_orai.clone(),
             &swap_router_contract,
+            &smart_router_contract,
+            fee_denom_default.clone()
         )
         .unwrap(),
         Uint128::from(0u128)
@@ -1450,18 +1458,30 @@ fn test_deduct_relayer_fee() {
             token_fee_denom,
             destination_asset_on_orai.clone(),
             &swap_router_contract,
+            &smart_router_contract,
+            fee_denom_default.clone()
         )
         .unwrap(),
         Uint128::from(0u64)
     );
 
+    let relayer_fee = RelayerFee {
+        prefix: token_fee_denom.to_string(),
+        fee: Uint128::from(100u64),
+        fee_token: None,
+    };
     // oraib prefix case.
     RELAYER_FEE
-        .save(deps_mut.storage, token_fee_denom, &Uint128::from(100u64))
+        .save(deps_mut.storage, token_fee_denom, &relayer_fee)
         .unwrap();
 
+    let relayer_fee = RelayerFee {
+        prefix: "foo".to_string(),
+        fee: Uint128::from(1000u64),
+        fee_token: None,
+    };
     RELAYER_FEE
-        .save(deps_mut.storage, "foo", &Uint128::from(1000u64))
+        .save(deps_mut.storage, "foo", &relayer_fee)
         .unwrap();
 
     assert_eq!(
@@ -1473,6 +1493,8 @@ fn test_deduct_relayer_fee() {
             "foo0x",
             destination_asset_on_orai.clone(),
             &swap_router_contract,
+            &smart_router_contract,
+            fee_denom_default.clone()
         )
         .unwrap(),
         Uint128::from(1000u64)
@@ -1488,6 +1510,8 @@ fn test_deduct_relayer_fee() {
             token_fee_denom,
             destination_asset_on_orai,
             &swap_router_contract,
+            &smart_router_contract,
+            fee_denom_default.clone()
         )
         .unwrap(),
         Uint128::from(100u64)
@@ -1578,21 +1602,6 @@ fn test_process_ibc_msg() {
             FOLLOW_UP_IBC_SEND_FAILURE_ID
         )
     )
-}
-
-#[test]
-fn test_get_swap_token_amount_out_from_orai() {
-    let deps = mock_dependencies();
-    let simulate_amount = Uint128::from(10u128);
-    let result = get_swap_token_amount_out_from_orai(
-        &deps.as_ref().querier,
-        simulate_amount,
-        &RouterController("foo".to_string()),
-        AssetInfo::NativeToken {
-            denom: "orai".to_string(),
-        },
-    );
-    assert_eq!(result, simulate_amount)
 }
 
 #[test]
