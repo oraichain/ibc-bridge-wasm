@@ -513,23 +513,20 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
         // if initial asset info is different with destination asset info,
         // we need convert relayer fee from destination_asset_info_on_orai to initial token receive
-        let swap_operations = build_swap_operations(
-            initial_receive_asset_info.clone(),
+
+        let swap_responses = config.swap_smart_router.build_swap_operations(
+            querier,
+            &config.swap_router_contract,
             destination_asset_info_on_orai.clone(),
-            config.fee_denom.as_str(),
+            initial_receive_asset_info.clone(),
+            Some(additional_relayer_fee),
+            config.fee_denom,
         );
 
-        if !swap_operations.is_empty() {
-            // if simulate swap fails, set fee to zero
-            additional_relayer_fee = match config.swap_router_contract.simulate_swap(
-                querier,
-                additional_relayer_fee,
-                swap_operations,
-            ) {
-                Ok(res) => res.amount,
-                Err(_) => Uint128::default(),
-            };
-        }
+        additional_relayer_fee = match swap_responses {
+            Ok(val) => val.actual_minimum_receive,
+            Err(_) => Uint128::zero(),
+        };
 
         fee_data.relayer_fee = fee_data.relayer_fee.checked_add(additional_relayer_fee);
         fee_data.deducted_amount = fee_data
@@ -636,33 +633,30 @@ pub fn get_follow_up_msgs(
         Some(converter_info) => converter_info.token_ratio.info,
         None => destination_asset_info_on_orai.clone(),
     };
-    let swap_operations = build_swap_operations(
-        target_asset_info_on_swap.clone(),
+
+    let swap_responses = config.swap_smart_router.build_swap_operations(
+        querier,
+        &config.swap_router_contract,
         initial_receive_asset_info.clone(),
-        config.fee_denom.as_str(),
+        target_asset_info_on_swap.clone(),
+        Some(to_send.amount().clone()),
+        config.fee_denom.clone(),
     );
-    let mut minimum_receive = to_send.amount();
-    let mut ibc_transfer_amount = to_send.amount();
+
+    if swap_responses.is_err() {
+        follow_up_msgs_data.follow_up_msg = swap_responses.unwrap_err().to_string();
+        follow_up_msgs_data.is_success = false;
+
+        return Ok(follow_up_msgs_data);
+    }
+
+    let swap_responses = swap_responses.unwrap();
+    let swap_operations = swap_responses.swap_ops;
+    let minimum_receive = swap_responses.actual_minimum_receive;
+
+    let mut ibc_transfer_amount = minimum_receive.clone();
 
     if swap_operations.len() > 0 {
-        let response = config.swap_router_contract.simulate_swap(
-            querier,
-            to_send.amount().clone(),
-            swap_operations.clone(),
-        );
-        if response.is_err() {
-            follow_up_msgs_data.follow_up_msg = format!(
-                "Cannot simulate swap with ops: {:?} with error: {:?}",
-                swap_operations,
-                response.unwrap_err().to_string()
-            );
-            follow_up_msgs_data.is_success = false;
-
-            return Ok(follow_up_msgs_data);
-        }
-        minimum_receive = response.unwrap().amount;
-        ibc_transfer_amount = minimum_receive;
-
         let from_asset = Asset {
             amount: minimum_receive,
             info: target_asset_info_on_swap,
@@ -730,34 +724,6 @@ pub fn get_follow_up_msgs(
     };
     follow_up_msgs_data.sub_msgs = sub_msgs;
     return Ok(follow_up_msgs_data);
-}
-
-pub fn build_swap_operations(
-    destination_asset_info_on_orai: AssetInfo,
-    initial_receive_asset_info: AssetInfo,
-    fee_denom: &str,
-) -> Vec<SwapOperation> {
-    // always swap with orai first cuz its base denom & every token has a pair with it
-    let fee_denom_asset_info = AssetInfo::NativeToken {
-        denom: fee_denom.to_string(),
-    };
-    let mut swap_operations = vec![];
-    if destination_asset_info_on_orai.eq(&initial_receive_asset_info) {
-        return vec![];
-    }
-    if initial_receive_asset_info.ne(&fee_denom_asset_info) {
-        swap_operations.push(SwapOperation::OraiSwap {
-            offer_asset_info: initial_receive_asset_info.clone(),
-            ask_asset_info: fee_denom_asset_info.clone(),
-        })
-    }
-    if destination_asset_info_on_orai.ne(&fee_denom_asset_info) {
-        swap_operations.push(SwapOperation::OraiSwap {
-            offer_asset_info: fee_denom_asset_info.clone(),
-            ask_asset_info: destination_asset_info_on_orai,
-        });
-    }
-    swap_operations
 }
 
 pub fn build_swap_msgs(
@@ -1075,33 +1041,6 @@ pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
         token_fee.nominator,
         token_fee.denominator,
     ))
-}
-
-pub fn get_swap_token_amount_out_from_orai(
-    querier: &QuerierWrapper,
-    offer_amount: Uint128,
-    swap_router_contract: &RouterController,
-    ask_asset_info: AssetInfo,
-) -> Uint128 {
-    let orai_asset_info = AssetInfo::NativeToken {
-        denom: "orai".to_string(),
-    };
-    if ask_asset_info.eq(&orai_asset_info) {
-        return offer_amount;
-    }
-    let token_price = swap_router_contract
-        .simulate_swap(
-            querier,
-            offer_amount,
-            vec![SwapOperation::OraiSwap {
-                offer_asset_info: orai_asset_info,
-                // always swap with orai. If it does not share a pool with ORAI => ignore, no fee
-                ask_asset_info,
-            }],
-        )
-        .map(|data| data.amount)
-        .unwrap_or_default();
-    token_price
 }
 
 pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
