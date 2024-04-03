@@ -64,11 +64,13 @@ export const deployIcs20Token = async (
   {
     swap_router_contract,
     converter_contract,
+    swap_smart_router,
     gov_contract = senderAddress,
   }: {
     gov_contract?: string;
     swap_router_contract: string;
     converter_contract: string;
+    swap_smart_router: string;
   }
 ): Promise<CwIcs20LatestClient> => {
   const { codeId } = await client.upload(
@@ -88,6 +90,7 @@ export const deployIcs20Token = async (
       gov_contract,
       swap_router_contract,
       converter_contract,
+      swap_smart_router,
     },
     "cw-ics20-latest",
     "auto"

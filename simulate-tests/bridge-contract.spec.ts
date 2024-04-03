@@ -45,6 +45,7 @@ const bobAddressEth = "0x8754032Ac7966A909e2E753308dF56bb08DabD69";
 const bridgeReceiver = "tron-testnet0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222";
 const routerContractAddress = "placeholder"; // we will update the contract config later when we need to deploy the actual router contract
 const converterContractAddress = "converter"; // we will update the contract config later when we need to deploy the actual converter contract
+const smartRouterContractAddress = "smart-router";
 const cosmosSenderAddress = bech32.encode(
   "cosmos",
   bech32.decode(oraiSenderAddress).words
@@ -106,6 +107,7 @@ describe.only("IBCModule", () => {
     ics20Contract = await deployIcs20Token(oraiClient, {
       swap_router_contract: routerContractAddress,
       converter_contract: converterContractAddress,
+      swap_smart_router: smartRouterContractAddress,
     });
     oraiPort = "wasm." + ics20Contract.contractAddress;
     packetData.dest.port_id = oraiPort;
@@ -204,6 +206,7 @@ describe.only("IBCModule", () => {
     const ics20Contract = await deployIcs20Token(oraiClient, {
       swap_router_contract: routerContractAddress,
       converter_contract: converterContractAddress,
+      swap_smart_router: smartRouterContractAddress,
     });
     const oraiPort = "wasm." + ics20Contract.contractAddress;
     let newPacketData = {
@@ -1013,7 +1016,7 @@ describe.only("IBCModule", () => {
       expect(
         result.attributes.find((attr) => attr.key === "ibc_error_msg").value
       ).toEqual(
-        'Cannot simulate swap with ops: [OraiSwap { offer_asset_info: Token { contract_addr: Addr("orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu") }, ask_asset_info: NativeToken { denom: "orai" } }, OraiSwap { offer_asset_info: NativeToken { denom: "orai" }, ask_asset_info: NativeToken { denom: "ibc/EB7094899ACFB7A6F2A67DB084DEE2E9A83DEFAA5DEF92D9A9814FFD9FF673FA" } }] with error: "Error parsing into type oraiswap::router::SimulateSwapOperationsResponse: unknown field `ok`, expected `amount`"'
+        'Generic error: Cannot simulate swap with ops: [OraiSwap { offer_asset_info: Token { contract_addr: Addr("orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu") }, ask_asset_info: NativeToken { denom: "orai" } }, OraiSwap { offer_asset_info: NativeToken { denom: "orai" }, ask_asset_info: NativeToken { denom: "ibc/EB7094899ACFB7A6F2A67DB084DEE2E9A83DEFAA5DEF92D9A9814FFD9FF673FA" } }] with error: "Error parsing into type oraiswap::router::SimulateSwapOperationsResponse: unknown field `ok`, expected `amount`"'
       );
     });
 
