@@ -898,7 +898,7 @@ describe.only("IBCModule", () => {
           oraiIbcDenom
         ),
         bobAddress,
-        "Generic error: The destination info is neither evm or cosmos based",
+        "Generic error: The destination info is neither evm nor cosmos based",
       ],
     ])(
       "cw-ics20-test-single-step-native-token-swap-operations-to-dest-denom memo %s expected recipient %s",
@@ -1281,7 +1281,7 @@ describe.only("IBCModule", () => {
           (attr) =>
             attr.key === "ibc_error_msg" &&
             attr.value ===
-              "Generic error: The destination info is neither evm or cosmos based"
+              "Generic error: The destination info is neither evm nor cosmos based"
         );
         expect(ibcErrorMsg).not.toBeUndefined();
       }
