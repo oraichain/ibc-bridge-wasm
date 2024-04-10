@@ -37,7 +37,7 @@ pub const ORAIBRIDGE_PREFIX: &str = "oraib";
 /// This is compatible with the JSON serialization
 #[cw_serde]
 pub struct Ics20Packet {
-    /// amount of tokens to transfer is encoded as a string, but limited to u64 max
+    /// amount of tokens to transfer is encoded as a string
     pub amount: Uint128,
     /// the token denomination to be transferred
     pub denom: String,
