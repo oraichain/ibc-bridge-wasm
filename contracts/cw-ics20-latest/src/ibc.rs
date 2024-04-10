@@ -406,7 +406,7 @@ fn do_ibc_packet_receive(
         );
     }
 
-    Err(ContractError::Std(StdError::generic_err("Not suppported")))
+    Err(ContractError::Std(StdError::generic_err("Not supported")))
 }
 
 fn handle_ibc_packet_receive_native_remote_chain(
@@ -864,7 +864,7 @@ pub fn build_ibc_msg(
         )]);
     }
     Err(StdError::generic_err(
-        "The destination info is neither evm or cosmos based",
+        "The destination info is neither evm nor cosmos based",
     ))
 }
 
