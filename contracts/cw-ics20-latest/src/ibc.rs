@@ -96,7 +96,6 @@ pub fn ack_fail(err: String) -> Binary {
     to_binary(&res).unwrap()
 }
 
-// pub const RECEIVE_ID: u64 = 1337;
 pub const NATIVE_RECEIVE_ID: u64 = 1338;
 pub const FOLLOW_UP_IBC_SEND_FAILURE_ID: u64 = 1339;
 pub const REFUND_FAILURE_ID: u64 = 1340;
@@ -393,7 +392,6 @@ fn do_ibc_packet_receive(
     relayer: &str,
 ) -> Result<IbcReceiveResponse, ContractError> {
     let msg: Ics20Packet = from_binary(&packet.data)?;
-    // let channel = packet.dest.channel_id.clone();
 
     // If the token originated on the remote chain, it looks like "ucosm".
     // If it originated on our chain, it looks like "port/channel/ucosm".
@@ -1007,7 +1005,7 @@ pub fn deduct_relayer_fee(
     // this is bech32 prefix of sender from other chains. Should not error because we are in the cosmos ecosystem. Every address should have prefix
     // evm case, need to filter remote token denom since prefix is always oraib
     let prefix_result = get_prefix_decode_bech32(remote_address);
-    // api.debug(format!("prefix: {}", prefix).as_str());
+
     let prefix: String = if prefix_result.is_err() {
         convert_remote_denom_to_evm_prefix(remote_token_denom)
     } else {
