@@ -83,6 +83,9 @@ pub enum ContractError {
 
     #[error("Invalid destination memo {error}")]
     InvalidDestinationMemo { error: String },
+
+    #[error("User cannot close channel")]
+    CannotClose {},
 }
 
 impl From<FromUtf8Error> for ContractError {

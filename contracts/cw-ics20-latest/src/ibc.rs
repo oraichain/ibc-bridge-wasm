@@ -272,11 +272,12 @@ fn enforce_order_and_version(
 pub fn ibc_channel_close(
     _deps: DepsMut,
     _env: Env,
-    _channel: IbcChannelCloseMsg,
+    channel: IbcChannelCloseMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
-    // TODO: what to do here?
-    // we will have locked funds that need to be returned somehow
-    unimplemented!();
+    match channel {
+        IbcChannelCloseMsg::CloseConfirm { .. } => Ok(IbcBasicResponse::new()),
+        IbcChannelCloseMsg::CloseInit { .. } => Err(ContractError::CannotClose {}),
+    }
 }
 
 #[entry_point]
