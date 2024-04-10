@@ -263,7 +263,7 @@ fn enforce_order_and_version(
         }
     }
     if channel.order != ICS20_ORDERING {
-        return Err(ContractError::OnlyOrderedChannel {});
+        return Err(ContractError::OnlyUnorderedChannel {});
     }
     Ok(())
 }

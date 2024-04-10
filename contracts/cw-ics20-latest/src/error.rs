@@ -40,7 +40,7 @@ pub enum ContractError {
     InvalidIbcVersion { version: String },
 
     #[error("Only supports unordered channel")]
-    OnlyOrderedChannel {},
+    OnlyUnorderedChannel {},
 
     #[error("Insufficient funds to redeem voucher on channel {id}, {denom}")]
     InsufficientFunds { id: String, denom: String },
