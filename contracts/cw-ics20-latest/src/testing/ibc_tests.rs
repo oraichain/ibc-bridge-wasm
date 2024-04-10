@@ -1133,7 +1133,7 @@ fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
     .unwrap_err();
     assert_eq!(
         result,
-        StdError::generic_err("The destination info is neither evm or cosmos based")
+        StdError::generic_err("The destination info is neither evm nor cosmos based")
     )
 }
 
