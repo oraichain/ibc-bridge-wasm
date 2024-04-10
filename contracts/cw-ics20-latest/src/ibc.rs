@@ -942,6 +942,18 @@ pub fn process_deduct_fee(
     let local_denom = local_amount.denom();
     let (deducted_amount, token_fee) =
         deduct_token_fee(storage, remote_token_denom, local_amount.amount())?;
+
+    let mut fee_data = FeeData {
+        deducted_amount,
+        token_fee: Amount::from_parts(local_denom.clone(), token_fee),
+        relayer_fee: Amount::from_parts(local_denom.clone(), Uint128::zero()),
+    };
+    // if after token fee, the deducted amount is 0 then we deduct all to token fee
+    if deducted_amount.is_zero() {
+        fee_data.token_fee = local_amount;
+        return Ok(fee_data);
+    }
+
     // simulate for relayer fee
     let ask_asset_info = denom_to_asset_info(api, &local_amount.raw_denom());
 
@@ -955,23 +967,10 @@ pub fn process_deduct_fee(
         swap_router_contract,
     )?;
 
-    let mut fee_data = FeeData {
-        deducted_amount: deducted_amount.checked_sub(relayer_fee).unwrap_or_default(),
-        token_fee: Amount::from_parts(local_denom.clone(), token_fee),
-        relayer_fee: Amount::from_parts(local_denom.clone(), relayer_fee),
-    };
-
-    // if after token fee, the deducted amount is 0 then we deduct all to token fee
-    if deducted_amount.is_zero() {
-        fee_data.deducted_amount = Uint128::zero();
-        fee_data.token_fee = local_amount;
-        fee_data.relayer_fee = Amount::from_parts(local_denom, Uint128::zero());
-        return Ok(fee_data);
-    }
+    fee_data.deducted_amount = deducted_amount.checked_sub(relayer_fee).unwrap_or_default();
+    fee_data.relayer_fee = Amount::from_parts(local_denom.clone(), relayer_fee);
     // if the relayer fee makes the final amount 0, then we charge the remaining deducted amount as relayer fee
     if fee_data.deducted_amount.is_zero() {
-        fee_data.deducted_amount = Uint128::zero();
-        fee_data.token_fee = Amount::from_parts(local_denom.clone(), token_fee);
         fee_data.relayer_fee = Amount::from_parts(local_denom.clone(), deducted_amount);
         return Ok(fee_data);
     }
