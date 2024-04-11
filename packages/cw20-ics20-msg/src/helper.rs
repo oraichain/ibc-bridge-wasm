@@ -12,10 +12,10 @@ pub fn get_prefix_decode_bech32(address: &str) -> StdResult<String> {
     Ok(prefix)
 }
 
-pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
+pub fn parse_asset_info_denom(asset_info: &AssetInfo) -> String {
     match asset_info {
         AssetInfo::Token { contract_addr } => format!("cw20:{}", contract_addr.as_str()),
-        AssetInfo::NativeToken { denom } => denom,
+        AssetInfo::NativeToken { denom } => denom.to_string(),
     }
 }
 
