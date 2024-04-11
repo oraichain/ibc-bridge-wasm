@@ -67,7 +67,7 @@ impl Ics20Packet {
     }
 
     pub fn validate(&self) -> Result<(), ContractError> {
-        if self.amount.u128() > (u128::MAX as u128) {
+        if self.amount.u128() > u128::MAX {
             Err(ContractError::AmountOverflow {})
         } else {
             Ok(())
@@ -106,23 +106,15 @@ pub const ACK_FAILURE_ID: u64 = 64023;
 
 #[entry_point]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, ContractError> {
-    match reply.id {
-        // happens only when send cw20 amount to recipient failed. Wont refund because this case is unlikely to happen
-        NATIVE_RECEIVE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
-            // so no undo increase channel balance
-            SubMsgResult::Err(err) => Ok(Response::new()
+    if let SubMsgResult::Err(err) = reply.result {
+        return match reply.id {
+            // happens only when send cw20 amount to recipient failed. Wont refund because this case is unlikely to happen
+            NATIVE_RECEIVE_ID => Ok(Response::new()
                 .set_data(ack_success())
                 .add_attribute("action", "native_receive_id")
                 .add_attribute("error_transferring_ibc_tokens_to_cw20", err)),
-        },
-        // happens when swap failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
-        SWAP_OPS_FAILURE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
-            // so no undo increase channel balance
-            SubMsgResult::Err(err) => {
+            // happens when swap failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
+            SWAP_OPS_FAILURE_ID => {
                 let reply_args = REPLY_ARGS.load(deps.storage)?;
                 REPLY_ARGS.remove(deps.storage);
                 let sub_msg = handle_packet_refund(
@@ -138,12 +130,9 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     .add_attribute("action", "swap_ops_failure_id")
                     .add_attribute("error_swap_ops", err))
             }
-        },
-        // happens when failed to ibc send the packet to another chain after receiving the packet from the first remote chain.
-        // also when swap is successful. Will refund similarly to swap ops
-        FOLLOW_UP_IBC_SEND_FAILURE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => {
+            // happens when failed to ibc send the packet to another chain after receiving the packet from the first remote chain.
+            // also when swap is successful. Will refund similarly to swap ops
+            FOLLOW_UP_IBC_SEND_FAILURE_ID => {
                 let reply_args = SINGLE_STEP_REPLY_ARGS.load(deps.storage)?;
                 SINGLE_STEP_REPLY_ARGS.remove(deps.storage);
                 // only time where we undo reduce chann balance because this message is sent and reduced optimistically on Oraichain. If fail then we undo and then refund
@@ -173,32 +162,26 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                         attr("refund_recipient", reply_args.local_receiver),
                     ]))
             }
-        },
-        // fallback case when refund fails. Wont retry => will refund manually
-        REFUND_FAILURE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => Ok(Response::new()
+            // fallback case when refund fails. Wont retry => will refund manually
+            REFUND_FAILURE_ID => {
                 // we all set ack success so that this token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
-                .set_data(ack_success())
-                .add_attribute("action", "refund_failure_id")
-                .add_attribute("error_trying_to_refund_single_step", err)),
-        },
-        // fallback case when we dont have a mapping and have to do IBC transfer and it also failed. Wont refund because it is a rare case as we dont use IBC transfer as much
-        // this means that we are sending to a normal ibc transfer channel, not ibc wasm.
-        IBC_TRANSFER_NATIVE_ERROR_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            SubMsgResult::Err(err) => Ok(Response::new()
+                Ok(Response::new()
+                    .set_data(ack_success())
+                    .add_attribute("action", "refund_failure_id")
+                    .add_attribute("error_trying_to_refund_single_step", err))
+            }
+
+            // fallback case when we dont have a mapping and have to do IBC transfer and it also failed. Wont refund because it is a rare case as we dont use IBC transfer as much
+            // this means that we are sending to a normal ibc transfer channel, not ibc wasm.
+            IBC_TRANSFER_NATIVE_ERROR_ID => {
                 // we all set ack success so that this token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
-                .set_data(ack_success())
-                .add_attribute("action", "ibc_transfer_native_error_id")
-                .add_attribute("error_trying_to_transfer_ibc_native_with_error", err)),
-        },
-        // happens when convert failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
-        CONVERT_FAILURE_ID => match reply.result {
-            SubMsgResult::Ok(_) => Ok(Response::new()),
-            // we all set ack success so that the token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
-            // so no undo increase
-            SubMsgResult::Err(err) => {
+                Ok(Response::new()
+                    .set_data(ack_success())
+                    .add_attribute("action", "ibc_transfer_native_error_id")
+                    .add_attribute("error_trying_to_transfer_ibc_native_with_error", err))
+            }
+            // happens when convert failed. Will refund by sending to the initial receiver of the packet receive, amount is local on Oraichain & send through cw20
+            CONVERT_FAILURE_ID => {
                 let reply_args = CONVERT_REPLY_ARGS.load(deps.storage)?;
                 CONVERT_REPLY_ARGS.remove(deps.storage);
                 let sub_msg = handle_asset_refund(reply_args.local_receiver, reply_args.asset)?;
@@ -209,9 +192,11 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     .add_attribute("action", "convert_failure_id")
                     .add_attribute("error_convert_ops", err))
             }
-        },
-        _ => Err(ContractError::UnknownReplyId { id: reply.id }),
+            _ => Err(ContractError::UnknownReplyId { id: reply.id }),
+        };
     }
+    // default response
+    Ok(Response::new())
 }
 
 #[entry_point]
