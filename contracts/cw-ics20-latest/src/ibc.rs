@@ -900,7 +900,7 @@ pub fn process_ibc_msg(
         msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
             src_channel_id: src_channel.to_string(),
             ibc_denom: pair_query.key.clone(),
-            amount: remote_amount.clone(),
+            amount: remote_amount,
             local_receiver: local_receiver.to_string(),
         })?,
         funds: vec![],
@@ -916,7 +916,7 @@ pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, Contr
     match amount {
         Amount::Cw20(coin) => {
             // if cw20 token, use the registered gas limit, or error if not whitelisted
-            let addr = deps.api.addr_validate(&coin.address)?;
+            let addr = deps.api.addr_validate(coin.address.as_str())?;
             let allowed = ALLOW_LIST.may_load(deps.storage, &addr)?;
             match allowed {
                 Some(allow) => Ok(allow.gas_limit),
@@ -1232,11 +1232,9 @@ pub fn build_ibc_send_packet(
 ) -> StdResult<IbcMsg> {
     // build ics20 packet
     let packet = Ics20Packet::new(
-        amount.clone(),
+        amount,
         denom, // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
-        sender,
-        receiver,
-        memo,
+        sender, receiver, memo,
     );
     packet
         .validate()

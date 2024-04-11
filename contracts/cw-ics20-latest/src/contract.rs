@@ -5,7 +5,7 @@ use cosmwasm_std::{
     IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
 };
 use cw2::set_contract_version;
-use cw20::{Cw20Coin, Cw20ReceiveMsg};
+use cw20::Cw20ReceiveMsg;
 use cw20_ics20_msg::converter::ConverterController;
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
@@ -205,17 +205,12 @@ pub fn handle_increase_channel_balance_ibc_receive(
 ) -> Result<Response, ContractError> {
     is_caller_contract(caller, contract_addr)?;
     // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
-    increase_channel_balance(
-        deps.storage,
-        &dst_channel_id,
-        &ibc_denom,
-        remote_amount.clone(),
-    )?;
+    increase_channel_balance(deps.storage, &dst_channel_id, &ibc_denom, remote_amount)?;
     // we need to save the data to update the balances in reply
     let reply_args = ReplyArgs {
         channel: dst_channel_id.clone(),
         denom: ibc_denom.clone(),
-        amount: remote_amount.clone(),
+        amount: remote_amount,
         local_receiver: local_receiver.clone(),
     };
     REPLY_ARGS.save(deps.storage, &reply_args)?;
@@ -324,10 +319,7 @@ pub fn execute_receive(
 ) -> Result<Response, ContractError> {
     nonpayable(&info)?;
 
-    let amount = Amount::Cw20(Cw20Coin {
-        address: info.sender.to_string(),
-        amount: wrapper.amount,
-    });
+    let amount = Amount::cw20(wrapper.amount, info.sender);
     let api = deps.api;
 
     let msg: TransferBackMsg = from_binary(&wrapper.msg)?;
@@ -427,10 +419,8 @@ pub fn execute_transfer_back_to_remote_chain(
     let config = CONFIG.load(deps.storage)?;
 
     // should be in form port/channel/denom
-    let mappings = get_mappings_from_asset_info(
-        deps.as_ref().storage,
-        amount.into_asset_info(deps.api)?,
-    )?;
+    let mappings =
+        get_mappings_from_asset_info(deps.as_ref().storage, amount.into_asset_info(deps.api)?)?;
 
     // parse denom & compare with user input. Should not use string.includes() because hacker can fake a port that has the same remote denom to return true
     let mapping = mappings

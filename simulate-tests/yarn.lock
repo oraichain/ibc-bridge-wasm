@@ -1417,10 +1417,10 @@
   resolved "https://registry.yarnpkg.com/@oraichain/common-contracts-sdk/-/common-contracts-sdk-1.0.31.tgz#595f93b168438d69d64896909b37855c9afc92fb"
   integrity sha512-s8H20RXy5gCnu3DnM7L5ClQyj2mdQpbSBpZrXCpIAX9qY0LKsDdZG3sYaDQ8+VN333jz9Pp/qGWdFSYD+6PBsg==
 
-"@oraichain/cosmwasm-vm-js@^0.2.81":
-  version "0.2.81"
-  resolved "https://registry.yarnpkg.com/@oraichain/cosmwasm-vm-js/-/cosmwasm-vm-js-0.2.81.tgz#1c3350ce1eac169bd94a51641267ec96eef89114"
-  integrity sha512-fvBpZKxC/B5eEmn754AUrdU0OtRUOEIOMAXJiI1HLcYjfj5bjtbiLJVjpHeMMNEXdUYU9tUqYJlhaDO50+wK8A==
+"@oraichain/cosmwasm-vm-js@^0.2.84":
+  version "0.2.84"
+  resolved "https://registry.yarnpkg.com/@oraichain/cosmwasm-vm-js/-/cosmwasm-vm-js-0.2.84.tgz#5b8edb42a2bc3ea1b92bc75839c016aa18595b47"
+  integrity sha512-KYe4jqB8ly2/5sb3LglkGmWt8YTAX7hqQulkjU93WByCIc7zGv4P7r8zmXHULFq2dD5i+eHHbeYXtz1VslTI4w==
   dependencies:
     "@cosmjs/amino" "^0.31.0"
     "@cosmjs/crypto" "^0.31.0"
@@ -1431,17 +1431,17 @@
     elliptic "^6.5.4"
     secp256k1 "^4.0.3"
 
-"@oraichain/cw-simulate@^2.8.78":
-  version "2.8.78"
-  resolved "https://registry.yarnpkg.com/@oraichain/cw-simulate/-/cw-simulate-2.8.78.tgz#c448b4f18a0bbc982c1bc92e467babd07aaeb9f3"
-  integrity sha512-POYi7F2RFGOycoDTmBp6VJzYcWJjxu3w8Iv0hc7LdN4dc6YCrmDxxOepzFJlp9caJEWTH3CCMPaY4ieWM+k2hA==
+"@oraichain/cw-simulate@^2.8.82":
+  version "2.8.82"
+  resolved "https://registry.yarnpkg.com/@oraichain/cw-simulate/-/cw-simulate-2.8.82.tgz#2daa4ed750b86c92075f8059f8409e0848677ff4"
+  integrity sha512-QLDQcs/hRItZqjpo5KVmWfxj/hI0mje38MIQ7nP7Ub156B8Tr2BU9VTniOGBp1jy00NFifgH43tRDV70lzjDBw==
   dependencies:
     "@cosmjs/amino" "^0.31.0"
     "@cosmjs/cosmwasm-stargate" "^0.31.0"
     "@cosmjs/crypto" "^0.31.0"
     "@cosmjs/encoding" "^0.31.0"
     "@kiruse/serde" "^0.8.0-rc.6"
-    "@oraichain/cosmwasm-vm-js" "^0.2.81"
+    "@oraichain/cosmwasm-vm-js" "^0.2.84"
     eventemitter3 "^5.0.0"
     protobufjs "^7.2.3"
     ts-results "^3.3.0"
