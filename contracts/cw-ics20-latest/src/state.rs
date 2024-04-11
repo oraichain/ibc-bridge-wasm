@@ -156,13 +156,12 @@ pub fn increase_channel_balance(
     denom: &str, // should be ibc denom
     amount: Uint128,
 ) -> Result<(), ContractError> {
-    CHANNEL_REVERSE_STATE.update(storage, (channel, denom), |orig| -> StdResult<_> {
-        let mut state = orig.unwrap_or_default();
-        state.outstanding += amount;
-        state.total_sent += amount;
-        Ok(state)
-    })?;
-    Ok(())
+    let store = CHANNEL_REVERSE_STATE.key((channel, denom));
+    // whatever error or not found, return default
+    let mut state = store.load(storage).unwrap_or_default();
+    state.outstanding += amount;
+    state.total_sent += amount;
+    store.save(storage, &state).map_err(ContractError::Std)
 }
 
 pub fn reduce_channel_balance(
@@ -171,26 +170,24 @@ pub fn reduce_channel_balance(
     denom: &str, // should be ibc denom
     amount: Uint128,
 ) -> Result<(), ContractError> {
-    CHANNEL_REVERSE_STATE.update(
-        storage,
-        (channel, denom),
-        |orig| -> Result<_, ContractError> {
-            // this will return error if we don't have the funds there to cover the request (or no denom registered)
-            let mut cur = orig.ok_or(ContractError::NoSuchChannelState {
+    let store = CHANNEL_REVERSE_STATE.key((channel, denom));
+    let Ok(mut state) = store.load(storage) else {
+        return Err(ContractError::NoSuchChannelState {
+            id: channel.to_string(),
+            denom: denom.to_string(),
+        });
+    };
+
+    state.outstanding =
+        state
+            .outstanding
+            .checked_sub(amount)
+            .map_err(|_| ContractError::InsufficientFunds {
                 id: channel.to_string(),
                 denom: denom.to_string(),
             })?;
-            cur.outstanding =
-                cur.outstanding
-                    .checked_sub(amount)
-                    .or(Err(ContractError::InsufficientFunds {
-                        id: channel.to_string(),
-                        denom: denom.to_string(),
-                    }))?;
-            Ok(cur)
-        },
-    )?;
-    Ok(())
+
+    store.save(storage, &state).map_err(ContractError::Std)
 }
 
 // only used for admin of the contract
