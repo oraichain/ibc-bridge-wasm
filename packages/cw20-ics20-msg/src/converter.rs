@@ -25,15 +25,14 @@ impl ConverterController {
         querier: &QuerierWrapper,
         source_info: &AssetInfo,
     ) -> Option<ConvertInfoResponse> {
-        match querier.query_wasm_smart(
-            self.addr(),
-            &converter::QueryMsg::ConvertInfo {
-                asset_info: source_info.to_owned(),
-            },
-        ) {
-            Ok(val) => return val,
-            Err(_) => return None,
-        };
+        querier
+            .query_wasm_smart(
+                self.addr(),
+                &converter::QueryMsg::ConvertInfo {
+                    asset_info: source_info.to_owned(),
+                },
+            )
+            .ok()
     }
 
     pub fn process_convert(
@@ -48,7 +47,7 @@ impl ConverterController {
                 return Ok((
                     None,
                     Asset {
-                        info: source_info.to_owned(),
+                        info: source_info.clone(),
                         amount,
                     },
                 ))
@@ -60,11 +59,14 @@ impl ConverterController {
                         amount: amount * converter_info.token_ratio.ratio,
                     };
 
-                    let msg = match source_info.to_owned() {
+                    let msg = match source_info {
                         AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: self.addr(),
                             msg: to_binary(&converter::ExecuteMsg::Convert {})?,
-                            funds: vec![Coin { denom, amount }],
+                            funds: vec![Coin {
+                                denom: denom.clone(),
+                                amount,
+                            }],
                         }),
                         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: contract_addr.to_string(),

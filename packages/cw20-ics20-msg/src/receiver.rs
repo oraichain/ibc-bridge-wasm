@@ -25,15 +25,8 @@ impl Default for DestinationInfo {
 impl DestinationInfo {
     // destination string format: <destination-channel>/<receiver>:<denom>
     pub fn from_str(value: &str) -> Self {
-        let (destination, denom) = match value.split_once(':') {
-            Some((destination, denom)) => (destination, denom),
-            None => (value, ""),
-        };
-
-        let (channel, receiver) = match destination.split_once('/') {
-            Some((channel, receiver)) => (channel, receiver),
-            None => ("", destination),
-        };
+        let (destination, denom) = value.split_once(':').unwrap_or((value, ""));
+        let (channel, receiver) = destination.split_once('/').unwrap_or(("", destination));
 
         Self {
             receiver: receiver.to_string(),
@@ -47,15 +40,8 @@ impl DestinationInfo {
     }
 
     fn from_binary(value: &Binary) -> StdResult<Self> {
-        let deserialized = match Bufany::deserialize(&value) {
-            Ok(val) => val,
-            Err(err) => {
-                return Err(StdError::generic_err(format!(
-                    "Error on deserialize: {:?}",
-                    err
-                )))
-            }
-        };
+        let deserialized = Bufany::deserialize(&value)
+            .map_err(|err| StdError::generic_err(format!("Error on deserialize: {:?}", err)))?;
 
         let destination_receiver = deserialized
             .string(1)
@@ -95,15 +81,10 @@ impl DestinationInfo {
     }
 
     pub fn is_receiver_cosmos_based(&self) -> bool {
-        match get_prefix_decode_bech32(&self.receiver).ok() {
-            None => false,
-            Some(prefix) => {
-                if prefix.is_empty() {
-                    return false;
-                }
-                true
-            }
-        }
+        get_prefix_decode_bech32(&self.receiver)
+            .unwrap_or_default() // empty string if error
+            .len()
+            > 0
     }
 }
 
