@@ -19,7 +19,7 @@ pub struct IbcHooksUniversalSwap {
 
 impl IbcHooksUniversalSwap {
     pub fn from_binary(api: &dyn Api, value: &Binary) -> StdResult<Self> {
-        let deserialized = Bufany::deserialize(&value)
+        let deserialized = Bufany::deserialize(value)
             .map_err(|err| StdError::generic_err(format!("Error on deserialize: {:?}", err)))?;
 
         let receiver = api

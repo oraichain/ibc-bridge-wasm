@@ -1273,7 +1273,7 @@ fn test_deduct_fee() {
             },
             Uint128::from(1000u64)
         ),
-        Uint128::from(0u64)
+        Uint128::zero()
     );
     assert_eq!(
         deduct_fee(
@@ -1407,7 +1407,7 @@ fn test_deduct_relayer_fee() {
         &swap_router_contract,
     )
     .unwrap();
-    assert_eq!(result, Uint128::from(0u64));
+    assert_eq!(result, Uint128::zero());
 
     // remote address is wrong (dont follow bech32 form)
     assert_eq!(
@@ -1436,7 +1436,7 @@ fn test_deduct_relayer_fee() {
             &swap_router_contract,
         )
         .unwrap(),
-        Uint128::from(0u64)
+        Uint128::zero()
     );
 
     // oraib prefix case.

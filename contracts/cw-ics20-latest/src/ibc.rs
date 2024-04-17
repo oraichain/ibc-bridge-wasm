@@ -781,7 +781,7 @@ pub fn build_ibc_msg(
     let (is_evm_based, _) = destination.is_receiver_evm_based();
     if is_evm_based {
         if let Some(mapping) = pair_mapping {
-            return Ok(process_ibc_msg(
+            return process_ibc_msg(
                 mapping,
                 env.contract.address.to_string(),
                 local_receiver,
@@ -791,7 +791,7 @@ pub fn build_ibc_msg(
                 Some(destination.receiver.clone()),
                 amount,
                 timeout,
-            )?);
+            );
         }
         return Err(StdError::generic_err("cannot find pair mappings"));
     }
@@ -799,7 +799,7 @@ pub fn build_ibc_msg(
     let is_cosmos_based = destination.is_receiver_cosmos_based();
     if is_cosmos_based {
         if let Some(mapping) = pair_mapping {
-            return Ok(process_ibc_msg(
+            return process_ibc_msg(
                 mapping,
                 env.contract.address.to_string(),
                 local_receiver,
@@ -809,7 +809,7 @@ pub fn build_ibc_msg(
                 None, // no need memo because it is not used in the remote cosmos based chain
                 amount,
                 timeout,
-            )?);
+            );
         }
 
         // final case, where the destination token is from a remote chain that we dont have a pair mapping with.
@@ -959,13 +959,13 @@ pub fn deduct_token_fee(
     remote_token_denom: &str,
     amount: Uint128,
 ) -> StdResult<(Uint128, Uint128)> {
-    let token_fee = TOKEN_FEE.may_load(storage, &remote_token_denom)?;
+    let token_fee = TOKEN_FEE.may_load(storage, remote_token_denom)?;
     if let Some(token_fee) = token_fee {
         let fee = deduct_fee(token_fee, amount);
         let new_deducted_amount = amount.checked_sub(fee)?;
         return Ok((new_deducted_amount, fee));
     }
-    Ok((amount, Uint128::from(0u64)))
+    Ok((amount, Uint128::zero()))
 }
 
 pub fn deduct_relayer_fee(
@@ -1008,7 +1008,7 @@ pub fn deduct_relayer_fee(
 pub fn deduct_fee(token_fee: Ratio, amount: Uint128) -> Uint128 {
     // ignore case where denominator is zero since we cannot divide with 0
     if token_fee.denominator == 0 {
-        return Uint128::from(0u64);
+        return Uint128::zero();
     }
     amount.mul(Decimal::from_ratio(
         token_fee.nominator,
@@ -1028,7 +1028,7 @@ pub fn get_swap_token_amount_out_from_orai(
     if ask_asset_info.eq(&orai_asset_info) {
         return offer_amount;
     }
-    let token_price = swap_router_contract
+    swap_router_contract
         .simulate_swap(
             querier,
             offer_amount,
@@ -1039,13 +1039,12 @@ pub fn get_swap_token_amount_out_from_orai(
             }],
         )
         .map(|data| data.amount)
-        .unwrap_or_default();
-    token_price
+        .unwrap_or_default()
 }
 
 pub fn convert_remote_denom_to_evm_prefix(remote_denom: &str) -> String {
     match remote_denom.split_once("0x") {
-        Some((evm_prefix, _)) => return evm_prefix.to_string(),
+        Some((evm_prefix, _)) => evm_prefix.to_string(),
         None => "".to_string(),
     }
 }
@@ -1165,7 +1164,7 @@ pub fn handle_packet_refund(
     packet_amount: Uint128,
 ) -> Result<SubMsg, ContractError> {
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
-    let pair_mapping = ics20_denoms().load(storage, &packet_denom)?;
+    let pair_mapping = ics20_denoms().load(storage, packet_denom)?;
     let to_send = Amount::from_parts(
         parse_asset_info_denom(&pair_mapping.asset_info),
         convert_remote_to_local(

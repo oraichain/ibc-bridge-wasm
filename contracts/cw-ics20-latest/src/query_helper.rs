@@ -38,14 +38,14 @@ pub fn get_destination_info_on_orai(
 ) -> (AssetInfo, Option<PairQuery>) {
     // destination is Oraichain
     if destination_channel.is_empty() {
-        return (denom_to_asset_info(api, &destination_denom), None);
+        return (denom_to_asset_info(api, destination_denom), None);
     }
 
     // case 1: port is ibc wasm, must be registered in mapping
     let ibc_denom = get_key_ics20_ibc_denom(
         &parse_ibc_wasm_port_id(env.contract.address.as_str()),
-        &destination_channel,
-        &destination_denom,
+        destination_channel,
+        destination_denom,
     );
     if let Ok(pair_mapping) = ics20_denoms().load(storage, &ibc_denom) {
         return (

@@ -65,7 +65,9 @@ impl<'a> IndexList<MappingMetadata> for MappingMetadataIndexex<'a> {
     }
 }
 
-// used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A, in form of ibc no hash for destination port & channel - transfer/channel-0/uatom for example; value - mapping data including asset info, can be either native or cw20
+///  used when chain A (no cosmwasm) sends native token to chain B (has cosmwasm). key - original denom of chain A,
+/// in form of ibc no hash for destination port & channel - transfer/channel-0/uatom for example; value - mapping data
+/// including asset info, can be either native or cw20
 pub fn ics20_denoms<'a>() -> IndexedMap<'a, &'a str, MappingMetadata, MappingMetadataIndexex<'a>> {
     let indexes = MappingMetadataIndexex {
         asset_info: MultiIndex::new(

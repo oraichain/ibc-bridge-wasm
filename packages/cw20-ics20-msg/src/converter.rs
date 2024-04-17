@@ -43,15 +43,13 @@ impl ConverterController {
         convert_type: ConvertType,
     ) -> StdResult<(Option<CosmosMsg>, Asset)> {
         match self.converter_info(querier, source_info) {
-            None => {
-                return Ok((
-                    None,
-                    Asset {
-                        info: source_info.clone(),
-                        amount,
-                    },
-                ))
-            }
+            None => Ok((
+                None,
+                Asset {
+                    info: source_info.clone(),
+                    amount,
+                },
+            )),
             Some(converter_info) => match convert_type {
                 ConvertType::FromSource => {
                     let return_asset = Asset {
@@ -79,7 +77,7 @@ impl ConverterController {
                         }),
                     };
 
-                    return Ok((Some(msg), return_asset));
+                    Ok((Some(msg), return_asset))
                 }
                 ConvertType::ToSource => {
                     let return_asset = Asset {
@@ -108,10 +106,10 @@ impl ConverterController {
                         }),
                     };
 
-                    return Ok((Some(msg), return_asset));
+                    Ok((Some(msg), return_asset))
                 }
             },
-        };
+        }
     }
 }
 

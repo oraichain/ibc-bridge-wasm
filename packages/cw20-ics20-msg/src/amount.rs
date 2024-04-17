@@ -16,9 +16,11 @@ pub enum Amount {
 
 impl Amount {
     pub fn from_parts(denom: String, amount: Uint128) -> Self {
-        if denom.starts_with("cw20:") {
-            let address = Addr::unchecked(&denom[5..]);
-            Amount::Cw20(Cw20CoinVerified { address, amount })
+        if let Some(address) = denom.strip_prefix("cw20:") {
+            Amount::Cw20(Cw20CoinVerified {
+                address: Addr::unchecked(address),
+                amount,
+            })
         } else {
             Amount::Native(Coin { denom, amount })
         }
@@ -70,11 +72,10 @@ impl Amount {
 
     /// convert the amount into u64
     pub fn u64_amount(&self) -> Result<u64, StdError> {
-        Ok(self
-            .amount()
+        self.amount()
             .u128()
             .try_into()
-            .map_err(|_| StdError::generic_err("error casting to u64 from u128".to_string()))?)
+            .map_err(|_| StdError::generic_err("error casting to u64 from u128".to_string()))
     }
 
     pub fn is_empty(&self) -> bool {

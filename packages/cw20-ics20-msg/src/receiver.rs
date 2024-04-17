@@ -40,7 +40,7 @@ impl DestinationInfo {
     }
 
     fn from_binary(value: &Binary) -> StdResult<Self> {
-        let deserialized = Bufany::deserialize(&value)
+        let deserialized = Bufany::deserialize(value)
             .map_err(|err| StdError::generic_err(format!("Error on deserialize: {:?}", err)))?;
 
         let destination_receiver = deserialized
