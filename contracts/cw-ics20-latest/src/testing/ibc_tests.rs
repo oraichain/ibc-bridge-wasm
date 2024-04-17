@@ -1169,7 +1169,7 @@ fn test_follow_up_msgs() {
         },
         "foobar",
         receiver,
-        &DestinationInfo::from_str(""),
+        &DestinationInfo::parse_str(""),
         None,
     )
     .unwrap();
@@ -1204,7 +1204,7 @@ fn test_follow_up_msgs() {
         },
         "foobar",
         "foobar",
-        &DestinationInfo::from_str(memo),
+        &DestinationInfo::parse_str(memo),
         None,
     )
     .unwrap();
@@ -1241,7 +1241,7 @@ fn test_follow_up_msgs() {
         },
         "foobar",
         "foobar",
-        &DestinationInfo::from_str(memo),
+        &DestinationInfo::parse_str(memo),
         None,
     )
     .unwrap();
