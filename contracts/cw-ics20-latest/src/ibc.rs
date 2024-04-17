@@ -65,14 +65,6 @@ impl Ics20Packet {
             memo,
         }
     }
-
-    pub fn validate(&self) -> Result<(), ContractError> {
-        if self.amount.u128() > u128::MAX {
-            Err(ContractError::AmountOverflow {})
-        } else {
-            Ok(())
-        }
-    }
 }
 
 /// This is a generic ICS acknowledgement format.
@@ -260,7 +252,7 @@ pub fn ibc_channel_close(
     _channel: IbcChannelCloseMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
     // don't allow close channel
-    return Err(ContractError::CannotClose {});
+    Err(ContractError::CannotClose {})
 }
 
 #[entry_point]
@@ -329,7 +321,7 @@ pub fn parse_voucher_denom<'a>(
 
 // Returns local denom if the denom is an encoded voucher from the expected endpoint
 // Otherwise, error
-pub fn parse_ibc_denom_without_sanity_checks<'a>(ibc_denom: &'a str) -> StdResult<&'a str> {
+pub fn parse_ibc_denom_without_sanity_checks(ibc_denom: &str) -> StdResult<&str> {
     let split_denom: Vec<&str> = ibc_denom.splitn(3, '/').collect();
 
     if split_denom.len() != 3 {
@@ -342,7 +334,7 @@ pub fn parse_ibc_denom_without_sanity_checks<'a>(ibc_denom: &'a str) -> StdResul
 
 // Returns
 // Otherwise, error
-pub fn parse_ibc_channel_without_sanity_checks<'a>(ibc_denom: &'a str) -> StdResult<&'a str> {
+pub fn parse_ibc_channel_without_sanity_checks(ibc_denom: &str) -> StdResult<&str> {
     let split_denom: Vec<&str> = ibc_denom.splitn(3, '/').collect();
 
     if split_denom.len() != 3 {
@@ -353,9 +345,7 @@ pub fn parse_ibc_channel_without_sanity_checks<'a>(ibc_denom: &'a str) -> StdRes
     Ok(split_denom[1])
 }
 
-pub fn parse_ibc_info_without_sanity_checks<'a>(
-    ibc_denom: &'a str,
-) -> StdResult<(&'a str, &'a str, &'a str)> {
+pub fn parse_ibc_info_without_sanity_checks(ibc_denom: &str) -> StdResult<(&str, &str, &str)> {
     let split_denom: Vec<&str> = ibc_denom.splitn(3, '/').collect();
 
     if split_denom.len() != 3 {
@@ -384,7 +374,7 @@ fn do_ibc_packet_receive(
     // if denom is native, we handle it the native way
     if denom.1 {
         return handle_ibc_packet_receive_native_remote_chain(
-            storage, api, &querier, env, &denom.0, &packet, &msg, relayer,
+            storage, api, querier, env, denom.0, packet, &msg, relayer,
         );
     }
 
@@ -617,10 +607,10 @@ pub fn get_follow_up_msgs(
     let mut minimum_receive = to_send.amount();
     let mut ibc_transfer_amount = to_send.amount();
 
-    if swap_operations.len() > 0 {
+    if !swap_operations.is_empty() {
         let response = config.swap_router_contract.simulate_swap(
             querier,
-            to_send.amount().clone(),
+            to_send.amount(),
             swap_operations.clone(),
         );
         if response.is_err() {
@@ -665,14 +655,14 @@ pub fn get_follow_up_msgs(
         env,
         orai_receiver,
         ibc_transfer_amount,
-        &ibc_sender,
-        &destination,
+        ibc_sender,
+        destination,
         config.default_timeout,
         destination_pair_mapping,
         destination_asset_info_on_orai,
     );
 
-    if let Some(ibc_msg) = build_ibc_msg_result.as_mut().ok() {
+    if let Ok(ibc_msg) = build_ibc_msg_result.as_mut() {
         sub_msgs.append(ibc_msg);
         // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
         to = None;
@@ -702,7 +692,7 @@ pub fn get_follow_up_msgs(
         return Ok(follow_up_msgs_data);
     };
     follow_up_msgs_data.sub_msgs = sub_msgs;
-    return Ok(follow_up_msgs_data);
+    Ok(follow_up_msgs_data)
 }
 
 pub fn build_swap_operations(
@@ -743,11 +733,11 @@ pub fn build_swap_msgs(
     operations: Vec<SwapOperation>,
 ) -> StdResult<()> {
     // the swap msg must be executed before other msgs because we need the ask token amount to create ibc msg => insert in first index
-    if operations.len() == 0 {
+    if operations.is_empty() {
         return Ok(());
     }
     // double check. We cannot let swap ops with Some(to) aka swap to someone else, not this contract and then transfer ibc => would be double spending
-    if to.is_some() && sub_msgs.len() > 0 {
+    if to.is_some() && !sub_msgs.is_empty() {
         // forbidden case. Pop all sub messages and return empty
         while sub_msgs.pop().is_some() {
             sub_msgs.pop();
@@ -1206,9 +1196,6 @@ pub fn build_ibc_send_packet(
         denom, // we use ibc denom in form <transfer>/<channel>/<denom> so that when it is sent back to remote chain, it gets parsed correctly and burned
         sender, receiver, memo,
     );
-    packet
-        .validate()
-        .map_err(|err| StdError::generic_err(err.to_string()))?;
 
     // prepare ibc message
     Ok(IbcMsg::SendPacket {

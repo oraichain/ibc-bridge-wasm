@@ -426,21 +426,16 @@ pub fn execute_transfer_back_to_remote_chain(
     let mapping = mappings
         .into_iter()
         .find(|pair| -> bool {
-            let (denom, is_native) = parse_voucher_denom(
+            match parse_voucher_denom(
                 pair.key.as_str(),
                 &IbcEndpoint {
                     port_id: parse_ibc_wasm_port_id(env.contract.address.as_str()),
                     channel_id: msg.local_channel_id.clone(), // also verify local channel id
                 },
-            )
-            .unwrap_or_else(|_| ("", true)); // if there's an error, change is_native to true so it automatically returns false
-            if is_native {
-                return false;
+            ) {
+                Ok((denom, false)) => msg.remote_denom.eq(denom),
+                _ => false,
             }
-            if denom.eq(&msg.remote_denom) {
-                return true;
-            }
-            return false;
         })
         .ok_or(ContractError::MappingPairNotFound {})?;
 
