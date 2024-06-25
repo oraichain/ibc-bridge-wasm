@@ -24,16 +24,9 @@ impl Default for DestinationInfo {
 
 impl DestinationInfo {
     // destination string format: <destination-channel>/<receiver>:<denom>
-    pub fn from_str(value: &str) -> Self {
-        let (destination, denom) = match value.split_once(':') {
-            Some((destination, denom)) => (destination, denom),
-            None => (value, ""),
-        };
-
-        let (channel, receiver) = match destination.split_once('/') {
-            Some((channel, receiver)) => (channel, receiver),
-            None => ("", destination),
-        };
+    pub fn parse_str(value: &str) -> Self {
+        let (destination, denom) = value.split_once(':').unwrap_or((value, ""));
+        let (channel, receiver) = destination.split_once('/').unwrap_or(("", destination));
 
         Self {
             receiver: receiver.to_string(),
@@ -47,15 +40,8 @@ impl DestinationInfo {
     }
 
     fn from_binary(value: &Binary) -> StdResult<Self> {
-        let deserialized = match Bufany::deserialize(&value) {
-            Ok(val) => val,
-            Err(err) => {
-                return Err(StdError::generic_err(format!(
-                    "Error on deserialize: {:?}",
-                    err
-                )))
-            }
-        };
+        let deserialized = Bufany::deserialize(value)
+            .map_err(|err| StdError::generic_err(format!("Error on deserialize: {:?}", err)))?;
 
         let destination_receiver = deserialized
             .string(1)
@@ -95,29 +81,23 @@ impl DestinationInfo {
     }
 
     pub fn is_receiver_cosmos_based(&self) -> bool {
-        match get_prefix_decode_bech32(&self.receiver).ok() {
-            None => false,
-            Some(prefix) => {
-                if prefix.is_empty() {
-                    return false;
-                }
-                true
-            }
-        }
+        !get_prefix_decode_bech32(&self.receiver)
+            .unwrap_or_default() // empty string if error
+            .is_empty()
     }
 }
 
 #[test]
 fn test_is_evm_based() {
-    let d1 = DestinationInfo::from_str("cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
+    let d1 = DestinationInfo::parse_str("cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(false, d1.is_receiver_evm_based().0);
-    let d1 = DestinationInfo::from_str("0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222");
+    let d1 = DestinationInfo::parse_str("0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222");
     // false here because we need the evm-prefix as well!
     assert_eq!(false, d1.is_receiver_evm_based().0);
-    let d1 = DestinationInfo::from_str("foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278b");
+    let d1 = DestinationInfo::parse_str("foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278b");
     // false here because of the wrong eth address, not enough in length
     assert_eq!(false, d1.is_receiver_evm_based().0);
-    let d1 = DestinationInfo::from_str(
+    let d1 = DestinationInfo::parse_str(
         "channel-15/foobar0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222:usdt",
     );
     let (is_evm_based, prefix) = d1.is_receiver_evm_based();
@@ -131,55 +111,56 @@ fn test_is_evm_based() {
 
 #[test]
 fn test_is_cosmos_based() {
-    let d1 = DestinationInfo::from_str("foo");
+    let d1 = DestinationInfo::parse_str("foo");
     assert_eq!(false, d1.is_receiver_cosmos_based());
 
-    let d1 = DestinationInfo::from_str("channel-15/foo:usdt");
+    let d1 = DestinationInfo::parse_str("channel-15/foo:usdt");
     assert_eq!(false, d1.is_receiver_cosmos_based());
 
     let d1 =
-        DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:usdt");
+        DestinationInfo::parse_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:usdt");
     let result = d1.is_receiver_cosmos_based();
     assert_eq!(true, result);
 
     let d1 =
-        DestinationInfo::from_str("channel-15/akash1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejjpn5xp:usdt");
+        DestinationInfo::parse_str("channel-15/akash1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejjpn5xp:usdt");
     let result = d1.is_receiver_cosmos_based();
     assert_eq!(true, result);
 
-    let d1 =
-        DestinationInfo::from_str("channel-15/bostrom1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejuf2qpu:usdt");
+    let d1 = DestinationInfo::parse_str(
+        "channel-15/bostrom1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejuf2qpu:usdt",
+    );
     let result = d1.is_receiver_cosmos_based();
     assert_eq!(true, result);
 
-    let d1 = DestinationInfo::from_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
+    let d1 = DestinationInfo::parse_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
     let result = d1.is_receiver_cosmos_based();
     assert_eq!(true, result);
 }
 
 #[test]
-fn test_destination_info_from_str() {
-    let d1 = DestinationInfo::from_str("cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
+fn test_destination_info_parse_str() {
+    let d1 = DestinationInfo::parse_str("cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(d1.destination_channel, "");
     assert_eq!(d1.receiver, "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(d1.destination_denom, "");
 
-    let d1 = DestinationInfo::from_str("cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:foo");
+    let d1 = DestinationInfo::parse_str("cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:foo");
     assert_eq!(d1.destination_channel, "");
     assert_eq!(d1.receiver, "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(d1.destination_denom, "foo");
 
-    let d1 = DestinationInfo::from_str("foo/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
+    let d1 = DestinationInfo::parse_str("foo/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(d1.destination_channel, "foo");
     assert_eq!(d1.receiver, "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(d1.destination_denom, "");
 
-    let d1 = DestinationInfo::from_str("foo/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:bar");
+    let d1 = DestinationInfo::parse_str("foo/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:bar");
     assert_eq!(d1.destination_channel, "foo");
     assert_eq!(d1.receiver, "cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
     assert_eq!(d1.destination_denom, "bar");
 
-    let d1 = DestinationInfo::from_str("");
+    let d1 = DestinationInfo::parse_str("");
     assert_eq!(d1.destination_channel, "");
     assert_eq!(d1.receiver, "");
     assert_eq!(d1.destination_denom, "");
@@ -195,7 +176,7 @@ mod tests {
     #[test]
     fn test_parse_destination_info() {
         // swap to orai then orai to atom, then use swapped amount to transfer ibc to destination
-        let d1 = DestinationInfo::from_str(
+        let d1 = DestinationInfo::parse_str(
             "channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz:atom",
         );
         assert_eq!(
@@ -207,7 +188,7 @@ mod tests {
             }
         );
         // swap to orai then orai to usdt with 'to' as the receiver when swapping, then we're done
-        let d2 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573:usdt");
+        let d2 = DestinationInfo::parse_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573:usdt");
         assert_eq!(
             d2,
             DestinationInfo {
@@ -218,7 +199,7 @@ mod tests {
         );
         // this case returns an error (because it has channel but no destination denom)
         let d3 =
-            DestinationInfo::from_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
+            DestinationInfo::parse_str("channel-15/cosmos14n3tx8s5ftzhlxvq0w5962v60vd82h30sythlz");
         assert_eq!(
             d3,
             DestinationInfo {
@@ -227,8 +208,9 @@ mod tests {
                 destination_denom: "".to_string()
             }
         );
-        let d4 =
-            DestinationInfo::from_str("trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt");
+        let d4 = DestinationInfo::parse_str(
+            "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt",
+        );
         assert_eq!(
             d4,
             DestinationInfo {
@@ -238,7 +220,7 @@ mod tests {
             }
         );
 
-        let d5 = DestinationInfo::from_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
+        let d5 = DestinationInfo::parse_str("orai14n3tx8s5ftzhlxvq0w5962v60vd82h30rha573");
         assert_eq!(
             d5,
             DestinationInfo {
@@ -248,7 +230,7 @@ mod tests {
             }
         );
 
-        let d6 = DestinationInfo::from_str(
+        let d6 = DestinationInfo::parse_str(
             "channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:usdt",
         );
         assert_eq!(
@@ -260,7 +242,7 @@ mod tests {
             }
         );
         // ibc hash case
-        let d7 = DestinationInfo::from_str("channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78");
+        let d7 = DestinationInfo::parse_str("channel-5/trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64:ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78");
         assert_eq!(
             d7,
             DestinationInfo {
@@ -271,7 +253,7 @@ mod tests {
                         .to_string()
             }
         );
-        let d8 = DestinationInfo::from_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
+        let d8 = DestinationInfo::parse_str("channel-124/cosmos1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejl67nlm:orai17l2zk3arrx0a0fyuneyx8raln68622a2lrsz8ph75u7gw9tgz3esayqryf");
         assert_eq!(
             d8,
             DestinationInfo {

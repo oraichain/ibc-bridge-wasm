@@ -1,8 +1,8 @@
 use std::ops::Sub;
 
 use cosmwasm_std::{
-    coin, Addr, BankMsg, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcTimeout,
-    StdError,
+    coin, Addr, BankMsg, Coin, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg,
+    IbcTimeout, StdError,
 };
 use cosmwasm_testing_util::mock::MockContract;
 use cosmwasm_vm::testing::MockInstanceOptions;
@@ -34,7 +34,7 @@ use crate::state::{
     MappingMetadata, Ratio, RelayerFee, TokenFee, CHANNEL_REVERSE_STATE, RELAYER_FEE, REPLY_ARGS,
     TOKEN_FEE,
 };
-use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20ReceiveMsg};
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
 
 use crate::contract::{
@@ -265,7 +265,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
     let custom_addr = "custom-addr";
     let original_sender = "original_sender";
     let denom = "uatom0x";
-    let amount = 1234567u128;
+    let amount = Uint128::from(1234567u128);
     let token_addr = Addr::unchecked("token-addr".to_string());
     let asset_info = AssetInfo::Token {
         contract_addr: token_addr.clone(),
@@ -277,8 +277,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
         nominator: 1,
         denominator: 10,
     };
-    let fee_amount =
-        Uint128::from(amount) * Decimal::from_ratio(ratio.nominator, ratio.denominator);
+    let fee_amount = amount * Decimal::from_ratio(ratio.nominator, ratio.denominator);
     let mut deps = setup(&[remote_channel, local_channel], &[]);
     TOKEN_FEE
         .save(deps.as_mut().storage, denom, &ratio)
@@ -312,7 +311,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
 
     let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
         sender: original_sender.to_string(),
-        amount: Uint128::from(amount),
+        amount,
         msg: to_binary(&transfer).unwrap(),
     });
 
@@ -328,8 +327,13 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
     );
 
     // prepare some mock packets
-    let recv_packet =
-        mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
+    let recv_packet = mock_receive_packet(
+        remote_channel,
+        local_channel,
+        amount,
+        denom.to_string(),
+        custom_addr.to_string(),
+    );
 
     // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
     let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
@@ -398,7 +402,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
                 msg,
                 to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: "gov".to_string(),
-                    amount: fee_amount.clone()
+                    amount: fee_amount
                 })
                 .unwrap()
             );
@@ -411,15 +415,15 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
     assert_eq!(
         chan.balances,
         vec![Amount::native(
-            fee_amount.u128(),
-            &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+            fee_amount,
+            get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
         )]
     );
     assert_eq!(
         chan.total_sent,
         vec![Amount::native(
             amount,
-            &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+            get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
         )]
     );
 
@@ -703,7 +707,7 @@ fn test_build_swap_msgs() {
     build_swap_msgs(
         minimum_receive.clone(),
         &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount.clone(),
+        amount,
         initial_receive_asset_info.clone(),
         to.clone(),
         &mut cosmos_msgs,
@@ -716,10 +720,10 @@ fn test_build_swap_msgs() {
         ask_asset_info: initial_receive_asset_info.clone(),
     });
     build_swap_msgs(
-        minimum_receive.clone(),
+        minimum_receive,
         &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount.clone(),
-        initial_receive_asset_info.clone(),
+        amount,
+        initial_receive_asset_info,
         to.clone(),
         &mut cosmos_msgs,
         operations.clone(),
@@ -734,10 +738,10 @@ fn test_build_swap_msgs() {
         denom: native_denom.to_string(),
     };
     build_swap_msgs(
-        minimum_receive.clone(),
+        minimum_receive,
         &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount.clone(),
-        initial_receive_asset_info.clone(),
+        amount,
+        initial_receive_asset_info,
         to.clone(),
         &mut cosmos_msgs,
         operations.clone(),
@@ -791,10 +795,10 @@ fn test_build_swap_msgs_forbidden_case() {
         amount: coins(1u128, "orai"),
     })));
     build_swap_msgs(
-        minimum_receive.clone(),
+        minimum_receive,
         &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount.clone(),
-        initial_receive_asset_info.clone(),
+        amount,
+        initial_receive_asset_info,
         Some(Addr::unchecked("attacker")),
         &mut cosmos_msgs,
         operations.clone(),
@@ -917,7 +921,7 @@ fn test_get_ibc_msg_evm_case() {
             CosmosMsg::Ibc(IbcMsg::SendPacket {
                 channel_id: destination.destination_channel.clone(),
                 data: to_binary(&Ics20Packet::new(
-                    remote_amount.clone(),
+                    remote_amount,
                     pair_mapping_key.clone(),
                     env.contract.address.as_str(),
                     &remote_address,
@@ -960,7 +964,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
     let local_channel_id = "channel";
     let local_receiver = "receiver";
     let timeout = 10u64;
-    let remote_amount = convert_local_to_remote(amount.clone(), 18, 6).unwrap();
+    let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
     let destination = DestinationInfo {
         receiver: "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string(),
         destination_channel: send_channel.to_string(),
@@ -984,7 +988,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
             deps.as_mut().storage,
             (local_channel_id, ibc_denom.as_str()),
             &ChannelState {
-                outstanding: remote_amount.clone(),
+                outstanding: remote_amount,
                 total_sent: Uint128::from(100u128),
             },
         )
@@ -995,7 +999,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
             deps.as_mut().storage,
             (send_channel, pair_mapping_key.as_str()),
             &ChannelState {
-                outstanding: remote_amount.clone(),
+                outstanding: remote_amount,
                 total_sent: Uint128::from(100u128),
             },
         )
@@ -1050,7 +1054,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
             deps.as_mut().storage,
             (local_channel_id, &pair_mapping_key),
             &ChannelState {
-                outstanding: remote_amount.clone(),
+                outstanding: remote_amount,
                 total_sent: Uint128::from(100u128),
             },
         )
@@ -1083,7 +1087,7 @@ fn test_get_ibc_msg_cosmos_based_case() {
             CosmosMsg::Ibc(IbcMsg::SendPacket {
                 channel_id: send_channel.to_string(),
                 data: to_binary(&Ics20Packet::new(
-                    remote_amount.clone(),
+                    remote_amount,
                     pair_mapping_key.clone(),
                     env.contract.address.as_str(),
                     &destination.receiver,
@@ -1141,7 +1145,7 @@ fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
     .unwrap_err();
     assert_eq!(
         result,
-        StdError::generic_err("The destination info is neither evm or cosmos based")
+        StdError::generic_err("The destination info is neither evm nor cosmos based")
     )
 }
 
@@ -1166,17 +1170,14 @@ fn test_follow_up_msgs() {
         deps_mut.api,
         &deps_mut.querier,
         env.clone(),
-        Amount::Cw20(Cw20Coin {
-            address: "foobar".to_string(),
-            amount: amount.clone(),
-        }),
+        Amount::cw20(amount, Addr::unchecked("foobar")),
         initial_asset_info.clone(),
         AssetInfo::NativeToken {
             denom: "".to_string(),
         },
         "foobar",
         receiver,
-        &DestinationInfo::from_str(""),
+        &DestinationInfo::parse_str(""),
         None,
     )
     .unwrap();
@@ -1188,7 +1189,7 @@ fn test_follow_up_msgs() {
                 contract_addr: env.contract.address.to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: receiver.to_string(),
-                    amount: amount.clone()
+                    amount
                 })
                 .unwrap(),
                 funds: vec![]
@@ -1204,17 +1205,14 @@ fn test_follow_up_msgs() {
         deps_mut.api,
         &deps_mut.querier,
         env.clone(),
-        Amount::Cw20(Cw20Coin {
-            address: "foobar".to_string(),
-            amount,
-        }),
+        Amount::cw20(amount, Addr::unchecked("foobar")),
         initial_asset_info.clone(),
         AssetInfo::NativeToken {
             denom: "cosmosabcd".to_string(),
         },
         "foobar",
         "foobar",
-        &DestinationInfo::from_str(memo),
+        &DestinationInfo::parse_str(memo),
         None,
     )
     .unwrap();
@@ -1226,7 +1224,7 @@ fn test_follow_up_msgs() {
                 contract_addr: env.contract.address.to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: receiver.to_string(),
-                    amount: amount.clone()
+                    amount
                 })
                 .unwrap(),
                 funds: vec![]
@@ -1242,10 +1240,7 @@ fn test_follow_up_msgs() {
         deps_mut.api,
         &deps_mut.querier,
         env.clone(),
-        Amount::Cw20(Cw20Coin {
-            address: "foobar".to_string(),
-            amount,
-        }),
+        Amount::cw20(amount, Addr::unchecked("foobar")),
         AssetInfo::NativeToken {
             denom: "orai".to_string(),
         },
@@ -1254,7 +1249,7 @@ fn test_follow_up_msgs() {
         },
         "foobar",
         "foobar",
-        &DestinationInfo::from_str(memo),
+        &DestinationInfo::parse_str(memo),
         None,
     )
     .unwrap();
@@ -1266,7 +1261,7 @@ fn test_follow_up_msgs() {
                 contract_addr: env.contract.address.to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: receiver.to_string(),
-                    amount: amount.clone()
+                    amount
                 })
                 .unwrap(),
                 funds: vec![]
@@ -1286,7 +1281,7 @@ fn test_deduct_fee() {
             },
             Uint128::from(1000u64)
         ),
-        Uint128::from(0u64)
+        Uint128::zero()
     );
     assert_eq!(
         deduct_fee(
@@ -1380,10 +1375,7 @@ fn test_deduct_token_fee() {
     let storage = deps.as_mut().storage;
     let token_fee_denom = "foo0x";
     // should return amount because we have not set relayer fee yet
-    assert_eq!(
-        deduct_token_fee(storage, "foo", amount).unwrap().0,
-        amount.clone()
-    );
+    assert_eq!(deduct_token_fee(storage, "foo", amount).unwrap().0, amount);
     TOKEN_FEE
         .save(
             storage,
@@ -1423,7 +1415,7 @@ fn test_deduct_relayer_fee() {
         &swap_router_contract,
     )
     .unwrap();
-    assert_eq!(result, Uint128::from(0u64));
+    assert_eq!(result, Uint128::zero());
 
     // remote address is wrong (dont follow bech32 form)
     assert_eq!(
@@ -1452,7 +1444,7 @@ fn test_deduct_relayer_fee() {
             &swap_router_contract,
         )
         .unwrap(),
-        Uint128::from(0u64)
+        Uint128::zero()
     );
 
     // oraib prefix case.
@@ -1518,14 +1510,14 @@ fn test_process_ibc_msg() {
     let local_receiver = "local_receiver";
     let memo = None;
     let timeout = Timestamp::from_seconds(10u64);
-    let remote_amount = convert_local_to_remote(amount.clone(), 18, 6).unwrap();
+    let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
 
     CHANNEL_REVERSE_STATE
         .save(
             storage,
             (local_channel_id, ibc_denom),
             &ChannelState {
-                outstanding: remote_amount.clone(),
+                outstanding: remote_amount,
                 total_sent: Uint128::from(100u128),
             },
         )
@@ -1566,7 +1558,7 @@ fn test_process_ibc_msg() {
             IbcMsg::SendPacket {
                 channel_id: local_channel_id.to_string(),
                 data: to_binary(&Ics20Packet {
-                    amount: remote_amount.clone(),
+                    amount: remote_amount,
                     denom: ibc_denom.to_string(),
                     receiver: ibc_msg_receiver.to_string(),
                     sender: ibc_msg_sender.to_string(),
@@ -2041,16 +2033,16 @@ fn test_delete_cw20_mapping() {
 fn mock_receive_packet(
     remote_channel: &str,
     local_channel: &str,
-    amount: u128,
-    denom: &str,
-    receiver: &str,
+    amount: Uint128,
+    denom: String,
+    receiver: String,
 ) -> IbcPacket {
     let data = Ics20Packet {
         // this is returning a foreign (our) token, thus denom is <port>/<channel>/<denom>
-        denom: denom.to_string(),
-        amount: amount.into(),
+        denom,
+        amount,
         sender: "remote-sender".to_string(),
-        receiver: receiver.to_string(),
+        receiver,
         memo: Some("memo".to_string()),
     };
     IbcPacket::new(
@@ -2077,7 +2069,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
     let custom_addr = "custom-addr";
     let original_sender = "original_sender";
     let denom = "uatom0x";
-    let amount = 1234567u128;
+    let amount = Uint128::from(1234567u128);
     let asset_info = AssetInfo::NativeToken {
         denom: denom.into(),
     };
@@ -2088,8 +2080,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         nominator: 1,
         denominator: 10,
     };
-    let fee_amount =
-        Uint128::from(amount) * Decimal::from_ratio(ratio.nominator, ratio.denominator);
+    let fee_amount = amount * Decimal::from_ratio(ratio.nominator, ratio.denominator);
     let mut deps = setup(&[remote_channel, local_channel], &[]);
     TOKEN_FEE
         .save(deps.as_mut().storage, denom, &ratio)
@@ -2124,7 +2115,13 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
     let msg = ExecuteMsg::TransferToRemote(transfer.clone());
 
     // insufficient funds case because we need to receive from remote chain first
-    let info = mock_info(cw20_raw_denom, &[coin(amount, denom)]);
+    let info = mock_info(
+        cw20_raw_denom,
+        &[Coin {
+            amount,
+            denom: denom.to_string(),
+        }],
+    );
     let res = execute(deps.as_mut(), mock_env(), info.clone(), msg.clone());
     assert_eq!(
         res.unwrap_err(),
@@ -2135,8 +2132,13 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
     );
 
     // prepare some mock packets
-    let recv_packet =
-        mock_receive_packet(remote_channel, local_channel, amount, denom, custom_addr);
+    let recv_packet = mock_receive_packet(
+        remote_channel,
+        local_channel,
+        amount,
+        denom.to_string(),
+        custom_addr.to_string(),
+    );
 
     // receive some tokens. Assume that the function works perfectly because the test case is elsewhere
     let ibc_msg = IbcPacketReceiveMsg::new(recv_packet.clone(), relayer);
@@ -2149,7 +2151,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
             dest_channel_id: local_channel.to_string(),
             ibc_denom: ibc_denom.clone(),
-            amount: Uint128::from(amount),
+            amount,
             local_receiver: custom_addr.to_string(),
         },
     )
@@ -2176,10 +2178,7 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
             assert_eq!(timeout, expected_timeout.into());
             assert_eq!(channel_id.as_str(), local_channel);
             let msg: Ics20Packet = from_binary(&data).unwrap();
-            assert_eq!(
-                msg.amount,
-                Uint128::new(1234567).sub(Uint128::from(fee_amount))
-            );
+            assert_eq!(msg.amount, Uint128::new(1234567).sub(fee_amount));
             assert_eq!(
                 msg.denom.as_str(),
                 get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
@@ -2206,15 +2205,15 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
     assert_eq!(
         chan.balances,
         vec![Amount::native(
-            fee_amount.u128(),
-            &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+            fee_amount,
+            get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
         )]
     );
     assert_eq!(
         chan.total_sent,
         vec![Amount::native(
             amount,
-            &get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
+            get_key_ics20_ibc_denom(CONTRACT_PORT, local_channel, denom)
         )]
     );
 
@@ -2471,10 +2470,10 @@ fn test_increase_channel_balance_ibc_receive() {
     let channel_state = CHANNEL_REVERSE_STATE
         .load(deps.as_ref().storage, (local_channel_id, &ibc_denom_keys))
         .unwrap();
-    assert_eq!(channel_state.outstanding, amount.clone());
-    assert_eq!(channel_state.total_sent, amount.clone());
+    assert_eq!(channel_state.outstanding, amount);
+    assert_eq!(channel_state.total_sent, amount);
     let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
-    assert_eq!(reply_args.amount, amount.clone());
+    assert_eq!(reply_args.amount, amount);
     assert_eq!(reply_args.channel, local_channel_id);
     assert_eq!(reply_args.denom, ibc_denom_keys.to_string());
     assert_eq!(reply_args.local_receiver, local_receiver.to_string());
@@ -2562,7 +2561,7 @@ fn test_reduce_channel_balance_ibc_receive() {
     assert_eq!(channel_state.outstanding, Uint128::zero());
     assert_eq!(channel_state.total_sent, Uint128::from(10u128));
     let reply_args = REPLY_ARGS.load(deps.as_ref().storage).unwrap();
-    assert_eq!(reply_args.amount, amount.clone());
+    assert_eq!(reply_args.amount, amount);
     assert_eq!(reply_args.channel, local_channel_id);
     assert_eq!(reply_args.denom, ibc_denom_keys);
     assert_eq!(reply_args.local_receiver, local_receiver.to_string());

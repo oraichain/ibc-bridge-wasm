@@ -6,7 +6,7 @@ use cosmwasm_std::{
     WasmMsg,
 };
 use cw2::set_contract_version;
-use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20ReceiveMsg};
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw20_ics20_msg::converter::ConverterController;
 use cw20_ics20_msg::helper::parse_ibc_wasm_port_id;
 use cw_storage_plus::Bound;
@@ -239,7 +239,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
     let reply_args = ReplyArgs {
         channel: dst_channel_id.clone(),
         denom: ibc_denom.clone(),
-        amount: remote_amount.clone(),
+        amount: remote_amount,
         local_receiver: local_receiver.clone(),
     };
     REPLY_ARGS.save(deps.storage, &reply_args)?;
@@ -373,10 +373,7 @@ pub fn execute_receive(
 ) -> Result<Response, ContractError> {
     nonpayable(&info)?;
 
-    let amount = Amount::Cw20(Cw20Coin {
-        address: info.sender.to_string(),
-        amount: wrapper.amount,
-    });
+    let amount = Amount::cw20(wrapper.amount, info.sender);
     let api = deps.api;
 
     let msg: TransferBackMsg = from_binary(&wrapper.msg)?;
@@ -483,21 +480,16 @@ pub fn execute_transfer_back_to_remote_chain(
     let mapping = mappings
         .into_iter()
         .find(|pair| -> bool {
-            let (denom, is_native) = parse_voucher_denom(
+            match parse_voucher_denom(
                 pair.key.as_str(),
                 &IbcEndpoint {
                     port_id: parse_ibc_wasm_port_id(env.contract.address.as_str()),
                     channel_id: msg.local_channel_id.clone(), // also verify local channel id
                 },
-            )
-            .unwrap_or_else(|_| ("", true)); // if there's an error, change is_native to true so it automatically returns false
-            if is_native {
-                return false;
+            ) {
+                Ok((denom, false)) => msg.remote_denom.eq(denom),
+                _ => false,
             }
-            if denom.eq(&msg.remote_denom) {
-                return true;
-            }
-            return false;
         })
         .ok_or(ContractError::MappingPairNotFound {})?;
 

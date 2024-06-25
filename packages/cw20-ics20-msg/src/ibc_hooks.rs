@@ -19,15 +19,8 @@ pub struct IbcHooksUniversalSwap {
 
 impl IbcHooksUniversalSwap {
     pub fn from_binary(api: &dyn Api, value: &Binary) -> StdResult<Self> {
-        let deserialized = match Bufany::deserialize(&value) {
-            Ok(val) => val,
-            Err(err) => {
-                return Err(StdError::generic_err(format!(
-                    "Error on deserialize: {:?}",
-                    err
-                )))
-            }
-        };
+        let deserialized = Bufany::deserialize(value)
+            .map_err(|err| StdError::generic_err(format!("Error on deserialize: {:?}", err)))?;
 
         let receiver = api
             .addr_humanize(
@@ -41,6 +34,13 @@ impl IbcHooksUniversalSwap {
             .string(2)
             .ok_or_else(|| StdError::generic_err("Error on deserialize destination_receiver"))?;
 
+        // Always require destination.receiver
+        if destination_receiver.is_empty() {
+            return Err(StdError::generic_err(
+                "Require destination receiver in memo",
+            ));
+        }
+
         let destination_channel = deserialized
             .string(3)
             .ok_or_else(|| StdError::generic_err("Error on deserialize destination_channel"))?;
@@ -49,22 +49,12 @@ impl IbcHooksUniversalSwap {
             .string(4)
             .ok_or_else(|| StdError::generic_err("Error on deserialize destination_denom"))?;
 
-        let bridge_receiver = match to_orai_bridge_address(&receiver) {
-            Ok(val) => val,
-            Err(err) => {
-                return Err(StdError::generic_err(format!(
-                    "Error on convert to orai bridge address: {:?}",
-                    err
-                )))
-            }
-        };
-
-        // Always require destination.receiver
-        if destination_receiver.is_empty() {
-            return Err(StdError::generic_err(
-                "Require destination receiver in memo",
-            ));
-        }
+        let bridge_receiver = to_orai_bridge_address(&receiver).map_err(|err| {
+            StdError::generic_err(format!(
+                "Error on convert to orai bridge address: {:?}",
+                err
+            ))
+        })?;
 
         Ok(Self {
             receiver: receiver.clone(),

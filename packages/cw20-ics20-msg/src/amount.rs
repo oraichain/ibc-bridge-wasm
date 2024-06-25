@@ -1,9 +1,9 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    to_binary, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128,
+    to_binary, Addr, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128,
     WasmMsg,
 };
-use cw20::{Cw20Coin, Cw20ExecuteMsg};
+use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
 use oraiswap::asset::AssetInfo;
 use std::convert::TryInto;
 
@@ -11,37 +11,34 @@ use std::convert::TryInto;
 pub enum Amount {
     Native(Coin),
     // FIXME? USe Cw20CoinVerified, and validate cw20 addresses
-    Cw20(Cw20Coin),
+    Cw20(Cw20CoinVerified),
 }
 
 impl Amount {
     pub fn from_parts(denom: String, amount: Uint128) -> Self {
-        if denom.starts_with("cw20:") {
-            let address = denom.get(5..).unwrap().into();
-            Amount::Cw20(Cw20Coin { address, amount })
+        if let Some(address) = denom.strip_prefix("cw20:") {
+            Amount::Cw20(Cw20CoinVerified {
+                address: Addr::unchecked(address),
+                amount,
+            })
         } else {
             Amount::Native(Coin { denom, amount })
         }
     }
 
-    pub fn cw20(amount: u128, addr: &str) -> Self {
-        Amount::Cw20(Cw20Coin {
-            address: addr.into(),
-            amount: Uint128::new(amount),
-        })
+    // return struct should copy instead of ref
+    pub fn cw20(amount: Uint128, address: Addr) -> Self {
+        Amount::Cw20(Cw20CoinVerified { address, amount })
     }
 
-    pub fn native(amount: u128, denom: &str) -> Self {
-        Amount::Native(Coin {
-            denom: denom.to_string(),
-            amount: Uint128::new(amount),
-        })
+    pub fn native(amount: Uint128, denom: String) -> Self {
+        Amount::Native(Coin { denom, amount })
     }
 
     pub fn into_asset_info(&self, api: &dyn Api) -> StdResult<AssetInfo> {
         match self {
             Amount::Native(coin) => Ok(AssetInfo::NativeToken {
-                denom: coin.denom.to_owned(),
+                denom: coin.denom.clone(),
             }),
             Amount::Cw20(cw20_coin) => Ok(AssetInfo::Token {
                 contract_addr: api.addr_validate(cw20_coin.address.as_str())?,
@@ -75,11 +72,10 @@ impl Amount {
 
     /// convert the amount into u64
     pub fn u64_amount(&self) -> Result<u64, StdError> {
-        Ok(self
-            .amount()
+        self.amount()
             .u128()
             .try_into()
-            .map_err(|_| StdError::generic_err("error casting to u64 from u128".to_string()))?)
+            .map_err(|_| StdError::generic_err("error casting to u64 from u128".to_string()))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -111,7 +107,7 @@ impl Amount {
                 };
 
                 WasmMsg::Execute {
-                    contract_addr: coin.address,
+                    contract_addr: coin.address.to_string(),
                     msg: to_binary(&msg_cw20).unwrap(),
                     funds: vec![],
                 }
@@ -123,11 +119,10 @@ impl Amount {
 
 impl Amount {
     pub fn checked_add(&self, add_amount: Uint128) -> Self {
+        let amount = self.amount();
         Amount::from_parts(
             self.denom(),
-            self.amount()
-                .checked_add(add_amount)
-                .unwrap_or(self.amount()),
+            amount.checked_add(add_amount).unwrap_or(amount),
         )
     }
 }
@@ -191,14 +186,14 @@ mod tests {
     #[test]
     pub fn test_into_asset_info() {
         let deps = mock_dependencies();
-        let amount = Amount::cw20(1u128, "addr");
+        let amount = Amount::cw20(1u128.into(), Addr::unchecked("addr"));
         assert_eq!(
             amount.into_asset_info(deps.as_ref().api).unwrap(),
             AssetInfo::Token {
                 contract_addr: Addr::unchecked("addr")
             }
         );
-        let amount = Amount::native(1u128, "native");
+        let amount = Amount::native(1u128.into(), "native".to_string());
         assert_eq!(
             amount.into_asset_info(deps.as_ref().api).unwrap(),
             AssetInfo::NativeToken {
@@ -210,13 +205,13 @@ mod tests {
     #[test]
     pub fn test_checked_add() {
         assert_eq!(
-            Amount::cw20(1u128, "addr").checked_add(Uint128::one()),
-            Amount::cw20(2u128, "addr")
+            Amount::cw20(1u128.into(), Addr::unchecked("addr")).checked_add(Uint128::one()),
+            Amount::cw20(2u128.into(), Addr::unchecked("addr"))
         );
 
         assert_eq!(
-            Amount::cw20(1u128, "addr").checked_add(Uint128::MAX),
-            Amount::cw20(1u128, "addr")
+            Amount::cw20(1u128.into(), Addr::unchecked("addr")).checked_add(Uint128::MAX),
+            Amount::cw20(1u128.into(), Addr::unchecked("addr"))
         )
     }
 }

@@ -78,7 +78,7 @@ pub fn ibc_hooks_universal_swap(
         };
 
     let mut to_send_amount =
-        Amount::from_parts(parse_asset_info_denom(to_send.info.clone()), to_send.amount);
+        Amount::from_parts(parse_asset_info_denom(&to_send.info), to_send.amount);
     let follow_up_msg_data;
 
     // There are 2 cases:
@@ -159,7 +159,7 @@ pub fn ibc_hooks_universal_swap(
             }
 
             to_send_amount = Amount::from_parts(
-                parse_asset_info_denom(to_send.info.clone()),
+                parse_asset_info_denom(&to_send.info),
                 fee_data.deducted_amount,
             );
         } else {

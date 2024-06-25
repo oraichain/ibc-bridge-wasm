@@ -40,7 +40,7 @@ pub enum ContractError {
     InvalidIbcVersion { version: String },
 
     #[error("Only supports unordered channel")]
-    OnlyOrderedChannel {},
+    OnlyUnorderedChannel {},
 
     #[error("Insufficient funds to redeem voucher on channel {id}, {denom}")]
     InsufficientFunds { id: String, denom: String },
@@ -83,6 +83,9 @@ pub enum ContractError {
 
     #[error("Invalid destination memo {error}")]
     InvalidDestinationMemo { error: String },
+
+    #[error("User cannot close channel")]
+    CannotClose {},
 }
 
 impl From<FromUtf8Error> for ContractError {

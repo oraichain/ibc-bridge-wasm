@@ -2,20 +2,20 @@ use cosmwasm_std::{Api, StdError, StdResult};
 use oraiswap::asset::AssetInfo;
 
 pub fn get_prefix_decode_bech32(address: &str) -> StdResult<String> {
-    let decode_result = bech32::decode(address);
-    if decode_result.is_err() {
+    let Ok((prefix, _, _)) = bech32::decode(address) else {
         return Err(StdError::generic_err(format!(
             "Cannot decode remote sender: {}",
             address
         )));
-    }
-    Ok(decode_result.unwrap().0)
+    };
+
+    Ok(prefix)
 }
 
-pub fn parse_asset_info_denom(asset_info: AssetInfo) -> String {
+pub fn parse_asset_info_denom(asset_info: &AssetInfo) -> String {
     match asset_info {
-        AssetInfo::Token { contract_addr } => format!("cw20:{}", contract_addr.to_string()),
-        AssetInfo::NativeToken { denom } => denom,
+        AssetInfo::Token { contract_addr } => format!("cw20:{}", contract_addr.as_str()),
+        AssetInfo::NativeToken { denom } => denom.to_string(),
     }
 }
 
@@ -34,21 +34,19 @@ pub fn denom_to_asset_info(api: &dyn Api, denom: &str) -> AssetInfo {
 }
 
 pub fn to_orai_bridge_address(address: &str) -> StdResult<String> {
-    let decode_result = bech32::decode(address).map_err(|_| {
-        StdError::generic_err(format!(
+    let Ok((_, data, _)) = bech32::decode(address) else {
+        return Err(StdError::generic_err(format!(
             "Cannot decode sender address in to_orai_bridge_address: {}",
             address
-        ))
-    })?;
-    let oraib_address =
-        bech32::encode("oraib", decode_result.1, bech32::Variant::Bech32).map_err(|_| {
-            StdError::generic_err(format!(
-                "Cannot encode sender address to oraibridge address in to_orai_bridge_address: {}",
-                address
-            ))
-        })?;
+        )));
+    };
 
-    Ok(oraib_address)
+    bech32::encode("oraib", data, bech32::Variant::Bech32).map_err(|_| {
+        StdError::generic_err(format!(
+            "Cannot encode sender address to oraibridge address in to_orai_bridge_address: {}",
+            address
+        ))
+    })
 }
 
 #[cfg(test)]
