@@ -186,6 +186,7 @@ mod tests {
                             SystemResult::Ok(ContractResult::Ok(
                                 to_binary(&ConvertInfoResponse {
                                     token_ratio: TokenRatio {
+                                        is_mint_burn: false,
                                         info: AssetInfo::Token {
                                             contract_addr: Addr::unchecked("orai123"),
                                         },
@@ -252,6 +253,7 @@ mod tests {
             res,
             Some(ConvertInfoResponse {
                 token_ratio: TokenRatio {
+                    is_mint_burn: false,
                     info: AssetInfo::Token {
                         contract_addr: Addr::unchecked("orai123"),
                     },

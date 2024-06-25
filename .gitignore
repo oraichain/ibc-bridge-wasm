@@ -7,3 +7,6 @@ tests/test-data.json
 **/artifacts/*
 !**/artifacts/*.wasm
 .env
+
+.scannerwork/
+clippy-report.json

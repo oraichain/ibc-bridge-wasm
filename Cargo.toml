@@ -5,7 +5,17 @@ resolver = "2"
 
 [workspace.dependencies]
 cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "24c138c" }
-oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "03f4955b" }
+oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "29decac" }
+cw2 = { version = "1.0.1" }
+cw20 = { version = "1.0.1" }
+cw20-base = { version = "1.0.1" }
+cw-storage-plus = { version = "1.0.1" }
+cw-controllers = { version = "1.0.1" }
+cw-utils = "0.16.0"
+cw20-ics20-msg = { path = "./packages/cw20-ics20-msg" }
+cosmwasm-schema = { version = "1.2.8" }
+cosmwasm-std = { version = "1.2.8", default-features = false }
+cosmwasm-vm = { version = "1.2.8" }
 # osmosis-test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
 
 [profile.release]
