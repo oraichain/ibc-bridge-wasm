@@ -281,9 +281,9 @@ dependencies = [
 
 [[package]]
 name = "cosmwasm-storage"
-version = "1.2.7"
+version = "1.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8601d284db8776e39fe99b3416516c5636ca73cef14666b7bb9648ca32c4b89"
+checksum = "d0a2997bbb57c24c7ca9f745799c8839c08b7cde0be3f6c43127d25a7f03f2fe"
 dependencies = [
  "cosmwasm-std",
  "serde",
@@ -1204,7 +1204,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "oraiswap"
 version = "0.2.0"
-source = "git+https://github.com/oraichain/oraiswap.git?rev=29decac#29decac873cd2be2245dfc4e792dbc50ce26979c"
+source = "git+https://github.com/oraichain/oraiswap.git?rev=f2c1cec#f2c1ceccdfbe588f284481d3fcf9013773552d70"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
