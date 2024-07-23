@@ -7,7 +7,10 @@ use crate::{helper::get_prefix_decode_bech32, universal_swap_memo::Memo};
 
 impl Memo {
     pub fn decode_memo(memo: Binary) -> Result<Self, StdError> {
-        Memo::decode(memo.0.as_ref()).map_err(|err| StdError::generic_err(err.to_string()))
+        let memo =
+            Memo::decode(memo.0.as_ref()).map_err(|err| StdError::generic_err(err.to_string()))?;
+        memo.validate()?;
+        Ok(memo)
     }
 
     pub fn validate(&self) -> StdResult<()> {
@@ -23,8 +26,30 @@ impl Memo {
         {
             return Err(StdError::generic_err("Cannot have two swap exacts"));
         }
-        if let Some(swap_exact) = user_swap.swap_exact_asset_in {}
-        if let Some(smart_swap_exact) = user_swap.smart_swap_exact_asset_in {}
+        if let Some(swap_exact) = user_swap.swap_exact_asset_in {
+            for op in swap_exact.operations {
+                if op.pool_id.is_none() {
+                    return Err(StdError::generic_err("No pool id"));
+                }
+                let pool_id = op.pool_id.unwrap_or_default();
+                if pool_id.pair_address.is_none() && pool_id.pool_key.is_none() {
+                    return Err(StdError::generic_err("No pair address or pool key"));
+                }
+            }
+        }
+        if let Some(smart_swap_exact) = user_swap.smart_swap_exact_asset_in {
+            for route in smart_swap_exact.routes {
+                for op in route.operations {
+                    if op.pool_id.is_none() {
+                        return Err(StdError::generic_err("No pool id"));
+                    }
+                    let pool_id = op.pool_id.unwrap_or_default();
+                    if pool_id.pair_address.is_none() && pool_id.pool_key.is_none() {
+                        return Err(StdError::generic_err("No pair address or pool key"));
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -373,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_parse_memo_prost_valid() {
-        let memo_base64 = "CkoKSAoFMTAwMDASPwo9CjkKCAoEb3JhaRABEi0KK29yYWkxMmh6anhmaDc3d2w1NzJnZHpjdDJmeHYyYXJ4Y3doNmd5a2M3cWgQARIINDAwMDAwMDA=";
+        let memo_base64 = "CkoKSAoFMTAwMDASPwo9EjkKBG9yYWkSK29yYWkxMmh6anhmaDc3d2w1NzJnZHpjdDJmeHYyYXJ4Y3doNmd5a2M3cWgaBAgBEAEYARIINDAwMDAwMDA=";
         let memo = Memo::decode_memo(Binary::from_base64(memo_base64).unwrap()).unwrap();
         println!("memo: {:?}", memo.user_swap);
         assert_eq!(memo.minimum_receive, "40000000");
@@ -384,13 +409,11 @@ mod tests {
         let pool_id = swap.operations[0].clone().pool_id.unwrap();
         assert_eq!(pool_id.x_to_y, true);
         let pool_key = pool_id.pool_key.unwrap();
-        assert_eq!(pool_key.fee_tier.is_none(), true);
-        assert_eq!(pool_key.token_x.clone().unwrap().denom, "orai");
+        assert_eq!(pool_key.fee_tier.is_none(), false);
+        assert_eq!(pool_key.token_x, "orai");
         assert_eq!(
-            pool_key.token_y.clone().unwrap().denom,
+            pool_key.token_y,
             "orai12hzjxfh77wl572gdzct2fxv2arxcwh6gykc7qh"
         ); // usdt
-        assert_eq!(pool_key.token_x.unwrap().is_native, true);
-        assert_eq!(pool_key.token_y.unwrap().is_native, false);
     }
 }
