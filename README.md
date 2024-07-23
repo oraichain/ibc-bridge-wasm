@@ -34,6 +34,5 @@ brew install protobuf
 
 cargo install protoc-gen-prost
 
-protoc --prost_out packages/cw20-ics20-msg/src/ -I proto proto/universal-swap-memo.proto && mv packages/cw20-ics20-msg/src/_ packages/cw20-ics20-msg/src/universal-swap
--memo.rs
+protoc --prost_out packages/cw20-ics20-msg/src/ -I proto proto/universal-swap-memo.proto && mv packages/cw20-ics20-msg/src/_ packages/cw20-ics20-msg/src/universal_swap_memo.rs
 ```
