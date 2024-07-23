@@ -1,8 +1,15 @@
 use anybuf::Bufany;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Binary, StdError, StdResult};
+use prost::Message;
 
-use crate::helper::get_prefix_decode_bech32;
+use crate::{helper::get_prefix_decode_bech32, universal_swap_memo::Memo};
+
+impl Memo {
+    pub fn decode_memo(memo: Binary) -> Result<Self, StdError> {
+        Memo::decode(memo.0.as_ref()).map_err(|err| StdError::generic_err(err.to_string()))
+    }
+}
 
 #[cw_serde]
 pub struct DestinationInfo {
@@ -171,7 +178,7 @@ mod tests {
     use anybuf::Anybuf;
     use cosmwasm_std::{Binary, StdError};
 
-    use crate::receiver::DestinationInfo;
+    use crate::{receiver::DestinationInfo, universal_swap_memo::Memo};
 
     #[test]
     fn test_parse_destination_info() {
@@ -343,5 +350,28 @@ mod tests {
                 destination_denom: "orai".to_string()
             }
         );
+    }
+
+    #[test]
+    fn test_parse_memo_prost_valid() {
+        let memo_base64 = "CkoKSAoFMTAwMDASPwo9CjkKCAoEb3JhaRABEi0KK29yYWkxMmh6anhmaDc3d2w1NzJnZHpjdDJmeHYyYXJ4Y3doNmd5a2M3cWgQARIINDAwMDAwMDA=";
+        let memo = Memo::decode_memo(Binary::from_base64(memo_base64).unwrap()).unwrap();
+        println!("memo: {:?}", memo.user_swap);
+        assert_eq!(memo.minimum_receive, "40000000");
+        let user_swap = memo.user_swap.clone().unwrap();
+        let swap = user_swap.swap_exact_asset_in.clone().unwrap();
+        assert_eq!(swap.offer_amount, "10000");
+        assert_eq!(swap.operations.len(), 1);
+        let pool_id = swap.operations[0].clone().pool_id.unwrap();
+        assert_eq!(pool_id.x_to_y, true);
+        let pool_key = pool_id.pool_key.unwrap();
+        assert_eq!(pool_key.fee_tier.is_none(), true);
+        assert_eq!(pool_key.token_x.clone().unwrap().denom, "orai");
+        assert_eq!(
+            pool_key.token_y.clone().unwrap().denom,
+            "orai12hzjxfh77wl572gdzct2fxv2arxcwh6gykc7qh"
+        ); // usdt
+        assert_eq!(pool_key.token_x.unwrap().is_native, true);
+        assert_eq!(pool_key.token_y.unwrap().is_native, false);
     }
 }

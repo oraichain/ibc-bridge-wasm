@@ -15,6 +15,7 @@ use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
 use cw20_ics20_msg::receiver::DestinationInfo;
+use cw20_ics20_msg::universal_swap_memo::Memo;
 use cw_storage_plus::Map;
 use oraiswap::asset::{Asset, AssetInfo};
 use oraiswap::router::{RouterController, SwapOperation};
@@ -445,6 +446,8 @@ fn handle_ibc_packet_receive_native_remote_chain(
         to_send.clone(),
         &config.swap_router_contract,
     )?;
+
+    let memo_data = Memo::decode_memo(Binary::from_base64(&msg.memo.clone().unwrap_or_default())?)?;
     let destination =
         DestinationInfo::from_base64(&msg.memo.clone().unwrap_or_default()).unwrap_or_default();
     // if destination denom is empty, set destination denom to ibc denom receive
