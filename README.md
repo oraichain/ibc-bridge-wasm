@@ -25,14 +25,3 @@ Currently not supported.
 ## Network B transfers tokens to A (B->A, where tokens are native tokens from A)
 
 In this case, the user will deposit tokens and invoke the function `execute_transfer_back_to_remote_chain` function. It will create an IBC Send packet and lock the cw20 or native token in the cw20-ics20 contract. If there's a failed acknowledgement, the contract will try to automatically refund the locked tokens back to the sender. If the refund msg is failed, then the token will be locked in the contract, and the team will refund these tokens manually for security purposes.
-
-## Protobuf install
-
-```bash
-# macos
-brew install protobuf
-
-cargo install protoc-gen-prost
-
-protoc --prost_out packages/cw20-ics20-msg/src/ -I proto proto/universal-swap-memo.proto && mv packages/cw20-ics20-msg/src/_ packages/cw20-ics20-msg/src/universal_swap_memo.rs
-```

@@ -7,4 +7,3 @@ pub mod converter;
 pub mod helper;
 pub mod ibc_hooks;
 pub mod receiver;
-pub mod universal_swap_memo;

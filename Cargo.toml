@@ -16,7 +16,6 @@ cw20-ics20-msg = { path = "./packages/cw20-ics20-msg" }
 cosmwasm-schema = { version = "1.5.0" }
 cosmwasm-std = { version = "1.5.0", default-features = false }
 cosmwasm-vm = { version = "1.5.0" }
-prost = "0.11"                                                                                              # or the latest version
 
 [profile.release]
 opt-level = 3
