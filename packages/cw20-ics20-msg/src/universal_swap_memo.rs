@@ -56,30 +56,23 @@ pub mod memo {
     #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct PoolKey {
-        #[prost(message, optional, tag="1")]
-        pub token_x: ::core::option::Option<AssetInfo>,
-        #[prost(message, optional, tag="2")]
-        pub token_y: ::core::option::Option<AssetInfo>,
+        #[prost(string, tag="1")]
+        pub token_x: ::prost::alloc::string::String,
+        #[prost(string, tag="2")]
+        pub token_y: ::prost::alloc::string::String,
         /// if it's v2 -> no fee tier
         #[prost(message, optional, tag="3")]
         pub fee_tier: ::core::option::Option<FeeTier>,
     }
     #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-    pub struct AssetInfo {
-        #[prost(string, tag="1")]
-        pub denom: ::prost::alloc::string::String,
-        /// This would help us parse between native and contract addr
-        #[prost(bool, tag="2")]
-        pub is_native: bool,
-    }
-    #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
     pub struct PoolId {
-        #[prost(message, optional, tag="1")]
+        #[prost(string, optional, tag="1")]
+        pub pair_address: ::core::option::Option<::prost::alloc::string::String>,
+        #[prost(message, optional, tag="2")]
         pub pool_key: ::core::option::Option<PoolKey>,
         /// we can use this to create v2 swap operation as well
-        #[prost(bool, tag="2")]
+        #[prost(bool, tag="3")]
         pub x_to_y: bool,
     }
     /// if none is provided -> error, if more than one attributes are provided ->
