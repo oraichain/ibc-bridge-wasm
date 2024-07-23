@@ -5,7 +5,7 @@ resolver = "2"
 
 [workspace.dependencies]
 cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "33a262f" }
-oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "75b8e66" }
+oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "87e07012a2b809b10f6103f1183d49e36556179f" }
 cw2 = { version = "1.0.1" }
 cw20 = { version = "1.0.1" }
 cw20-base = { version = "1.0.1" }
