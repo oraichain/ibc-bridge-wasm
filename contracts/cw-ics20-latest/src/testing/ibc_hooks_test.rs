@@ -4,12 +4,12 @@ use cosmwasm_std::{
 };
 use cosmwasm_testing_util::mock::{MockApi, MockContract};
 use cosmwasm_vm::testing::MockInstanceOptions;
-use cw20_ics20_msg::ibc_hooks::HookMethods;
+use cw20_ics20_msg::{ibc_hooks::HookMethods, msg::UpdatePairMsg, state::Ratio};
 use oraiswap::asset::AssetInfo;
 
 use crate::{
-    msg::{AllowMsg, ExecuteMsg, InitMsg, UpdatePairMsg},
-    state::{Ratio, TOKEN_FEE},
+    msg::{AllowMsg, ExecuteMsg, InitMsg},
+    state::TOKEN_FEE,
     testing::test_helpers::{DEFAULT_TIMEOUT, WASM_BYTES},
 };
 

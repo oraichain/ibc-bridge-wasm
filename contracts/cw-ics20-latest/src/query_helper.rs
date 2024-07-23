@@ -1,11 +1,12 @@
 use cosmwasm_std::{Api, Env, Order, StdResult, Storage};
 use cw20_ics20_msg::helper::{denom_to_asset_info, parse_ibc_wasm_port_id};
+use cw20_ics20_msg::state::MappingMetadata;
 use oraiswap::asset::AssetInfo;
 use sha256::digest;
 
 use crate::{
     msg::PairQuery,
-    state::{get_key_ics20_ibc_denom, ics20_denoms, MappingMetadata},
+    state::{get_key_ics20_ibc_denom, ics20_denoms},
 };
 
 pub fn get_mappings_from_asset_info(

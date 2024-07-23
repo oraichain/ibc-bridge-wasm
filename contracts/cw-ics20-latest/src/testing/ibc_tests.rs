@@ -31,22 +31,23 @@ use cosmwasm_std::{
 use crate::error::ContractError;
 use crate::state::{
     get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance, ChannelState,
-    MappingMetadata, Ratio, RelayerFee, TokenFee, CHANNEL_REVERSE_STATE, RELAYER_FEE, REPLY_ARGS,
-    TOKEN_FEE,
+    CHANNEL_REVERSE_STATE, RELAYER_FEE, REPLY_ARGS, TOKEN_FEE,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
+use cw20_ics20_msg::state::{MappingMetadata, Ratio, RelayerFee, TokenFee};
 
 use crate::contract::{
     build_burn_cw20_mapping_msg, build_mint_cw20_mapping_msg, execute,
     handle_override_channel_balance, query, query_channel, query_channel_with_key,
 };
 use crate::msg::{
-    AllowMsg, ChannelResponse, ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg,
-    ListChannelsResponse, ListMappingResponse, PairQuery, QueryMsg, TransferBackMsg, UpdatePairMsg,
+    AllowMsg, ChannelResponse, ConfigResponse, ExecuteMsg, InitMsg, ListChannelsResponse,
+    ListMappingResponse, PairQuery, QueryMsg,
 };
 use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
 use cosmwasm_std::{coins, to_vec};
+use cw20_ics20_msg::msg::{DeletePairMsg, TransferBackMsg, UpdatePairMsg};
 
 const SENDER: &str = "orai1gkr56hlnx9vc7vncln2dkd896zfsqjn300kfq0";
 const CONTRACT: &str = "orai19p43y0tqnr5qlhfwnxft2u5unph5yn60y7tuvu";
@@ -1629,7 +1630,7 @@ fn setup_and_query() {
     .unwrap_err();
     assert!(err
         .to_string()
-        .contains("type: cw_ics20_latest::state::ChannelInfo;"));
+        .contains("type: cw20_ics20_msg::state::ChannelInfo;"));
     assert!(err.to_string().contains("not found"));
 }
 
@@ -2342,7 +2343,7 @@ fn test_handle_packet_refund() {
         .unwrap_err();
     assert!(result
         .to_string()
-        .contains("cw_ics20_latest::state::MappingMetadata"));
+        .contains("cw20_ics20_msg::state::MappingMetadata"));
     assert!(result.to_string().contains("not found"));
 
     // update mapping pair so that we can get refunded

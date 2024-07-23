@@ -17,19 +17,19 @@ use crate::error::ContractError;
 use crate::ibc::{build_ibc_send_packet, parse_voucher_denom, process_deduct_fee};
 use crate::ibc_hooks::ibc_hooks_receive;
 use crate::msg::{
-    AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse, ConfigResponse,
-    DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
-    ListMappingResponse, MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse,
-    TransferBackMsg, UpdatePairMsg,
+    AllowedResponse, ChannelResponse, ChannelWithKeyResponse, ConfigResponse, ExecuteMsg, InitMsg,
+    ListAllowedResponse, ListChannelsResponse, ListMappingResponse, MigrateMsg, PairQuery,
+    PortResponse, QueryMsg, RelayerFeeResponse,
 };
 use crate::query_helper::get_mappings_from_asset_info;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
-    reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
-    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    reduce_channel_balance, Config, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG,
+    RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
+use cw20_ics20_msg::msg::{AllowedInfo, DeletePairMsg, TransferBackMsg, UpdatePairMsg};
+use cw20_ics20_msg::state::{AllowInfo, MappingMetadata, RelayerFee, ReplyArgs, TokenFee};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
 
 // version info for migration info

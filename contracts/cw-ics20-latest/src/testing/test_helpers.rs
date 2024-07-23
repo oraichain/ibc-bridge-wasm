@@ -1,6 +1,6 @@
 use crate::contract::instantiate;
 use crate::ibc::{ibc_channel_connect, ibc_channel_open, ICS20_ORDERING, ICS20_VERSION};
-use crate::state::ChannelInfo;
+use cw20_ics20_msg::state::ChannelInfo;
 
 use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
 

@@ -21,14 +21,15 @@ use oraiswap::router::{RouterController, SwapOperation};
 
 use crate::contract::build_mint_cw20_mapping_msg;
 use crate::error::{ContractError, Never};
-use crate::msg::{ExecuteMsg, FeeData, FollowUpMsgsData, PairQuery};
+use crate::msg::{ExecuteMsg, PairQuery};
 use crate::query_helper::get_destination_info_on_orai;
 use crate::state::{
-    get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ChannelInfo,
-    ConvertReplyArgs, Ratio, ALLOW_LIST, CHANNEL_INFO, CONFIG, CONVERT_REPLY_ARGS, RELAYER_FEE,
-    REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ALLOW_LIST, CHANNEL_INFO,
+    CONFIG, CONVERT_REPLY_ARGS, RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
+use cw20_ics20_msg::msg::{FeeData, FollowUpMsgsData};
+use cw20_ics20_msg::state::{ChannelInfo, ConvertReplyArgs, Ratio};
 
 pub const ICS20_VERSION: &str = "ics20-1";
 pub const ICS20_ORDERING: IbcOrder = IbcOrder::Unordered;
