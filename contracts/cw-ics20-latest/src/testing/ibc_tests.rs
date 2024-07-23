@@ -1627,10 +1627,10 @@ fn setup_and_query() {
         },
     )
     .unwrap_err();
-    assert_eq!(
-        err,
-        StdError::not_found("cw_ics20_latest::state::ChannelInfo")
-    );
+    assert!(err
+        .to_string()
+        .contains("type: cw_ics20_latest::state::ChannelInfo;"));
+    assert!(err.to_string().contains("not found"));
 }
 
 #[test]
@@ -2340,10 +2340,10 @@ fn test_handle_packet_refund() {
 
     let result = handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount, false)
         .unwrap_err();
-    assert_eq!(
-        result.to_string(),
-        "cw_ics20_latest::state::MappingMetadata not found"
-    );
+    assert!(result
+        .to_string()
+        .contains("cw_ics20_latest::state::MappingMetadata"));
+    assert!(result.to_string().contains("not found"));
 
     // update mapping pair so that we can get refunded
     // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
