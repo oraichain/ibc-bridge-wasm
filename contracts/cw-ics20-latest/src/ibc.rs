@@ -2,12 +2,12 @@ use std::ops::Mul;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, coin, entry_point, from_binary, to_binary, Addr, Api, Binary, CosmosMsg, Decimal, Deps,
-    DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
-    IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
-    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
-    Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
-    Timestamp, Uint128,
+    attr, coin, entry_point, from_binary, to_binary, to_json_binary, Addr, Api, Binary, CosmosMsg,
+    Decimal, Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel,
+    IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder,
+    IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse,
+    IbcTimeout, Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg,
+    SubMsgResult, Timestamp, Uint128, WasmMsg,
 };
 
 use cw20_ics20_msg::converter::ConvertType;
@@ -18,6 +18,7 @@ use cw20_ics20_msg::receiver::DestinationInfo;
 use cw_storage_plus::Map;
 use oraiswap::asset::{Asset, AssetInfo};
 use oraiswap::router::{RouterController, SwapOperation};
+use skip::entry_point::ExecuteMsg as EntryPointExecuteMsg;
 
 use crate::contract::build_mint_cw20_mapping_msg;
 use crate::error::{ContractError, Never};
@@ -437,7 +438,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
         funds: vec![],
     }));
 
-    let mut fee_data = process_deduct_fee(
+    let fee_data = process_deduct_fee(
         storage,
         querier,
         api,
@@ -446,70 +447,6 @@ fn handle_ibc_packet_receive_native_remote_chain(
         to_send.clone(),
         &config.swap_router_contract,
     )?;
-
-    let destination =
-        DestinationInfo::from_base64(&msg.memo.clone().unwrap_or_default()).unwrap_or_default();
-    // if destination denom is empty, set destination denom to ibc denom receive
-    let (destination_asset_info_on_orai, destination_pair_mapping) =
-        if destination.destination_denom.is_empty() {
-            (initial_receive_asset_info.clone(), None)
-        } else {
-            get_destination_info_on_orai(
-                storage,
-                api,
-                &env,
-                &destination.destination_channel,
-                &destination.destination_denom,
-            )
-        };
-
-    // if there's a round trip in the destination then we charge additional token and relayer fees
-    if !destination.destination_denom.is_empty() && !destination.destination_channel.is_empty() {
-        // if there's a round trip to a different network, we deduct the token fee based on the remote destination denom
-        // for relayer fee, we need to deduct using the destination network
-        let (_, additional_token_fee) =
-            deduct_token_fee(storage, &destination.destination_denom, to_send.amount())?;
-        fee_data.token_fee = fee_data.token_fee.checked_add(additional_token_fee);
-        let mut additional_relayer_fee = deduct_relayer_fee(
-            storage,
-            api,
-            querier,
-            &destination.receiver,
-            &destination.destination_denom,
-            destination_asset_info_on_orai.clone(),
-            &config.swap_router_contract,
-        )?;
-
-        // if initial asset info is different with destination asset info,
-        // we need convert relayer fee from destination_asset_info_on_orai to initial token receive
-        let swap_operations = build_swap_operations(
-            initial_receive_asset_info.clone(),
-            destination_asset_info_on_orai.clone(),
-            config.fee_denom.as_str(),
-        );
-
-        if !swap_operations.is_empty() {
-            // if simulate swap fails, set fee to zero
-            additional_relayer_fee = config
-                .swap_router_contract
-                .simulate_swap(querier, additional_relayer_fee, swap_operations)
-                .map(|res| res.amount)
-                .unwrap_or_default();
-        }
-
-        // if additional_relayer_fee is greater than 0
-        if !additional_relayer_fee.is_zero() {
-            fee_data.relayer_fee = fee_data.relayer_fee.checked_add(additional_relayer_fee);
-            fee_data.deducted_amount = fee_data
-                .deducted_amount
-                .checked_sub(
-                    additional_token_fee
-                        .checked_add(additional_relayer_fee)
-                        .unwrap_or(additional_token_fee),
-                )
-                .unwrap_or_default();
-        }
-    }
 
     // if the fees have consumed all user funds, we send all the fees to our token fee receiver
     if fee_data.deducted_amount.is_zero() {
@@ -533,34 +470,23 @@ fn handle_ibc_packet_receive_native_remote_chain(
     if !fee_data.relayer_fee.is_empty() {
         cosmos_msgs.push(fee_data.relayer_fee.send_amount(relayer.to_string(), None))
     }
-
     let new_deducted_to_send = Amount::from_parts(to_send.denom(), fee_data.deducted_amount);
-    let follow_up_msg_data = get_follow_up_msgs(
-        storage,
-        api,
-        querier,
-        env.clone(),
-        new_deducted_to_send,
-        initial_receive_asset_info,
-        destination_asset_info_on_orai,
-        &msg.sender,
-        &msg.receiver,
-        &destination,
-        destination_pair_mapping,
-    )?;
+    let swap_then_post_action_msg = new_deducted_to_send.send_amount(
+        config.osor_entrypoint_contract,
+        Some(to_json_binary(&EntryPointExecuteMsg::UniversalSwap {
+            memo: msg.memo.clone().unwrap_or_default(),
+        })?),
+    );
 
-    let mut res = IbcReceiveResponse::new()
+    let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_messages(cosmos_msgs)
-        .add_submessages(follow_up_msg_data.sub_msgs)
+        .add_submessage(SubMsg::new(swap_then_post_action_msg))
         .add_attributes(attributes)
         .add_attributes(vec![
             ("token_fee", &fee_data.token_fee.amount().to_string()),
             ("relayer_fee", &fee_data.relayer_fee.amount().to_string()),
         ]);
-    if !follow_up_msg_data.follow_up_msg.is_empty() {
-        res = res.add_attribute("ibc_error_msg", follow_up_msg_data.follow_up_msg);
-    }
 
     Ok(res)
 }

@@ -80,6 +80,7 @@ pub fn setup(
         allowlist,
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
+        osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
     };
     let info = mock_info(&String::from("anyone"), &[]);
     let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();

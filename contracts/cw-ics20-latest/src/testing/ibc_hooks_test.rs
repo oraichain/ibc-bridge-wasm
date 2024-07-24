@@ -74,6 +74,7 @@ fn test_ibc_hooks_receive() {
         allowlist,
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
+        osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
     };
 
     contract_instance

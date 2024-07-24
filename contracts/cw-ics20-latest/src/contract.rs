@@ -54,6 +54,7 @@ pub fn instantiate(
         token_fee_receiver: admin.clone(),
         relayer_fee_receiver: admin,
         converter_contract: ConverterController(msg.converter_contract),
+        osor_entrypoint_contract: msg.osor_entrypoint_contract,
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -768,18 +769,9 @@ pub fn execute_delete_mapping_pair(
 #[entry_point]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
     // we don't need to save anything if migrating from the same version
-    CONFIG.save(
-        deps.storage,
-        &Config {
-            default_timeout: msg.default_timeout,
-            default_gas_limit: msg.default_gas_limit,
-            fee_denom: msg.fee_denom,
-            swap_router_contract: RouterController(msg.swap_router_contract),
-            token_fee_receiver: deps.api.addr_validate(&msg.token_fee_receiver)?,
-            relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
-            converter_contract: ConverterController(msg.converter_contract),
-        },
-    )?;
+    let mut config = CONFIG.load(deps.storage)?;
+    config.osor_entrypoint_contract = msg.osor_entrypoint_contract;
+    CONFIG.save(deps.storage, &config)?;
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 

@@ -87,11 +87,22 @@ impl Amount {
 
     pub fn send_amount(&self, recipient: String, msg: Option<Binary>) -> CosmosMsg {
         match self.to_owned() {
-            Amount::Native(coin) => BankMsg::Send {
-                to_address: recipient,
-                amount: vec![coin],
+            Amount::Native(coin) => {
+                if let Some(msg) = msg {
+                    WasmMsg::Execute {
+                        contract_addr: recipient,
+                        msg,
+                        funds: vec![coin],
+                    }
+                    .into()
+                } else {
+                    BankMsg::Send {
+                        to_address: recipient,
+                        amount: vec![coin],
+                    }
+                    .into()
+                }
             }
-            .into(),
             Amount::Cw20(coin) => {
                 let msg_cw20 = if let Some(msg) = msg {
                     Cw20ExecuteMsg::Send {

@@ -22,6 +22,8 @@ pub struct InitMsg {
     pub swap_router_contract: String,
     /// converter contract for convert token
     pub converter_contract: String,
+    // entrypoint for handling swap and post actions like IBC transfer to remote
+    pub osor_entrypoint_contract: String,
 }
 
 #[cw_serde]
@@ -32,13 +34,7 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
-    pub default_timeout: u64,
-    pub default_gas_limit: Option<u64>,
-    pub fee_denom: String,
-    pub swap_router_contract: String,
-    pub token_fee_receiver: String,
-    pub relayer_fee_receiver: String,
-    pub converter_contract: String,
+    pub osor_entrypoint_contract: String,
 }
 
 #[cw_serde]
