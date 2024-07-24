@@ -1,6 +1,5 @@
-use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Binary, IbcEndpoint, SubMsg, Uint128};
-use cw20::Cw20ReceiveMsg;
+use cosmwasm_schema::cw_serde;
+use cosmwasm_std::{IbcEndpoint, Uint128};
 use oraiswap::asset::{Asset, AssetInfo};
 
 #[cw_serde]

@@ -39,7 +39,7 @@ pub fn ibc_hooks_universal_swap(
     // check exactly one coin was sent
     let source_coin = one_coin(&info)?;
 
-    let hooks_info = IbcHooksUniversalSwap::from_binary(deps.api, &args)?;
+    let hooks_info = IbcHooksUniversalSwap::from_json(deps.api, &args)?;
     let destination = DestinationInfo {
         receiver: hooks_info.destination_receiver,
         destination_channel: hooks_info.destination_channel,

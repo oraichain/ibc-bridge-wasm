@@ -18,7 +18,7 @@
 // pub mod v2 {
 //     use crate::state::{ChannelState, CHANNEL_INFO, CHANNEL_STATE};
 //     use crate::ContractError;
-//     use cosmwasm_std::{to_binary, Addr, DepsMut, Env, Order, StdResult, WasmQuery};
+//     use cosmwasm_std::{to_json_binary, Addr, DepsMut, Env, Order, StdResult, WasmQuery};
 //     use cw20::{BalanceResponse, Cw20QueryMsg};
 //     use cw20_ics20_msg::amount::Amount;
 
@@ -62,7 +62,7 @@
 //                 // `Cw20Contract(contract.clone()).balance(&deps.querier, contract)?`
 //                 let query = WasmQuery::Smart {
 //                     contract_addr: coin.address,
-//                     msg: to_binary(&Cw20QueryMsg::Balance {
+//                     msg: to_json_binary(&Cw20QueryMsg::Balance {
 //                         address: contract.into(),
 //                     })?,
 //                 };

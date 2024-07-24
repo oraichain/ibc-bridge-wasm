@@ -1,6 +1,6 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    to_binary, Addr, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128,
+    to_json_binary, Addr, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128,
     WasmMsg,
 };
 use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
@@ -119,7 +119,7 @@ impl Amount {
 
                 WasmMsg::Execute {
                     contract_addr: coin.address.to_string(),
-                    msg: to_binary(&msg_cw20).unwrap(),
+                    msg: to_json_binary(&msg_cw20).unwrap(),
                     funds: vec![],
                 }
                 .into()

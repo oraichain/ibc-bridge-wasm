@@ -2,12 +2,12 @@ use std::ops::Mul;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, coin, entry_point, from_binary, to_binary, to_json_binary, Addr, Api, Binary, CosmosMsg,
-    Decimal, Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel,
-    IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder,
-    IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse,
-    IbcTimeout, Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg,
-    SubMsgResult, Timestamp, Uint128, WasmMsg,
+    attr, coin, entry_point, from_json, to_json_binary, Addr, Api, Binary, CosmosMsg, Decimal,
+    Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
+    IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
+    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
+    Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
+    Timestamp, Uint128,
 };
 
 use cw20_ics20_msg::converter::ConvertType;
@@ -83,13 +83,13 @@ pub enum Ics20Ack {
 // create a serialized success message
 fn ack_success() -> Binary {
     let res = Ics20Ack::Result(b"1".into());
-    to_binary(&res).unwrap()
+    to_json_binary(&res).unwrap()
 }
 
 // create a serialized error message
 pub fn ack_fail(err: String) -> Binary {
     let res = Ics20Ack::Error(err);
-    to_binary(&res).unwrap()
+    to_json_binary(&res).unwrap()
 }
 
 pub const NATIVE_RECEIVE_ID: u64 = 1338;
@@ -372,7 +372,7 @@ fn do_ibc_packet_receive(
     packet: &IbcPacket,
     relayer: &str,
 ) -> Result<IbcReceiveResponse, ContractError> {
-    let msg: Ics20Packet = from_binary(&packet.data)?;
+    let msg: Ics20Packet = from_json(&packet.data)?;
 
     // If the token originated on the remote chain, it looks like "ucosm".
     // If it originated on our chain, it looks like "port/channel/ucosm".
@@ -429,7 +429,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     // increase channel balance submsg. We increase it first before doing other tasks
     cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
         contract_addr: env.contract.address.to_string(),
-        msg: to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+        msg: to_json_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
             dest_channel_id: packet.dest.channel_id.clone(),
             ibc_denom: ibc_denom.clone(),
             amount: msg.amount,
@@ -807,7 +807,7 @@ pub fn process_ibc_msg(
 
     let reduce_balance_msg = SubMsg::new(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
         contract_addr,
-        msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
+        msg: to_json_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
             src_channel_id: src_channel.to_string(),
             ibc_denom: pair_query.key.clone(),
             amount: remote_amount,
@@ -1014,7 +1014,7 @@ pub fn ibc_packet_ack(
 ) -> Result<IbcBasicResponse, ContractError> {
     // Design decision: should we trap error like in receive?
     // retried again and again. is that good?
-    let ics20msg: Ics20Ack = from_binary(&msg.acknowledgement.data)?;
+    let ics20msg: Ics20Ack = from_json(&msg.acknowledgement.data)?;
     match ics20msg {
         Ics20Ack::Result(_) => on_packet_success(deps, msg.original_packet),
         Ics20Ack::Error(err) => on_packet_failure(deps, msg.original_packet, err),
@@ -1034,7 +1034,7 @@ pub fn ibc_packet_timeout(
 
 // update the balance stored on this (channel, denom) index
 fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicResponse, ContractError> {
-    let msg: Ics20Packet = from_binary(&packet.data)?;
+    let msg: Ics20Packet = from_json(&packet.data)?;
 
     // similar event messages like ibctransfer module
     let attributes = vec![
@@ -1063,7 +1063,7 @@ fn on_packet_failure(
     packet: IbcPacket,
     err: String,
 ) -> Result<IbcBasicResponse, ContractError> {
-    let msg: Ics20Packet = from_binary(&packet.data)?;
+    let msg: Ics20Packet = from_json(&packet.data)?;
 
     // in case that the denom is not in the mapping list, meaning that it is not transferred back, but transfer originally from this local chain
     if ics20_denoms().may_load(deps.storage, &msg.denom)?.is_none() {
@@ -1151,7 +1151,7 @@ pub fn build_ibc_send_packet(
     // prepare ibc message
     Ok(IbcMsg::SendPacket {
         channel_id: src_channel.to_string(),
-        data: to_binary(&packet)?,
+        data: to_json_binary(&packet)?,
         timeout,
     })
 }

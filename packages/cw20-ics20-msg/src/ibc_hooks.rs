@@ -18,7 +18,7 @@ pub struct IbcHooksUniversalSwap {
 }
 
 impl IbcHooksUniversalSwap {
-    pub fn from_binary(api: &dyn Api, value: &Binary) -> StdResult<Self> {
+    pub fn from_json(api: &dyn Api, value: &Binary) -> StdResult<Self> {
         let deserialized = Bufany::deserialize(value)
             .map_err(|err| StdError::generic_err(format!("Error on deserialize: {:?}", err)))?;
 
@@ -78,11 +78,8 @@ mod tests {
     #[test]
     fn test_parse_ibc_hooks_deserialize_error() {
         let memo = "memo".to_string();
-        IbcHooksUniversalSwap::from_binary(
-            &MockApi::default(),
-            &Binary::from_base64(&memo).unwrap(),
-        )
-        .unwrap_err();
+        IbcHooksUniversalSwap::from_json(&MockApi::default(), &Binary::from_base64(&memo).unwrap())
+            .unwrap_err();
     }
 
     #[test]
@@ -104,7 +101,7 @@ mod tests {
         )
         .to_base64();
 
-        let res = IbcHooksUniversalSwap::from_binary(
+        let res = IbcHooksUniversalSwap::from_json(
             &MockApi::default(),
             &Binary::from_base64(&memo).unwrap(),
         );
@@ -133,7 +130,7 @@ mod tests {
         )
         .to_base64();
 
-        let res = IbcHooksUniversalSwap::from_binary(
+        let res = IbcHooksUniversalSwap::from_json(
             &MockApi::default(),
             &Binary::from_base64(&memo).unwrap(),
         );
@@ -169,7 +166,7 @@ mod tests {
         )
         .to_base64();
 
-        let res = IbcHooksUniversalSwap::from_binary(
+        let res = IbcHooksUniversalSwap::from_json(
             &MockApi::default(),
             &Binary::from_base64(&memo).unwrap(),
         )

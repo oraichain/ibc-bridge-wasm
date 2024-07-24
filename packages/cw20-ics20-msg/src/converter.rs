@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{to_binary, Coin, CosmosMsg, QuerierWrapper, StdResult, Uint128, WasmMsg};
+use cosmwasm_std::{to_json_binary, Coin, CosmosMsg, QuerierWrapper, StdResult, Uint128, WasmMsg};
 use cw20::Cw20ExecuteMsg;
 use oraiswap::{
     asset::{Asset, AssetInfo},
@@ -60,7 +60,7 @@ impl ConverterController {
                     let msg = match source_info {
                         AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: self.addr(),
-                            msg: to_binary(&converter::ExecuteMsg::Convert {})?,
+                            msg: to_json_binary(&converter::ExecuteMsg::Convert {})?,
                             funds: vec![Coin {
                                 denom: denom.clone(),
                                 amount,
@@ -68,10 +68,10 @@ impl ConverterController {
                         }),
                         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: contract_addr.to_string(),
-                            msg: to_binary(&Cw20ExecuteMsg::Send {
+                            msg: to_json_binary(&Cw20ExecuteMsg::Send {
                                 contract: self.addr(),
                                 amount,
-                                msg: to_binary(&converter::Cw20HookMsg::Convert {})?,
+                                msg: to_json_binary(&converter::Cw20HookMsg::Convert {})?,
                             })?,
                             funds: vec![],
                         }),
@@ -88,17 +88,17 @@ impl ConverterController {
                     let msg = match converter_info.token_ratio.info {
                         AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: self.addr(),
-                            msg: to_binary(&converter::ExecuteMsg::ConvertReverse {
+                            msg: to_json_binary(&converter::ExecuteMsg::ConvertReverse {
                                 from_asset: source_info.to_owned(),
                             })?,
                             funds: vec![Coin { denom, amount }],
                         }),
                         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: contract_addr.to_string(),
-                            msg: to_binary(&Cw20ExecuteMsg::Send {
+                            msg: to_json_binary(&Cw20ExecuteMsg::Send {
                                 contract: self.addr(),
                                 amount,
-                                msg: to_binary(&converter::Cw20HookMsg::ConvertReverse {
+                                msg: to_json_binary(&converter::Cw20HookMsg::ConvertReverse {
                                     from: source_info.to_owned(),
                                 })?,
                             })?,
@@ -118,10 +118,11 @@ mod tests {
     use std::marker::PhantomData;
 
     use cosmwasm_std::{
-        from_binary, from_slice,
+        from_json,
         testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR},
-        to_binary, Addr, Api, Coin, ContractResult, CosmosMsg, Decimal, Empty, OwnedDeps, Querier,
-        QuerierResult, QueryRequest, SystemError, SystemResult, Uint128, WasmMsg, WasmQuery,
+        to_json_binary, Addr, Api, Coin, ContractResult, CosmosMsg, Decimal, Empty, OwnedDeps,
+        Querier, QuerierResult, QueryRequest, SystemError, SystemResult, Uint128, WasmMsg,
+        WasmQuery,
     };
     use cw20::Cw20ExecuteMsg;
     use cw_storage_plus::KeyDeserialize;
@@ -160,7 +161,7 @@ mod tests {
     impl Querier for WasmMockQuerier {
         fn raw_query(&self, bin_request: &[u8]) -> QuerierResult {
             // MockQuerier doesn't support Custom, so we ignore it completely here
-            let request: QueryRequest<Empty> = match from_slice(bin_request) {
+            let request: QueryRequest<Empty> = match from_json(bin_request) {
                 Ok(v) => v,
                 Err(e) => {
                     return SystemResult::Err(SystemError::InvalidRequest {
@@ -178,13 +179,13 @@ mod tests {
                 QueryRequest::Wasm(WasmQuery::Smart {
                     contract_addr: _,
                     msg,
-                }) => match from_binary(msg) {
+                }) => match from_json(msg) {
                     Ok(converter::QueryMsg::ConvertInfo { asset_info }) => {
                         if asset_info.eq(&AssetInfo::NativeToken {
                             denom: "inj".to_string(),
                         }) {
                             SystemResult::Ok(ContractResult::Ok(
-                                to_binary(&ConvertInfoResponse {
+                                to_json_binary(&ConvertInfoResponse {
                                     token_ratio: TokenRatio {
                                         is_mint_burn: false,
                                         info: AssetInfo::Token {
@@ -309,7 +310,7 @@ mod tests {
             (
                 Some(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "converter".to_string(),
-                    msg: to_binary(&converter::ExecuteMsg::Convert {}).unwrap(),
+                    msg: to_json_binary(&converter::ExecuteMsg::Convert {}).unwrap(),
                     funds: vec![Coin {
                         amount: Uint128::from(100000u128),
                         denom: "inj".to_string()
@@ -341,10 +342,10 @@ mod tests {
             (
                 Some(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "orai123".to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Send {
+                    msg: to_json_binary(&Cw20ExecuteMsg::Send {
                         contract: "converter".to_string(),
                         amount: Uint128::from(100000u128),
-                        msg: to_binary(&converter::Cw20HookMsg::ConvertReverse {
+                        msg: to_json_binary(&converter::Cw20HookMsg::ConvertReverse {
                             from: AssetInfo::NativeToken {
                                 denom: "inj".to_string(),
                             },

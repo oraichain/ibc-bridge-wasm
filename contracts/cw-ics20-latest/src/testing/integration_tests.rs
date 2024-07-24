@@ -2,7 +2,7 @@
 // use crate::msg::{AllowMsg, InitMsg, UpdatePairMsg};
 // use crate::testing::test_helpers::{CONTRACT_PORT, DEFAULT_TIMEOUT, REMOTE_PORT, WASM_BYTES};
 
-// use cosmwasm_std::{to_binary, Addr, Coin, IbcEndpoint, IbcPacket, Timestamp};
+// use cosmwasm_std::{to_json_binary, Addr, Coin, IbcEndpoint, IbcPacket, Timestamp};
 // use oraiswap::asset::{AssetInfo, ORAI_DENOM};
 // use osmosis_test_tube::{Account, Module, OraichainTestApp, Wasm};
 
@@ -30,7 +30,7 @@
 //         memo: None,
 //     };
 //     IbcPacket::new(
-//         to_binary(&data).unwrap(),
+//         to_json_binary(&data).unwrap(),
 //         IbcEndpoint {
 //             port_id: REMOTE_PORT.to_string(),
 //             channel_id: remote_channel.to_string(),

@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
+    from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
     IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
     WasmMsg,
 };
@@ -377,7 +377,7 @@ pub fn execute_receive(
     let amount = Amount::cw20(wrapper.amount, info.sender);
     let api = deps.api;
 
-    let msg: TransferBackMsg = from_binary(&wrapper.msg)?;
+    let msg: TransferBackMsg = from_json(&wrapper.msg)?;
     execute_transfer_back_to_remote_chain(
         deps,
         env,
@@ -446,7 +446,7 @@ pub fn execute_receive(
 //     // prepare ibc message
 //     let msg = IbcMsg::SendPacket {
 //         channel_id: msg.channel,
-//         data: to_binary(&packet)?,
+//         data: to_json_binary(&packet)?,
 //         timeout: timeout.into(),
 //     };
 
@@ -618,7 +618,7 @@ pub fn build_burn_cw20_mapping_msg(
             AssetInfo::Token { contract_addr } => {
                 return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract_addr.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Burn {
+                    msg: to_json_binary(&Cw20ExecuteMsg::Burn {
                         amount: amount_local,
                     })?,
                     funds: vec![],
@@ -647,7 +647,7 @@ pub fn build_mint_cw20_mapping_msg(
             AssetInfo::Token { contract_addr } => {
                 return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract_addr.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Mint {
+                    msg: to_json_binary(&Cw20ExecuteMsg::Mint {
                         recipient: receiver,
                         amount: amount_local,
                     })?,
@@ -781,31 +781,31 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Port {} => to_binary(&query_port(deps)?),
-        QueryMsg::ListChannels {} => to_binary(&query_list(deps)?),
-        QueryMsg::Channel { id } => to_binary(&query_channel(deps, id)?),
+        QueryMsg::Port {} => to_json_binary(&query_port(deps)?),
+        QueryMsg::ListChannels {} => to_json_binary(&query_list(deps)?),
+        QueryMsg::Channel { id } => to_json_binary(&query_channel(deps, id)?),
         QueryMsg::ChannelWithKey { channel_id, denom } => {
-            to_binary(&query_channel_with_key(deps, channel_id, denom)?)
+            to_json_binary(&query_channel_with_key(deps, channel_id, denom)?)
         }
-        QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Allowed { contract } => to_binary(&query_allowed(deps, contract)?),
+        QueryMsg::Config {} => to_json_binary(&query_config(deps)?),
+        QueryMsg::Allowed { contract } => to_json_binary(&query_allowed(deps, contract)?),
         QueryMsg::ListAllowed {
             start_after,
             limit,
             order,
-        } => to_binary(&list_allowed(deps, start_after, limit, order)?),
+        } => to_json_binary(&list_allowed(deps, start_after, limit, order)?),
         QueryMsg::PairMappings {
             start_after,
             limit,
             order,
-        } => to_binary(&list_cw20_mapping(deps, start_after, limit, order)?),
-        QueryMsg::PairMapping { key } => to_binary(&get_mapping_from_key(deps, key)?),
+        } => to_json_binary(&list_cw20_mapping(deps, start_after, limit, order)?),
+        QueryMsg::PairMapping { key } => to_json_binary(&get_mapping_from_key(deps, key)?),
         QueryMsg::PairMappingsFromAssetInfo { asset_info } => {
-            to_binary(&get_mappings_from_asset_info(deps.storage, asset_info)?)
+            to_json_binary(&get_mappings_from_asset_info(deps.storage, asset_info)?)
         }
-        QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
+        QueryMsg::Admin {} => to_json_binary(&ADMIN.query_admin(deps)?),
         QueryMsg::GetTransferTokenFee { remote_token_denom } => {
-            to_binary(&TOKEN_FEE.load(deps.storage, &remote_token_denom)?)
+            to_json_binary(&TOKEN_FEE.load(deps.storage, &remote_token_denom)?)
         }
     }
 }

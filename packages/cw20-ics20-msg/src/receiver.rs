@@ -36,10 +36,10 @@ impl DestinationInfo {
     }
 
     pub fn from_base64(encoded: &str) -> StdResult<Self> {
-        DestinationInfo::from_binary(&Binary::from_base64(encoded)?)
+        DestinationInfo::from_json(&Binary::from_base64(encoded)?)
     }
 
-    fn from_binary(value: &Binary) -> StdResult<Self> {
+    fn from_json(value: &Binary) -> StdResult<Self> {
         let deserialized = Bufany::deserialize(value)
             .map_err(|err| StdError::generic_err(format!("Error on deserialize: {:?}", err)))?;
 
