@@ -601,7 +601,7 @@ dependencies = [
  "cw2 1.1.2",
  "cw20 1.1.2",
  "cw20-ics20-msg 0.0.3",
- "oraiswap 0.2.0 (git+https://github.com/oraichain/oraiswap.git?rev=87e07012a2b809b10f6103f1183d49e36556179f)",
+ "oraiswap 0.2.0 (git+https://github.com/oraichain/oraiswap.git?rev=f4b0cc2f96e87938c6f203ac0a82012bcfe4b17b)",
  "sha256",
  "skip",
  "thiserror",
@@ -821,7 +821,7 @@ dependencies = [
  "cosmwasm-vm",
  "cw-storage-plus 1.2.0",
  "cw20 1.1.2",
- "oraiswap 0.2.0 (git+https://github.com/oraichain/oraiswap.git?rev=87e07012a2b809b10f6103f1183d49e36556179f)",
+ "oraiswap 0.2.0 (git+https://github.com/oraichain/oraiswap.git?rev=f4b0cc2f96e87938c6f203ac0a82012bcfe4b17b)",
 ]
 
 [[package]]
@@ -1551,6 +1551,26 @@ dependencies = [
 name = "oraiswap"
 version = "0.2.0"
 source = "git+https://github.com/oraichain/oraiswap.git?rev=87e07012a2b809b10f6103f1183d49e36556179f#87e07012a2b809b10f6103f1183d49e36556179f"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw-multi-test 0.20.1",
+ "cw-utils 0.16.0",
+ "cw20 1.1.2",
+ "cw20-base",
+ "oraiswap-v3",
+ "prost 0.11.9",
+ "protobuf",
+ "schemars",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "oraiswap"
+version = "0.2.0"
+source = "git+https://github.com/oraichain/oraiswap.git?rev=f4b0cc2f96e87938c6f203ac0a82012bcfe4b17b#f4b0cc2f96e87938c6f203ac0a82012bcfe4b17b"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",

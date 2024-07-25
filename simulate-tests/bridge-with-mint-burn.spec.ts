@@ -35,6 +35,7 @@ import {
 } from "@oraichain/common-contracts-sdk/build/CwIcs20Latest.types";
 import { toDisplay } from "@oraichain/oraidex-common";
 import { parseToIbcWasmMemo } from "./proto-gen";
+import { expect, afterAll, beforeAll, describe, it, beforeEach } from "vitest";
 
 let cosmosChain: CWSimulateApp;
 // oraichain support cosmwasm
@@ -551,12 +552,12 @@ describe.only("IBCModuleWithMintBurn", () => {
       // upload pair & lp token code id
       const { codeId: pairCodeId } = await oraiClient.upload(
         oraiSenderAddress,
-        readFileSync(oraidexArtifacts.getContractDir("oraiswap_pair")),
+        readFileSync(oraidexArtifacts.getContractDir("oraiswap-pair")),
         "auto"
       );
       const { codeId: lpCodeId } = await oraiClient.upload(
         oraiSenderAddress,
-        readFileSync(oraidexArtifacts.getContractDir("oraiswap_token")),
+        readFileSync(oraidexArtifacts.getContractDir("oraiswap-token")),
         "auto"
       );
       lpId = lpCodeId;
@@ -587,7 +588,7 @@ describe.only("IBCModuleWithMintBurn", () => {
           oraiSenderAddress,
           {},
           "oraiswap-oracle",
-          "oraiswap_oracle"
+          "oraiswap-oracle"
         );
       // deploy factory contract
       oracleContract = new OraiswapOracleClient(
@@ -609,7 +610,7 @@ describe.only("IBCModuleWithMintBurn", () => {
             token_code_id: lpCodeId,
           },
           "oraiswap-factory",
-          "oraiswap_factory"
+          "oraiswap-factory"
         );
 
       const { contractAddress: routerAddress } =
@@ -621,7 +622,7 @@ describe.only("IBCModuleWithMintBurn", () => {
             factory_addr_v2: factoryAddress,
           },
           "oraiswap-router",
-          "oraiswap_router"
+          "oraiswap-router"
         );
       factoryContract = new OraiswapFactoryClient(
         oraiClient,
