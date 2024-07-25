@@ -16,7 +16,7 @@ cw20-ics20-msg = { path = "./packages/cw20-ics20-msg" }
 cosmwasm-schema = { version = "1.5.0" }
 cosmwasm-std = { version = "1.5.0", default-features = false }
 cosmwasm-vm = { version = "1.5.0" }
-skip = { git = "https://github.com/oraichain/osor-api-contracts.git", rev = "3a48115533c5c2523a613ffa352672fbe1007216" }
+skip = { git = "https://github.com/oraichain/osor-api-contracts.git", rev = "0655922173b4ac37c5e63f451eb9bc33c7ac8159" }
 
 [profile.release]
 opt-level = 3
