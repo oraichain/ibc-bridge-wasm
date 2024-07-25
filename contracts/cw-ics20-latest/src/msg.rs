@@ -82,6 +82,7 @@ pub enum ExecuteMsg {
     },
     IbcHooksReceive {
         func: HookMethods,
+        orai_receiver: String,
         args: Binary,
     },
 }

@@ -157,9 +157,11 @@ pub fn execute(
             outstanding,
             total_sent,
         ),
-        ExecuteMsg::IbcHooksReceive { func, args } => {
-            ibc_hooks_receive(deps, env, info, func, args)
-        }
+        ExecuteMsg::IbcHooksReceive {
+            func,
+            orai_receiver,
+            args,
+        } => ibc_hooks_receive(deps, env, info, func, orai_receiver, args),
     }
 }
 

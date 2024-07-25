@@ -10,7 +10,6 @@ use cosmwasm_std::{
     Timestamp, Uint128,
 };
 
-use cw20_ics20_msg::converter::ConvertType;
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
@@ -23,14 +22,13 @@ use skip::entry_point::ExecuteMsg as EntryPointExecuteMsg;
 use crate::contract::build_mint_cw20_mapping_msg;
 use crate::error::{ContractError, Never};
 use crate::msg::{ExecuteMsg, PairQuery};
-use crate::query_helper::get_destination_info_on_orai;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ALLOW_LIST, CHANNEL_INFO,
     CONFIG, CONVERT_REPLY_ARGS, RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
-use cw20_ics20_msg::msg::{FeeData, FollowUpMsgsData};
-use cw20_ics20_msg::state::{ChannelInfo, ConvertReplyArgs, Ratio};
+use cw20_ics20_msg::msg::FeeData;
+use cw20_ics20_msg::state::{ChannelInfo, Ratio};
 
 pub const ICS20_VERSION: &str = "ics20-1";
 pub const ICS20_ORDERING: IbcOrder = IbcOrder::Unordered;
@@ -98,6 +96,7 @@ pub const REFUND_FAILURE_ID: u64 = 1340;
 pub const IBC_TRANSFER_NATIVE_ERROR_ID: u64 = 1341;
 pub const SWAP_OPS_FAILURE_ID: u64 = 1342;
 pub const CONVERT_FAILURE_ID: u64 = 1343;
+pub const UNIVERSAL_SWAP_ERROR_ID: u64 = 1344;
 pub const ACK_FAILURE_ID: u64 = 64023;
 
 #[entry_point]
@@ -190,6 +189,14 @@ pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> Result<Response, Contrac
                     .add_submessage(sub_msg)
                     .add_attribute("action", "convert_failure_id")
                     .add_attribute("error_convert_ops", err))
+            }
+            // fallback case when refund fails. Wont retry => will refund manually
+            UNIVERSAL_SWAP_ERROR_ID => {
+                // we all set ack success so that this token is stuck on Oraichain, not on OraiBridge because if ack fail => token refunded on OraiBridge yet still refund on Oraichain
+                Ok(Response::new()
+                    .set_data(ack_success())
+                    .add_attribute("action", "universal_swap_error")
+                    .add_attribute("error_trying_to_call_entrypoint_for_universal_swap", err))
             }
             _ => Err(ContractError::UnknownReplyId { id: reply.id }),
         };
@@ -471,17 +478,17 @@ fn handle_ibc_packet_receive_native_remote_chain(
         cosmos_msgs.push(fee_data.relayer_fee.send_amount(relayer.to_string(), None))
     }
     let new_deducted_to_send = Amount::from_parts(to_send.denom(), fee_data.deducted_amount);
-    let swap_then_post_action_msg = new_deducted_to_send.send_amount(
-        config.osor_entrypoint_contract,
-        Some(to_json_binary(&EntryPointExecuteMsg::UniversalSwap {
-            memo: msg.memo.clone().unwrap_or_default(),
-        })?),
-    );
+    let sub_msgs = get_follow_up_msgs(
+        storage,
+        msg.receiver.clone(),
+        new_deducted_to_send,
+        msg.memo.clone(),
+    )?;
 
     let res = IbcReceiveResponse::new()
         .set_ack(ack_success())
         .add_messages(cosmos_msgs)
-        .add_submessage(SubMsg::new(swap_then_post_action_msg))
+        .add_submessages(sub_msgs)
         .add_attributes(attributes)
         .add_attributes(vec![
             ("token_fee", &fee_data.token_fee.amount().to_string()),
@@ -493,138 +500,32 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
 pub fn get_follow_up_msgs(
     storage: &mut dyn Storage,
-    api: &dyn Api,
-    querier: &QuerierWrapper,
-    env: Env,
+    orai_receiver: String,
     to_send: Amount,
-    initial_receive_asset_info: AssetInfo,
-    destination_asset_info_on_orai: AssetInfo,
-    ibc_sender: &str,    // will be receiver  of ics20 packet if destination is evm
-    orai_receiver: &str, // receiver on Oraichain
-    destination: &DestinationInfo,
-    destination_pair_mapping: Option<PairQuery>,
-) -> Result<FollowUpMsgsData, ContractError> {
+    memo: Option<String>,
+) -> Result<Vec<SubMsg>, ContractError> {
     let config = CONFIG.load(storage)?;
     let mut sub_msgs: Vec<SubMsg> = vec![];
-    let send_only_sub_msg = SubMsg::reply_on_error(
-        to_send.send_amount(orai_receiver.to_string(), None),
-        NATIVE_RECEIVE_ID,
-    );
-    let mut follow_up_msgs_data = FollowUpMsgsData {
-        sub_msgs: vec![send_only_sub_msg],
-        follow_up_msg: "".to_string(),
-        is_success: true,
-    };
-    if destination.destination_denom.is_empty() {
-        return Ok(follow_up_msgs_data);
-    }
-    // successful case. We dont care if this msg is going to be successful or not because it does not affect our ibc receive flow (just submsgs)
-    // by default, the receiver is the original address sent in ics20packet
-    let mut to = Some(api.addr_validate(orai_receiver)?);
-
-    // check destination_asset_info_on_orai should convert before ibc transfer
-    let converter_info = config
-        .converter_contract
-        .converter_info(querier, &destination_asset_info_on_orai);
-
-    let target_asset_info_on_swap = match converter_info.clone() {
-        Some(converter_info) => converter_info.token_ratio.info,
-        None => destination_asset_info_on_orai.clone(),
-    };
-    let swap_operations = build_swap_operations(
-        target_asset_info_on_swap.clone(),
-        initial_receive_asset_info.clone(),
-        config.fee_denom.as_str(),
-    );
-    let mut minimum_receive = to_send.amount();
-    let mut ibc_transfer_amount = to_send.amount();
-
-    if !swap_operations.is_empty() {
-        let response = config.swap_router_contract.simulate_swap(
-            querier,
-            to_send.amount(),
-            swap_operations.clone(),
-        );
-        if response.is_err() {
-            follow_up_msgs_data.follow_up_msg = format!(
-                "Cannot simulate swap with ops: {:?} with error: {:?}",
-                swap_operations,
-                response.unwrap_err().to_string()
+    let send_only_sub_msg =
+        SubMsg::reply_on_error(to_send.send_amount(orai_receiver, None), NATIVE_RECEIVE_ID);
+    if let Some(memo) = memo {
+        if memo.is_empty() {
+            sub_msgs.push(send_only_sub_msg);
+        } else {
+            let swap_then_post_action_msg = to_send.send_amount(
+                config.osor_entrypoint_contract,
+                Some(to_json_binary(&EntryPointExecuteMsg::UniversalSwap {
+                    memo,
+                })?),
             );
-            follow_up_msgs_data.is_success = false;
-
-            return Ok(follow_up_msgs_data);
+            let sub_msg =
+                SubMsg::reply_on_error(swap_then_post_action_msg, UNIVERSAL_SWAP_ERROR_ID);
+            sub_msgs.push(sub_msg);
         }
-        minimum_receive = response.unwrap().amount;
-        ibc_transfer_amount = minimum_receive;
-
-        let from_asset = Asset {
-            amount: minimum_receive,
-            info: target_asset_info_on_swap,
-        };
-
-        let (convert_msg, return_asset) = config.converter_contract.process_convert(
-            querier,
-            &destination_asset_info_on_orai,
-            minimum_receive,
-            ConvertType::ToSource,
-        )?;
-
-        if let Some(convert_msg) = convert_msg {
-            CONVERT_REPLY_ARGS.save(
-                storage,
-                &ConvertReplyArgs {
-                    local_receiver: orai_receiver.to_string(),
-                    asset: from_asset,
-                },
-            )?;
-            sub_msgs.push(SubMsg::reply_on_error(convert_msg, CONVERT_FAILURE_ID));
-            ibc_transfer_amount = return_asset.amount;
-        }
-    }
-
-    let mut build_ibc_msg_result = build_ibc_msg(
-        env,
-        orai_receiver,
-        ibc_transfer_amount,
-        ibc_sender,
-        destination,
-        config.default_timeout,
-        destination_pair_mapping,
-        destination_asset_info_on_orai,
-    );
-
-    if let Ok(ibc_msg) = build_ibc_msg_result.as_mut() {
-        sub_msgs.append(ibc_msg);
-        // if there's an ibc msg => swap receiver is None so the receiver is this ibc wasm address
-        to = None;
     } else {
-        follow_up_msgs_data.follow_up_msg = build_ibc_msg_result.unwrap_err().to_string();
-        // if has converter message, but don't have ibc messages, then we simply dont convert & send the destination_asset_info_on_orai to user's orai_receiver
-        CONVERT_REPLY_ARGS.remove(storage);
-        sub_msgs.pop();
-
-        // if destination_channel is not empty then it means there's something wrong with the build_ibc_msg -> is_success = false
-        if !destination.destination_channel.is_empty() {
-            follow_up_msgs_data.is_success = false;
-        }
-    };
-
-    build_swap_msgs(
-        minimum_receive,
-        &config.swap_router_contract,
-        to_send.amount(),
-        initial_receive_asset_info,
-        to.clone(),
-        &mut sub_msgs,
-        swap_operations,
-    )?;
-    // fallback case. If there's no cosmos message then we return send amount
-    if sub_msgs.is_empty() {
-        return Ok(follow_up_msgs_data);
-    };
-    follow_up_msgs_data.sub_msgs = sub_msgs;
-    Ok(follow_up_msgs_data)
+        sub_msgs.push(send_only_sub_msg);
+    }
+    Ok(sub_msgs)
 }
 
 pub fn build_swap_operations(
