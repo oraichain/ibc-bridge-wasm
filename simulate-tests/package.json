@@ -24,7 +24,7 @@
     "vitest": "^2.0.4"
   },
   "scripts": {
-    "test": "vitest",
+    "test": "vitest --silent=false",
     "ts-check": "tsc --noEmit"
   },
   "eslintConfig": {

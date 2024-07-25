@@ -22,7 +22,11 @@ import { CwIcs20LatestClient } from "./contracts-sdk/CwIcs20Latest.client";
 import * as oraidexArtifacts from "@oraichain/oraidex-contracts-build";
 import { FungibleTokenPacketData } from "cosmjs-types/ibc/applications/transfer/v2/packet";
 import {
-  deployIcs20Token,
+  deployIbcWasmAdapterContract,
+  deployIbcWasmContract,
+  deployMixedRouterContract,
+  deployOraiDexAdapterContract,
+  deployOsorEntrypointContract,
   deployToken,
   senderAddress as oraiSenderAddress,
   senderAddress,
@@ -36,6 +40,12 @@ import {
 import { toDisplay } from "@oraichain/oraidex-common";
 import { parseToIbcWasmMemo } from "./proto-gen";
 import { expect, afterAll, beforeAll, describe, it, beforeEach } from "vitest";
+import {
+  EntryPointClient,
+  OraidexClient,
+  OraiIbcWasmClient,
+  OraiswapMixedRouterClient,
+} from "./contracts-sdk";
 
 let cosmosChain: CWSimulateApp;
 // oraichain support cosmwasm
@@ -46,6 +56,7 @@ const bobAddressEth = "0x8754032Ac7966A909e2E753308dF56bb08DabD69";
 const bridgeReceiver = "tron-testnet0x3C5C6b570C1DA469E8B24A2E8Ed33c278bDA3222";
 const routerContractAddress = "placeholder"; // we will update the contract config later when we need to deploy the actual router contract
 const converterContractAddress = "converter"; // we will update the contract config later when we need to deploy the actual converter contract
+const osorEntrypointContractAddressTemp = "osor"; // we will update the contract config later when we need to deploy the actual converter contract
 const cosmosSenderAddress = bech32.encode(
   "cosmos",
   bech32.decode(oraiSenderAddress).words
@@ -59,7 +70,7 @@ console.log({ cosmosSenderAddress });
 const ibcTransferAmount = "100000000";
 const initialBalanceAmount = "10000000000000";
 
-describe.only("IBCModule", () => {
+describe.only("test-universal-swap-v3-no-mint-burn", () => {
   let oraiPort: string;
   let oraiIbcDenom: string =
     "tron-testnet0xA325Ad6D9c92B55A3Fc5aD7e412B1518F96441C0";
@@ -73,6 +84,10 @@ describe.only("IBCModule", () => {
   let cosmosPort: string = "transfer";
   let channel = "channel-0";
   let ics20Contract: CwIcs20LatestClient;
+  let mixedRouterContract: OraiswapMixedRouterClient;
+  let osorEntrypointContract: EntryPointClient;
+  let oraidexAdapterContract: OraidexClient;
+  let ibcWasmAdapterContract: OraiIbcWasmClient;
   let airiToken: OraiswapTokenClient;
   let packetData = {
     src: {
@@ -104,10 +119,40 @@ describe.only("IBCModule", () => {
       metering: process.env.METERING === "true",
     });
 
-    ics20Contract = await deployIcs20Token(oraiClient, {
+    ics20Contract = await deployIbcWasmContract(oraiClient, {
       swap_router_contract: routerContractAddress,
       converter_contract: converterContractAddress,
+      osor_entrypoint_contract: osorEntrypointContractAddressTemp,
     });
+
+    // TODO: deploy factory address
+    mixedRouterContract = await deployMixedRouterContract(oraiClient, {
+      factory_addr: "factory",
+      oraiswap_v3: "oraiswap_v3",
+    });
+
+    osorEntrypointContract = await deployOsorEntrypointContract(oraiClient, {
+      ibc_wasm_contract_address: ics20Contract.contractAddress,
+    });
+
+    oraidexAdapterContract = await deployOraiDexAdapterContract(oraiClient, {
+      osor_entrypoint_contract: osorEntrypointContract.contractAddress,
+    });
+
+    ibcWasmAdapterContract = await deployIbcWasmAdapterContract(oraiClient, {
+      osor_entrypoint_contract: osorEntrypointContract.contractAddress,
+    });
+
+    // add swap venue for entrypoint to universal swap
+    await osorEntrypointContract.updateConfig({
+      swapVenues: [
+        {
+          name: "universal-swap",
+          adapter_contract_address: oraidexAdapterContract.contractAddress,
+        },
+      ],
+    });
+
     oraiPort = "wasm." + ics20Contract.contractAddress;
     packetData.dest.port_id = oraiPort;
 
@@ -202,9 +247,10 @@ describe.only("IBCModule", () => {
       metering: process.env.METERING === "true",
     });
 
-    const ics20Contract = await deployIcs20Token(oraiClient, {
+    const ics20Contract = await deployIbcWasmContract(oraiClient, {
       swap_router_contract: routerContractAddress,
       converter_contract: converterContractAddress,
+      osor_entrypoint_contract: osorEntrypointContract.contractAddress,
     });
     const oraiPort = "wasm." + ics20Contract.contractAddress;
     let newPacketData = {

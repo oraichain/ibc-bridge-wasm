@@ -22,7 +22,7 @@ import { CwIcs20LatestClient } from "./contracts-sdk/CwIcs20Latest.client";
 import * as oraidexArtifacts from "@oraichain/oraidex-contracts-build";
 import { FungibleTokenPacketData } from "cosmjs-types/ibc/applications/transfer/v2/packet";
 import {
-  deployIcs20Token,
+  deployIbcWasmContract,
   deployToken,
   senderAddress as oraiSenderAddress,
   senderAddress,
@@ -104,7 +104,7 @@ describe.only("IBCModuleWithMintBurn", () => {
       metering: process.env.METERING === "true",
     });
 
-    ics20Contract = await deployIcs20Token(oraiClient, {
+    ics20Contract = await deployIbcWasmContract(oraiClient, {
       swap_router_contract: routerContractAddress,
       converter_contract: converterContractAddress,
     });
@@ -199,7 +199,7 @@ describe.only("IBCModuleWithMintBurn", () => {
       metering: process.env.METERING === "true",
     });
 
-    const ics20Contract = await deployIcs20Token(oraiClient, {
+    const ics20Contract = await deployIbcWasmContract(oraiClient, {
       swap_router_contract: routerContractAddress,
       converter_contract: converterContractAddress,
     });
