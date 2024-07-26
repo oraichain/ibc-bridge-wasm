@@ -5,59 +5,19 @@
 */
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
-import { StdFee } from "@cosmjs/amino";
-import {Uint128, Binary, Addr, Cw20ReceiveMsg, Asset, Coin, Cw20Coin, Route} from "./types";
-import {InstantiateMsg, ExecuteMsg, SwapOperation, QueryMsg, Decimal, SimulateSmartSwapExactAssetInResponse, SimulateSwapExactAssetInResponse, SimulateSwapExactAssetOutResponse} from "./Oraidex.types";
+import { Coin, StdFee } from "@cosmjs/amino";
+import {Uint128, Binary, SwapOperation, AssetInfo, Addr, Percentage, Cw20ReceiveMsg, PoolKey, FeeTier} from "./types";
+import {InstantiateMsg, ExecuteMsg, QueryMsg, ConfigResponse, SimulateSwapOperationsResponse} from "./Oraidex.types";
 export interface OraidexReadOnlyInterface {
   contractAddress: string;
-  simulateSwapExactAssetOut: ({
-    assetOut,
-    swapOperations
+  config: () => Promise<ConfigResponse>;
+  simulateSwapOperations: ({
+    offerAmount,
+    operations
   }: {
-    assetOut: Asset;
-    swapOperations: SwapOperation[];
-  }) => Promise<Asset>;
-  simulateSwapExactAssetIn: ({
-    assetIn,
-    swapOperations
-  }: {
-    assetIn: Asset;
-    swapOperations: SwapOperation[];
-  }) => Promise<Asset>;
-  simulateSwapExactAssetOutWithMetadata: ({
-    assetOut,
-    includeSpotPrice,
-    swapOperations
-  }: {
-    assetOut: Asset;
-    includeSpotPrice: boolean;
-    swapOperations: SwapOperation[];
-  }) => Promise<SimulateSwapExactAssetOutResponse>;
-  simulateSwapExactAssetInWithMetadata: ({
-    assetIn,
-    includeSpotPrice,
-    swapOperations
-  }: {
-    assetIn: Asset;
-    includeSpotPrice: boolean;
-    swapOperations: SwapOperation[];
-  }) => Promise<SimulateSwapExactAssetInResponse>;
-  simulateSmartSwapExactAssetIn: ({
-    assetIn,
-    routes
-  }: {
-    assetIn: Asset;
-    routes: Route[];
-  }) => Promise<Asset>;
-  simulateSmartSwapExactAssetInWithMetadata: ({
-    assetIn,
-    includeSpotPrice,
-    routes
-  }: {
-    assetIn: Asset;
-    includeSpotPrice: boolean;
-    routes: Route[];
-  }) => Promise<SimulateSmartSwapExactAssetInResponse>;
+    offerAmount: Uint128;
+    operations: SwapOperation[];
+  }) => Promise<SimulateSwapOperationsResponse>;
 }
 export class OraidexQueryClient implements OraidexReadOnlyInterface {
   client: CosmWasmClient;
@@ -66,104 +26,26 @@ export class OraidexQueryClient implements OraidexReadOnlyInterface {
   constructor(client: CosmWasmClient, contractAddress: string) {
     this.client = client;
     this.contractAddress = contractAddress;
-    this.simulateSwapExactAssetOut = this.simulateSwapExactAssetOut.bind(this);
-    this.simulateSwapExactAssetIn = this.simulateSwapExactAssetIn.bind(this);
-    this.simulateSwapExactAssetOutWithMetadata = this.simulateSwapExactAssetOutWithMetadata.bind(this);
-    this.simulateSwapExactAssetInWithMetadata = this.simulateSwapExactAssetInWithMetadata.bind(this);
-    this.simulateSmartSwapExactAssetIn = this.simulateSmartSwapExactAssetIn.bind(this);
-    this.simulateSmartSwapExactAssetInWithMetadata = this.simulateSmartSwapExactAssetInWithMetadata.bind(this);
+    this.config = this.config.bind(this);
+    this.simulateSwapOperations = this.simulateSwapOperations.bind(this);
   }
 
-  simulateSwapExactAssetOut = async ({
-    assetOut,
-    swapOperations
-  }: {
-    assetOut: Asset;
-    swapOperations: SwapOperation[];
-  }): Promise<Asset> => {
+  config = async (): Promise<ConfigResponse> => {
     return this.client.queryContractSmart(this.contractAddress, {
-      simulate_swap_exact_asset_out: {
-        asset_out: assetOut,
-        swap_operations: swapOperations
-      }
+      config: {}
     });
   };
-  simulateSwapExactAssetIn = async ({
-    assetIn,
-    swapOperations
+  simulateSwapOperations = async ({
+    offerAmount,
+    operations
   }: {
-    assetIn: Asset;
-    swapOperations: SwapOperation[];
-  }): Promise<Asset> => {
+    offerAmount: Uint128;
+    operations: SwapOperation[];
+  }): Promise<SimulateSwapOperationsResponse> => {
     return this.client.queryContractSmart(this.contractAddress, {
-      simulate_swap_exact_asset_in: {
-        asset_in: assetIn,
-        swap_operations: swapOperations
-      }
-    });
-  };
-  simulateSwapExactAssetOutWithMetadata = async ({
-    assetOut,
-    includeSpotPrice,
-    swapOperations
-  }: {
-    assetOut: Asset;
-    includeSpotPrice: boolean;
-    swapOperations: SwapOperation[];
-  }): Promise<SimulateSwapExactAssetOutResponse> => {
-    return this.client.queryContractSmart(this.contractAddress, {
-      simulate_swap_exact_asset_out_with_metadata: {
-        asset_out: assetOut,
-        include_spot_price: includeSpotPrice,
-        swap_operations: swapOperations
-      }
-    });
-  };
-  simulateSwapExactAssetInWithMetadata = async ({
-    assetIn,
-    includeSpotPrice,
-    swapOperations
-  }: {
-    assetIn: Asset;
-    includeSpotPrice: boolean;
-    swapOperations: SwapOperation[];
-  }): Promise<SimulateSwapExactAssetInResponse> => {
-    return this.client.queryContractSmart(this.contractAddress, {
-      simulate_swap_exact_asset_in_with_metadata: {
-        asset_in: assetIn,
-        include_spot_price: includeSpotPrice,
-        swap_operations: swapOperations
-      }
-    });
-  };
-  simulateSmartSwapExactAssetIn = async ({
-    assetIn,
-    routes
-  }: {
-    assetIn: Asset;
-    routes: Route[];
-  }): Promise<Asset> => {
-    return this.client.queryContractSmart(this.contractAddress, {
-      simulate_smart_swap_exact_asset_in: {
-        asset_in: assetIn,
-        routes
-      }
-    });
-  };
-  simulateSmartSwapExactAssetInWithMetadata = async ({
-    assetIn,
-    includeSpotPrice,
-    routes
-  }: {
-    assetIn: Asset;
-    includeSpotPrice: boolean;
-    routes: Route[];
-  }): Promise<SimulateSmartSwapExactAssetInResponse> => {
-    return this.client.queryContractSmart(this.contractAddress, {
-      simulate_smart_swap_exact_asset_in_with_metadata: {
-        asset_in: assetIn,
-        include_spot_price: includeSpotPrice,
-        routes
+      simulate_swap_operations: {
+        offer_amount: offerAmount,
+        operations
       }
     });
   };
@@ -180,27 +62,32 @@ export interface OraidexInterface extends OraidexReadOnlyInterface {
     msg: Binary;
     sender: string;
   }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
-  swap: ({
-    operations
+  executeSwapOperations: ({
+    minimumReceive,
+    operations,
+    to
   }: {
+    minimumReceive?: Uint128;
     operations: SwapOperation[];
+    to?: Addr;
   }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
-  transferFundsBack: ({
-    returnDenom,
-    swapper
-  }: {
-    returnDenom: string;
-    swapper: Addr;
-  }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
-  astroportPoolSwap: ({
-    operation
+  executeSwapOperation: ({
+    operation,
+    sender,
+    to
   }: {
     operation: SwapOperation;
+    sender: Addr;
+    to?: Addr;
   }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
-  whiteWhalePoolSwap: ({
-    operation
+  assertMinimumReceiveAndTransfer: ({
+    assetInfo,
+    minimumReceive,
+    receiver
   }: {
-    operation: SwapOperation;
+    assetInfo: AssetInfo;
+    minimumReceive: Uint128;
+    receiver: Addr;
   }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
 }
 export class OraidexClient extends OraidexQueryClient implements OraidexInterface {
@@ -214,10 +101,9 @@ export class OraidexClient extends OraidexQueryClient implements OraidexInterfac
     this.sender = sender;
     this.contractAddress = contractAddress;
     this.receive = this.receive.bind(this);
-    this.swap = this.swap.bind(this);
-    this.transferFundsBack = this.transferFundsBack.bind(this);
-    this.astroportPoolSwap = this.astroportPoolSwap.bind(this);
-    this.whiteWhalePoolSwap = this.whiteWhalePoolSwap.bind(this);
+    this.executeSwapOperations = this.executeSwapOperations.bind(this);
+    this.executeSwapOperation = this.executeSwapOperation.bind(this);
+    this.assertMinimumReceiveAndTransfer = this.assertMinimumReceiveAndTransfer.bind(this);
   }
 
   receive = async ({
@@ -237,50 +123,54 @@ export class OraidexClient extends OraidexQueryClient implements OraidexInterfac
       }
     }, _fee, _memo, _funds);
   };
-  swap = async ({
-    operations
+  executeSwapOperations = async ({
+    minimumReceive,
+    operations,
+    to
   }: {
+    minimumReceive?: Uint128;
     operations: SwapOperation[];
+    to?: Addr;
   }, _fee: number | StdFee | "auto" = "auto", _memo?: string, _funds?: Coin[]): Promise<ExecuteResult> => {
     return await this.client.execute(this.sender, this.contractAddress, {
-      swap: {
-        operations
+      execute_swap_operations: {
+        minimum_receive: minimumReceive,
+        operations,
+        to
       }
     }, _fee, _memo, _funds);
   };
-  transferFundsBack = async ({
-    returnDenom,
-    swapper
-  }: {
-    returnDenom: string;
-    swapper: Addr;
-  }, _fee: number | StdFee | "auto" = "auto", _memo?: string, _funds?: Coin[]): Promise<ExecuteResult> => {
-    return await this.client.execute(this.sender, this.contractAddress, {
-      transfer_funds_back: {
-        return_denom: returnDenom,
-        swapper
-      }
-    }, _fee, _memo, _funds);
-  };
-  astroportPoolSwap = async ({
-    operation
+  executeSwapOperation = async ({
+    operation,
+    sender,
+    to
   }: {
     operation: SwapOperation;
+    sender: Addr;
+    to?: Addr;
   }, _fee: number | StdFee | "auto" = "auto", _memo?: string, _funds?: Coin[]): Promise<ExecuteResult> => {
     return await this.client.execute(this.sender, this.contractAddress, {
-      astroport_pool_swap: {
-        operation
+      execute_swap_operation: {
+        operation,
+        sender,
+        to
       }
     }, _fee, _memo, _funds);
   };
-  whiteWhalePoolSwap = async ({
-    operation
+  assertMinimumReceiveAndTransfer = async ({
+    assetInfo,
+    minimumReceive,
+    receiver
   }: {
-    operation: SwapOperation;
+    assetInfo: AssetInfo;
+    minimumReceive: Uint128;
+    receiver: Addr;
   }, _fee: number | StdFee | "auto" = "auto", _memo?: string, _funds?: Coin[]): Promise<ExecuteResult> => {
     return await this.client.execute(this.sender, this.contractAddress, {
-      white_whale_pool_swap: {
-        operation
+      assert_minimum_receive_and_transfer: {
+        asset_info: assetInfo,
+        minimum_receive: minimumReceive,
+        receiver
       }
     }, _fee, _memo, _funds);
   };

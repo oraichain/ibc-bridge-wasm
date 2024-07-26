@@ -1,5 +1,12 @@
 import { SimulateCosmWasmClient } from "@oraichain/cw-simulate";
-import { OraiswapTokenClient } from "@oraichain/oraidex-contracts-sdk";
+import {
+  AssetInfo,
+  OraiswapFactoryClient,
+  OraiswapOracleClient,
+  OraiswapRouterClient,
+  OraiswapTokenClient,
+  OraiswapV3Client,
+} from "@oraichain/oraidex-contracts-sdk";
 // import { CwIcs20LatestClient } from "@oraichain/common-contracts-sdk";
 import { CwIcs20LatestClient } from "./contracts-sdk/CwIcs20Latest.client";
 import * as oraidexArtifacts from "@oraichain/oraidex-contracts-build";
@@ -19,8 +26,11 @@ import { InstantiateMsg as OraiDexAdapterInstantiateMsg } from "./contracts-sdk/
 import { InstantiateMsg as IbcWasmAdapterInstantiateMsg } from "./contracts-sdk/OraiIbcWasm.types";
 import { InstantiateMsg as OsorEntrypointInstantiateMsg } from "./contracts-sdk/EntryPoint.types";
 import { InstantiateMsg as MixedRouterInstantiateMsg } from "./contracts-sdk/OraiswapMixedRouter.types";
+import { InstantiateMsg as OraiSwapV3InstantiateMsg } from "@oraichain/oraidex-contracts-sdk/build/OraiswapV3.types";
 
 export const senderAddress = "orai1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejvfgs7g";
+export const AtomDenom =
+  "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78";
 
 export const deployToken = async (
   client: SimulateCosmWasmClient,
@@ -55,6 +65,32 @@ export const deployToken = async (
         } as OraiSwapTokenInstantiateMsg,
         "token",
         "oraiswap-token"
+      )
+    ).contractAddress
+  );
+};
+
+export const deployOraiswapV3 = async (
+  client: SimulateCosmWasmClient,
+  {
+    protocol_fee,
+  }: {
+    protocol_fee: number;
+  }
+): Promise<OraiswapV3Client> => {
+  return new OraiswapV3Client(
+    client,
+    senderAddress,
+    (
+      await oraidexArtifacts.deployContract(
+        client,
+        senderAddress,
+
+        {
+          protocol_fee,
+        } as OraiSwapV3InstantiateMsg,
+        "oraiswap-v3",
+        "oraiswap-v3"
       )
     ).contractAddress
   );
@@ -103,8 +139,10 @@ export const deployOraiDexAdapterContract = async (
   client: SimulateCosmWasmClient,
   {
     osor_entrypoint_contract,
+    oraidex_router_contract_address,
   }: {
     osor_entrypoint_contract: string;
+    oraidex_router_contract_address: string;
   }
 ): Promise<OraidexClient> => {
   const { codeId } = await client.upload(
@@ -117,6 +155,7 @@ export const deployOraiDexAdapterContract = async (
     codeId,
     {
       entry_point_contract_address: osor_entrypoint_contract,
+      oraidex_router_contract_address,
     } as OraiDexAdapterInstantiateMsg,
     "oraidex-adapter",
     "auto"
@@ -128,8 +167,10 @@ export const deployIbcWasmAdapterContract = async (
   client: SimulateCosmWasmClient,
   {
     osor_entrypoint_contract,
+    ibc_wasm_contract_address,
   }: {
     osor_entrypoint_contract: string;
+    ibc_wasm_contract_address: string;
   }
 ): Promise<OraiIbcWasmClient> => {
   const { codeId } = await client.upload(
@@ -142,6 +183,7 @@ export const deployIbcWasmAdapterContract = async (
     codeId,
     {
       entry_point_contract_address: osor_entrypoint_contract,
+      ibc_wasm_contract_address,
     } as IbcWasmAdapterInstantiateMsg,
     "ibc-wasm-adapter",
     "auto"
@@ -202,4 +244,113 @@ export const deployMixedRouterContract = async (
     "auto"
   );
   return new OraiswapMixedRouterClient(client, senderAddress, contractAddress);
+};
+
+export const deployV2Contracts = async (
+  oraiClient: SimulateCosmWasmClient,
+  ibcWasmContractAddress: string,
+  initialBalanceAmount: string,
+  oraiSenderAddress = senderAddress
+) => {
+  let factoryContract: OraiswapFactoryClient;
+  let routerContract: OraiswapRouterClient;
+  let usdtToken: OraiswapTokenClient;
+  let oracleContract: OraiswapOracleClient;
+
+  // upload pair & lp token code id
+  const { codeId: pairCodeId } = await oraiClient.upload(
+    oraiSenderAddress,
+    readFileSync(oraidexArtifacts.getContractDir("oraiswap-pair")),
+    "auto"
+  );
+  const { codeId: lpCodeId } = await oraiClient.upload(
+    oraiSenderAddress,
+    readFileSync(oraidexArtifacts.getContractDir("oraiswap-token")),
+    "auto"
+  );
+  // deploy another cw20 for oraiswap testing
+  const { contractAddress: usdtAddress } = await oraiClient.instantiate(
+    oraiSenderAddress,
+    lpCodeId,
+    {
+      decimals: 6,
+      symbol: "USDT",
+      name: "USDT token",
+      initial_balances: [
+        {
+          address: ibcWasmContractAddress,
+          amount: initialBalanceAmount,
+        },
+      ],
+      mint: {
+        minter: oraiSenderAddress,
+      },
+    },
+    "cw20-usdt"
+  );
+  usdtToken = new OraiswapTokenClient(
+    oraiClient,
+    oraiSenderAddress,
+    usdtAddress
+  );
+  // deploy oracle addr
+  const { contractAddress: oracleAddress } =
+    await oraidexArtifacts.deployContract(
+      oraiClient,
+      oraiSenderAddress,
+      {},
+      "oraiswap-oracle",
+      "oraiswap-oracle"
+    );
+  // deploy factory contract
+  oracleContract = new OraiswapOracleClient(
+    oraiClient,
+    oraiSenderAddress,
+    oracleAddress
+  );
+
+  await oracleContract.updateTaxRate({ rate: "0" });
+  await oracleContract.updateTaxCap({ denom: AtomDenom, cap: "100000" });
+  const { contractAddress: factoryAddress } =
+    await oraidexArtifacts.deployContract(
+      oraiClient,
+      oraiSenderAddress,
+      {
+        commission_rate: "0",
+        oracle_addr: oracleAddress,
+        pair_code_id: pairCodeId,
+        token_code_id: lpCodeId,
+      },
+      "oraiswap-factory",
+      "oraiswap-factory"
+    );
+
+  const { contractAddress: routerAddress } =
+    await oraidexArtifacts.deployContract(
+      oraiClient,
+      oraiSenderAddress,
+      {
+        factory_addr: factoryAddress,
+        factory_addr_v2: factoryAddress,
+      },
+      "oraiswap-router",
+      "oraiswap-router"
+    );
+  factoryContract = new OraiswapFactoryClient(
+    oraiClient,
+    oraiSenderAddress,
+    factoryAddress
+  );
+  routerContract = new OraiswapRouterClient(
+    oraiClient,
+    oraiSenderAddress,
+    routerAddress
+  );
+  return {
+    factoryContract,
+    oracleContract,
+    usdtToken,
+    routerContract,
+    lpCodeId,
+  };
 };

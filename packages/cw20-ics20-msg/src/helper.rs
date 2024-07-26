@@ -51,10 +51,7 @@ pub fn to_orai_bridge_address(address: &str) -> StdResult<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        helper::{get_prefix_decode_bech32, to_orai_bridge_address},
-        receiver::DestinationInfo,
-    };
+    use crate::helper::{get_prefix_decode_bech32, to_orai_bridge_address};
 
     #[test]
     fn test_get_prefix_decode_bech32() {
@@ -70,17 +67,5 @@ mod tests {
             result,
             "oraib1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejmgvu0t".to_string()
         );
-    }
-
-    #[test]
-    fn test_destination_info_default() {
-        assert_eq!(
-            DestinationInfo::default(),
-            DestinationInfo {
-                receiver: "".to_string(),
-                destination_channel: "".to_string(),
-                destination_denom: "".to_string()
-            }
-        )
     }
 }

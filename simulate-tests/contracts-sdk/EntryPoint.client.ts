@@ -6,8 +6,8 @@
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
 import { StdFee } from "@cosmjs/amino";
-import {Uint128, Binary, Asset, Addr, Cw20ReceiveMsg, Coin, Cw20Coin, IbcInfo, IbcFee, TransferBackMsg, Route} from "./types";
-import {InstantiateMsg, SwapVenue, ExecuteMsg, Action, Swap, Affiliate, SwapExactAssetOut, SwapOperation, SwapExactAssetIn, SmartSwapExactAssetIn, QueryMsg} from "./EntryPoint.types";
+import {Uint128, Binary, Asset, Addr, Cw20ReceiveMsg, Coin, Cw20Coin, SwapOperation, TransferBackMsg} from "./types";
+import {InstantiateMsg, SwapVenue, ExecuteMsg, Action, Swap, Affiliate, SwapExactAssetOut, IbcInfo, IbcFee, SwapExactAssetIn, SmartSwapExactAssetIn, Route, QueryMsg} from "./EntryPoint.types";
 export interface EntryPointReadOnlyInterface {
   contractAddress: string;
   swapVenueAdapterContract: ({

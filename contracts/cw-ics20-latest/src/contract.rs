@@ -93,7 +93,6 @@ pub fn execute(
         ExecuteMsg::UpdateConfig {
             default_timeout,
             default_gas_limit,
-            fee_denom,
             swap_router_contract,
             admin,
             token_fee,
@@ -106,7 +105,6 @@ pub fn execute(
             info,
             default_timeout,
             default_gas_limit,
-            fee_denom,
             swap_router_contract,
             admin,
             token_fee,
@@ -319,7 +317,6 @@ pub fn update_config(
     info: MessageInfo,
     default_timeout: Option<u64>,
     default_gas_limit: Option<u64>,
-    fee_denom: Option<String>,
     swap_router_contract: Option<String>,
     admin: Option<String>,
     token_fee: Option<Vec<TokenFee>>,
@@ -342,9 +339,6 @@ pub fn update_config(
     CONFIG.update(deps.storage, |mut config| -> StdResult<Config> {
         if let Some(default_timeout) = default_timeout {
             config.default_timeout = default_timeout;
-        }
-        if let Some(fee_denom) = fee_denom {
-            config.fee_denom = fee_denom;
         }
         if let Some(swap_router_contract) = swap_router_contract {
             config.swap_router_contract = RouterController(swap_router_contract);

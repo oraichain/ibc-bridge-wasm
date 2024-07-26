@@ -1,4 +1,4 @@
-import {Addr, Uint128, Binary, AssetInfo, Cw20ReceiveMsg} from "./types";
+import {Addr, Uint128, Binary, SwapOperation, AssetInfo, Percentage, Cw20ReceiveMsg, PoolKey, FeeTier} from "./types";
 export interface InstantiateMsg {
   factory_addr: Addr;
   factory_addr_v2: Addr;
@@ -24,28 +24,14 @@ export type ExecuteMsg = {
     minimum_receive: Uint128;
     receiver: Addr;
   };
-};
-export type SwapOperation = {
-  orai_swap: {
-    ask_asset_info: AssetInfo;
-    offer_asset_info: AssetInfo;
-  };
 } | {
-  swap_v3: {
-    pool_key: PoolKey;
-    x_to_y: boolean;
+  update_config: {
+    factory_addr?: string | null;
+    factory_addr_v2?: string | null;
+    oraiswap_v3?: string | null;
+    owner?: string | null;
   };
 };
-export type Percentage = number;
-export interface PoolKey {
-  fee_tier: FeeTier;
-  token_x: string;
-  token_y: string;
-}
-export interface FeeTier {
-  fee: Percentage;
-  tick_spacing: number;
-}
 export type QueryMsg = {
   config: {};
 } | {

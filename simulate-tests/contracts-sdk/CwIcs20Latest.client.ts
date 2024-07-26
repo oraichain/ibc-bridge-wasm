@@ -262,7 +262,6 @@ export interface CwIcs20LatestInterface extends CwIcs20LatestReadOnlyInterface {
     converterContract,
     defaultGasLimit,
     defaultTimeout,
-    feeDenom,
     feeReceiver,
     relayerFee,
     relayerFeeReceiver,
@@ -273,7 +272,6 @@ export interface CwIcs20LatestInterface extends CwIcs20LatestReadOnlyInterface {
     converterContract?: string;
     defaultGasLimit?: number;
     defaultTimeout?: number;
-    feeDenom?: string;
     feeReceiver?: string;
     relayerFee?: RelayerFee[];
     relayerFeeReceiver?: string;
@@ -429,7 +427,6 @@ export class CwIcs20LatestClient extends CwIcs20LatestQueryClient implements CwI
     converterContract,
     defaultGasLimit,
     defaultTimeout,
-    feeDenom,
     feeReceiver,
     relayerFee,
     relayerFeeReceiver,
@@ -440,7 +437,6 @@ export class CwIcs20LatestClient extends CwIcs20LatestQueryClient implements CwI
     converterContract?: string;
     defaultGasLimit?: number;
     defaultTimeout?: number;
-    feeDenom?: string;
     feeReceiver?: string;
     relayerFee?: RelayerFee[];
     relayerFeeReceiver?: string;
@@ -453,7 +449,6 @@ export class CwIcs20LatestClient extends CwIcs20LatestQueryClient implements CwI
         converter_contract: converterContract,
         default_gas_limit: defaultGasLimit,
         default_timeout: defaultTimeout,
-        fee_denom: feeDenom,
         fee_receiver: feeReceiver,
         relayer_fee: relayerFee,
         relayer_fee_receiver: relayerFeeReceiver,

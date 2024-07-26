@@ -53,7 +53,6 @@ pub enum ExecuteMsg {
         admin: Option<String>,
         default_timeout: Option<u64>,
         default_gas_limit: Option<u64>,
-        fee_denom: Option<String>,
         swap_router_contract: Option<String>,
         token_fee: Option<Vec<TokenFee>>,
         relayer_fee: Option<Vec<RelayerFee>>,

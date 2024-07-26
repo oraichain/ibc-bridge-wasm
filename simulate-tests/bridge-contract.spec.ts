@@ -16,18 +16,22 @@ import {
   OraiswapTokenClient,
   OraiswapPairClient,
   OraiswapOracleClient,
+  OraiswapV3Client,
 } from "@oraichain/oraidex-contracts-sdk";
 // import { CwIcs20LatestClient } from "@oraichain/common-contracts-sdk";
 import { CwIcs20LatestClient } from "./contracts-sdk/CwIcs20Latest.client";
 import * as oraidexArtifacts from "@oraichain/oraidex-contracts-build";
 import { FungibleTokenPacketData } from "cosmjs-types/ibc/applications/transfer/v2/packet";
 import {
+  AtomDenom,
   deployIbcWasmAdapterContract,
   deployIbcWasmContract,
   deployMixedRouterContract,
   deployOraiDexAdapterContract,
+  deployOraiswapV3,
   deployOsorEntrypointContract,
   deployToken,
+  deployV2Contracts,
   senderAddress as oraiSenderAddress,
   senderAddress,
 } from "./common";
@@ -78,17 +82,21 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
     "tron-testnet0x7e2A35C746F2f7C240B664F1Da4DD100141AE71F";
   let usdtIbcDenom: string =
     "tron-testnet0xdac17f958d2ee523a2206206994597c13d831ec7";
-  let AtomDenom =
-    "ibc/A2E2EEC9057A4A1C2C0A6A4C78B0239118DF5F278830F50B4A6BDD7A66506B78";
   let atomChannel = "channel-15";
   let cosmosPort: string = "transfer";
   let channel = "channel-0";
   let ics20Contract: CwIcs20LatestClient;
+  let oraiswapV3: OraiswapV3Client;
   let mixedRouterContract: OraiswapMixedRouterClient;
   let osorEntrypointContract: EntryPointClient;
   let oraidexAdapterContract: OraidexClient;
   let ibcWasmAdapterContract: OraiIbcWasmClient;
+  let factoryContract: OraiswapFactoryClient;
+  let routerContract: OraiswapRouterClient;
+  let usdtToken: OraiswapTokenClient;
+  let oracleContract: OraiswapOracleClient;
   let airiToken: OraiswapTokenClient;
+  let lpId: number;
   let packetData = {
     src: {
       port_id: cosmosPort,
@@ -125,10 +133,22 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
       osor_entrypoint_contract: osorEntrypointContractAddressTemp,
     });
 
-    // TODO: deploy factory address
+    oraiswapV3 = await deployOraiswapV3(oraiClient, { protocol_fee: 1000 });
+
+    const result = await deployV2Contracts(
+      oraiClient,
+      ics20Contract.contractAddress,
+      initialBalanceAmount,
+      senderAddress
+    );
+    lpId = result.lpCodeId;
+    factoryContract = result.factoryContract;
+    oracleContract = result.oracleContract;
+    routerContract = result.routerContract;
+    usdtToken = result.usdtToken;
     mixedRouterContract = await deployMixedRouterContract(oraiClient, {
-      factory_addr: "factory",
-      oraiswap_v3: "oraiswap_v3",
+      factory_addr: factoryContract.contractAddress,
+      oraiswap_v3: oraiswapV3.contractAddress,
     });
 
     osorEntrypointContract = await deployOsorEntrypointContract(oraiClient, {
@@ -137,10 +157,12 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
 
     oraidexAdapterContract = await deployOraiDexAdapterContract(oraiClient, {
       osor_entrypoint_contract: osorEntrypointContract.contractAddress,
+      oraidex_router_contract_address: mixedRouterContract.contractAddress,
     });
 
     ibcWasmAdapterContract = await deployIbcWasmAdapterContract(oraiClient, {
       osor_entrypoint_contract: osorEntrypointContract.contractAddress,
+      ibc_wasm_contract_address: ics20Contract.contractAddress,
     });
 
     // add swap venue for entrypoint to universal swap
@@ -613,12 +635,7 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
   );
 
   describe("cw-ics20-test-single-step-swap-to-tokens", () => {
-    let factoryContract: OraiswapFactoryClient;
-    let routerContract: OraiswapRouterClient;
-    let usdtToken: OraiswapTokenClient;
-    let oracleContract: OraiswapOracleClient;
     let assetInfos: AssetInfo[];
-    let lpId: number;
     let icsPackage: FungibleTokenPacketData = {
       amount: ibcTransferAmount,
       denom: airiIbcDenom,
@@ -639,99 +656,11 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
         { native_token: { denom: ORAI } },
         { token: { contract_addr: airiToken.contractAddress } },
       ];
-      // upload pair & lp token code id
-      const { codeId: pairCodeId } = await oraiClient.upload(
-        oraiSenderAddress,
-        readFileSync(oraidexArtifacts.getContractDir("oraiswap-pair")),
-        "auto"
-      );
-      const { codeId: lpCodeId } = await oraiClient.upload(
-        oraiSenderAddress,
-        readFileSync(oraidexArtifacts.getContractDir("oraiswap-token")),
-        "auto"
-      );
-      lpId = lpCodeId;
-      // deploy another cw20 for oraiswap testing
-      const { contractAddress: usdtAddress } = await oraiClient.instantiate(
-        oraiSenderAddress,
-        lpCodeId,
-        {
-          decimals: 6,
-          symbol: "USDT",
-          name: "USDT token",
-          initial_balances: [
-            {
-              address: ics20Contract.contractAddress,
-              amount: initialBalanceAmount,
-            },
-          ],
-          mint: {
-            minter: oraiSenderAddress,
-          },
-        },
-        "cw20-usdt"
-      );
-      usdtToken = new OraiswapTokenClient(
-        oraiClient,
-        oraiSenderAddress,
-        usdtAddress
-      );
-      // deploy oracle addr
-      const { contractAddress: oracleAddress } =
-        await oraidexArtifacts.deployContract(
-          oraiClient,
-          oraiSenderAddress,
-          {},
-          "oraiswap-oracle",
-          "oraiswap-oracle"
-        );
-      // deploy factory contract
-      oracleContract = new OraiswapOracleClient(
-        oraiClient,
-        oraiSenderAddress,
-        oracleAddress
-      );
-
-      await oracleContract.updateTaxRate({ rate: "0" });
-      await oracleContract.updateTaxCap({ denom: AtomDenom, cap: "100000" });
-      const { contractAddress: factoryAddress } =
-        await oraidexArtifacts.deployContract(
-          oraiClient,
-          oraiSenderAddress,
-          {
-            commission_rate: "0",
-            oracle_addr: oracleAddress,
-            pair_code_id: pairCodeId,
-            token_code_id: lpCodeId,
-          },
-          "oraiswap-factory",
-          "oraiswap-factory"
-        );
-
-      const { contractAddress: routerAddress } =
-        await oraidexArtifacts.deployContract(
-          oraiClient,
-          oraiSenderAddress,
-          {
-            factory_addr: factoryAddress,
-            factory_addr_v2: factoryAddress,
-          },
-          "oraiswap-router",
-          "oraiswap-router"
-        );
-      factoryContract = new OraiswapFactoryClient(
-        oraiClient,
-        oraiSenderAddress,
-        factoryAddress
-      );
-      routerContract = new OraiswapRouterClient(
-        oraiClient,
-        oraiSenderAddress,
-        routerAddress
-      );
 
       // set correct router contract to prepare for the tests
-      await ics20Contract.updateConfig({ swapRouterContract: routerAddress });
+      await ics20Contract.updateConfig({
+        swapRouterContract: routerContract.contractAddress,
+      });
       // create mapping
       await ics20Contract.updateMappingPair({
         localAssetInfo: {

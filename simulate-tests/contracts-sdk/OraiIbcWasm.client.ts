@@ -6,17 +6,10 @@
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
 import { StdFee } from "@cosmjs/amino";
-import {Uint128, Coin, IbcInfo, IbcFee} from "./types";
-import {InstantiateMsg, ExecuteMsg, QueryMsg, String} from "./OraiIbcWasm.types";
+import {Asset, Uint128, Binary, Coin, Cw20Coin, TransferBackMsg, Cw20ReceiveMsg} from "./types";
+import {InstantiateMsg, ExecuteMsg, QueryMsg} from "./OraiIbcWasm.types";
 export interface OraiIbcWasmReadOnlyInterface {
   contractAddress: string;
-  inProgressRecoverAddress: ({
-    channelId,
-    sequenceId
-  }: {
-    channelId: string;
-    sequenceId: number;
-  }) => Promise<String>;
 }
 export class OraiIbcWasmQueryClient implements OraiIbcWasmReadOnlyInterface {
   client: CosmWasmClient;
@@ -25,35 +18,27 @@ export class OraiIbcWasmQueryClient implements OraiIbcWasmReadOnlyInterface {
   constructor(client: CosmWasmClient, contractAddress: string) {
     this.client = client;
     this.contractAddress = contractAddress;
-    this.inProgressRecoverAddress = this.inProgressRecoverAddress.bind(this);
   }
 
-  inProgressRecoverAddress = async ({
-    channelId,
-    sequenceId
-  }: {
-    channelId: string;
-    sequenceId: number;
-  }): Promise<String> => {
-    return this.client.queryContractSmart(this.contractAddress, {
-      in_progress_recover_address: {
-        channel_id: channelId,
-        sequence_id: sequenceId
-      }
-    });
-  };
 }
 export interface OraiIbcWasmInterface extends OraiIbcWasmReadOnlyInterface {
   contractAddress: string;
   sender: string;
-  ibcTransfer: ({
+  ibcWasmTransfer: ({
     coin,
-    info,
-    timeoutTimestamp
+    ibcWasmInfo
   }: {
-    coin: Coin;
-    info: IbcInfo;
-    timeoutTimestamp: number;
+    coin: Asset;
+    ibcWasmInfo: TransferBackMsg;
+  }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
+  receive: ({
+    amount,
+    msg,
+    sender
+  }: {
+    amount: Uint128;
+    msg: Binary;
+    sender: string;
   }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
 }
 export class OraiIbcWasmClient extends OraiIbcWasmQueryClient implements OraiIbcWasmInterface {
@@ -66,23 +51,38 @@ export class OraiIbcWasmClient extends OraiIbcWasmQueryClient implements OraiIbc
     this.client = client;
     this.sender = sender;
     this.contractAddress = contractAddress;
-    this.ibcTransfer = this.ibcTransfer.bind(this);
+    this.ibcWasmTransfer = this.ibcWasmTransfer.bind(this);
+    this.receive = this.receive.bind(this);
   }
 
-  ibcTransfer = async ({
+  ibcWasmTransfer = async ({
     coin,
-    info,
-    timeoutTimestamp
+    ibcWasmInfo
   }: {
-    coin: Coin;
-    info: IbcInfo;
-    timeoutTimestamp: number;
+    coin: Asset;
+    ibcWasmInfo: TransferBackMsg;
   }, _fee: number | StdFee | "auto" = "auto", _memo?: string, _funds?: Coin[]): Promise<ExecuteResult> => {
     return await this.client.execute(this.sender, this.contractAddress, {
-      ibc_transfer: {
+      ibc_wasm_transfer: {
         coin,
-        info,
-        timeout_timestamp: timeoutTimestamp
+        ibc_wasm_info: ibcWasmInfo
+      }
+    }, _fee, _memo, _funds);
+  };
+  receive = async ({
+    amount,
+    msg,
+    sender
+  }: {
+    amount: Uint128;
+    msg: Binary;
+    sender: string;
+  }, _fee: number | StdFee | "auto" = "auto", _memo?: string, _funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      receive: {
+        amount,
+        msg,
+        sender
       }
     }, _fee, _memo, _funds);
   };

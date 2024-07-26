@@ -2,18 +2,17 @@ use std::ops::Mul;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, coin, entry_point, from_json, to_json_binary, Addr, Api, Binary, CosmosMsg, Decimal,
-    Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
+    attr, entry_point, from_json, to_json_binary, Api, Binary, CosmosMsg, Decimal, Deps, DepsMut,
+    Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
     IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
     IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
     Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
-    Timestamp, Uint128,
+    Uint128,
 };
 
 use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
-use cw20_ics20_msg::receiver::DestinationInfo;
 use cw_storage_plus::Map;
 use oraiswap::asset::{Asset, AssetInfo};
 use oraiswap::router::{RouterController, SwapOperation};
@@ -21,12 +20,12 @@ use skip::entry_point::ExecuteMsg as EntryPointExecuteMsg;
 
 use crate::contract::build_mint_cw20_mapping_msg;
 use crate::error::{ContractError, Never};
-use crate::msg::{ExecuteMsg, PairQuery};
+use crate::msg::ExecuteMsg;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ALLOW_LIST, CHANNEL_INFO,
     CONFIG, CONVERT_REPLY_ARGS, RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
-use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
+use cw20_ics20_msg::amount::{convert_remote_to_local, Amount};
 use cw20_ics20_msg::msg::FeeData;
 use cw20_ics20_msg::state::{ChannelInfo, Ratio};
 
@@ -528,201 +527,6 @@ pub fn get_follow_up_msgs(
     Ok(sub_msgs)
 }
 
-pub fn build_swap_operations(
-    destination_asset_info_on_orai: AssetInfo,
-    initial_receive_asset_info: AssetInfo,
-    fee_denom: &str,
-) -> Vec<SwapOperation> {
-    // always swap with orai first cuz its base denom & every token has a pair with it
-    let fee_denom_asset_info = AssetInfo::NativeToken {
-        denom: fee_denom.to_string(),
-    };
-    let mut swap_operations = vec![];
-    if destination_asset_info_on_orai.eq(&initial_receive_asset_info) {
-        return vec![];
-    }
-    if initial_receive_asset_info.ne(&fee_denom_asset_info) {
-        swap_operations.push(SwapOperation::OraiSwap {
-            offer_asset_info: initial_receive_asset_info.clone(),
-            ask_asset_info: fee_denom_asset_info.clone(),
-        })
-    }
-    if destination_asset_info_on_orai.ne(&fee_denom_asset_info) {
-        swap_operations.push(SwapOperation::OraiSwap {
-            offer_asset_info: fee_denom_asset_info.clone(),
-            ask_asset_info: destination_asset_info_on_orai,
-        });
-    }
-    swap_operations
-}
-
-pub fn build_swap_msgs(
-    minimum_receive: Uint128,
-    swap_router_contract: &RouterController,
-    amount: Uint128,
-    initial_receive_asset_info: AssetInfo,
-    to: Option<Addr>,
-    sub_msgs: &mut Vec<SubMsg>,
-    operations: Vec<SwapOperation>,
-) -> StdResult<()> {
-    // the swap msg must be executed before other msgs because we need the ask token amount to create ibc msg => insert in first index
-    if operations.is_empty() {
-        return Ok(());
-    }
-    // double check. We cannot let swap ops with Some(to) aka swap to someone else, not this contract and then transfer ibc => would be double spending
-    if to.is_some() && !sub_msgs.is_empty() {
-        // forbidden case. Pop all sub messages and return empty
-        while sub_msgs.pop().is_some() {
-            sub_msgs.pop();
-        }
-        return Ok(());
-    }
-    sub_msgs.insert(
-        0,
-        SubMsg::reply_on_error(
-            swap_router_contract.execute_operations(
-                initial_receive_asset_info,
-                amount,
-                operations,
-                Some(minimum_receive),
-                to,
-            )?,
-            SWAP_OPS_FAILURE_ID,
-        ),
-    );
-
-    Ok(())
-}
-
-pub fn build_ibc_msg(
-    env: Env,
-    local_receiver: &str,
-    amount: Uint128,
-    remote_address: &str,
-    destination: &DestinationInfo,
-    default_timeout: u64,
-    pair_mapping: Option<PairQuery>,
-    destination_asset_info_on_orai: AssetInfo,
-) -> StdResult<Vec<SubMsg>> {
-    // if there's no dest channel then we stop, no need to transfer ibc
-    if destination.destination_channel.is_empty() {
-        return Err(StdError::generic_err(
-            "Destination channel empty in build ibc msg",
-        ));
-    }
-    let timeout = env.block.time.plus_seconds(default_timeout);
-    let (is_evm_based, _) = destination.is_receiver_evm_based();
-    if is_evm_based {
-        if let Some(mapping) = pair_mapping {
-            return process_ibc_msg(
-                mapping,
-                env.contract.address.to_string(),
-                local_receiver,
-                &destination.destination_channel,
-                env.contract.address.as_str(),
-                remote_address, // use sender from ICS20Packet as receiver when transferring back because we have the actual receiver in memo for evm cases
-                Some(destination.receiver.clone()),
-                amount,
-                timeout,
-            );
-        }
-        return Err(StdError::generic_err("cannot find pair mappings"));
-    }
-    // 2nd case, where destination network is not evm, but it is still supported on our channel (eg: cw20 ATOM mapped with native ATOM on Cosmos), then we call
-    let is_cosmos_based = destination.is_receiver_cosmos_based();
-    if is_cosmos_based {
-        if let Some(mapping) = pair_mapping {
-            return process_ibc_msg(
-                mapping,
-                env.contract.address.to_string(),
-                local_receiver,
-                &destination.destination_channel,
-                env.contract.address.as_str(),
-                &destination.receiver, // now we use dest receiver since cosmos based universal swap wont be sent to oraibridge, so the receiver is the correct receive addr
-                None, // no need memo because it is not used in the remote cosmos based chain
-                amount,
-                timeout,
-            );
-        }
-
-        // final case, where the destination token is from a remote chain that we dont have a pair mapping with.
-        // we use ibc transfer so that attackers cannot manipulate the data to send to oraibridge without reducing the channel balance
-        // by using ibc transfer, the contract must actually owns native ibc tokens, which is not possible if it's oraibridge tokens
-        // we do not need to reduce channel balance because this transfer is not on our contract channel, but on destination channel
-        let ibc_msg: CosmosMsg = match destination_asset_info_on_orai {
-            AssetInfo::NativeToken { denom } => IbcMsg::Transfer {
-                channel_id: destination.destination_channel.clone(),
-                to_address: destination.receiver.clone(),
-                amount: coin(amount.u128(), denom),
-                timeout: IbcTimeout::with_timestamp(timeout),
-            }
-            .into(),
-            AssetInfo::Token {
-                contract_addr: addr,
-            } => {
-                return Err(StdError::generic_err(format!(
-                    "The destination must be denom. Got {}",
-                    addr
-                )))
-            }
-        };
-        return Ok(vec![SubMsg::reply_on_error(
-            ibc_msg,
-            IBC_TRANSFER_NATIVE_ERROR_ID,
-        )]);
-    }
-    Err(StdError::generic_err(
-        "The destination info is neither evm nor cosmos based",
-    ))
-}
-
-// TODO: Write unit tests for relayer fee & cosmos based universal swap in simulate js
-pub fn process_ibc_msg(
-    pair_query: PairQuery,
-    contract_addr: String,
-    local_receiver: &str,
-    src_channel: &str,
-    ibc_msg_sender: &str,
-    ibc_msg_receiver: &str,
-    memo: Option<String>,
-    amount: Uint128,
-    timeout: Timestamp,
-) -> StdResult<Vec<SubMsg>> {
-    let remote_amount = convert_local_to_remote(
-        amount,
-        pair_query.pair_mapping.remote_decimals,
-        pair_query.pair_mapping.asset_info_decimals,
-    )?;
-
-    // prepare ibc message
-    let msg: CosmosMsg = build_ibc_send_packet(
-        remote_amount,
-        &pair_query.key,
-        ibc_msg_sender,
-        ibc_msg_receiver,
-        memo,
-        src_channel,
-        timeout.into(),
-    )?
-    .into();
-
-    let reduce_balance_msg = SubMsg::new(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
-        contract_addr,
-        msg: to_json_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
-            src_channel_id: src_channel.to_string(),
-            ibc_denom: pair_query.key.clone(),
-            amount: remote_amount,
-            local_receiver: local_receiver.to_string(),
-        })?,
-        funds: vec![],
-    }));
-
-    Ok(vec![
-        reduce_balance_msg,
-        SubMsg::reply_on_error(msg, FOLLOW_UP_IBC_SEND_FAILURE_ID),
-    ])
-}
-
 pub fn check_gas_limit(deps: Deps, amount: &Amount) -> Result<Option<u64>, ContractError> {
     match amount {
         Amount::Cw20(coin) => {
@@ -861,6 +665,7 @@ pub fn get_swap_token_amount_out_from_orai(
     if ask_asset_info.eq(&orai_asset_info) {
         return offer_amount;
     }
+    // TODO: switch this to mixed router?
     swap_router_contract
         .simulate_swap(
             querier,

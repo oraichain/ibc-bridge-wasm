@@ -26,7 +26,6 @@ export type ExecuteMsg = {
     converter_contract?: string | null;
     default_gas_limit?: number | null;
     default_timeout?: number | null;
-    fee_denom?: string | null;
     fee_receiver?: string | null;
     relayer_fee?: RelayerFee[] | null;
     relayer_fee_receiver?: string | null;

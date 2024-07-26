@@ -1,18 +1,14 @@
-import {Uint128, Coin, IbcInfo, IbcFee} from "./types";
+import {Asset, Uint128, Binary, Coin, Cw20Coin, TransferBackMsg, Cw20ReceiveMsg} from "./types";
 export interface InstantiateMsg {
   entry_point_contract_address: string;
+  ibc_wasm_contract_address: string;
 }
 export type ExecuteMsg = {
-  ibc_transfer: {
-    coin: Coin;
-    info: IbcInfo;
-    timeout_timestamp: number;
+  ibc_wasm_transfer: {
+    coin: Asset;
+    ibc_wasm_info: TransferBackMsg;
   };
+} | {
+  receive: Cw20ReceiveMsg;
 };
-export type QueryMsg = {
-  in_progress_recover_address: {
-    channel_id: string;
-    sequence_id: number;
-  };
-};
-export type String = string;
+export type QueryMsg = string;

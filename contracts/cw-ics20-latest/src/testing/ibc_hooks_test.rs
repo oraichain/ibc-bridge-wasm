@@ -1,8 +1,5 @@
-use anybuf::Anybuf;
-use cosmwasm_std::{
-    coin, coins, testing::mock_env, Addr, Api, BankMsg, Binary, CosmosMsg, IbcMsg, StdError, SubMsg,
-};
-use cosmwasm_testing_util::mock::{MockApi, MockContract};
+use cosmwasm_std::{coin, coins, Addr, BankMsg, Binary, CosmosMsg, SubMsg};
+use cosmwasm_testing_util::mock::MockContract;
 use cosmwasm_vm::testing::MockInstanceOptions;
 use cw20_ics20_msg::{ibc_hooks::HookMethods, msg::UpdatePairMsg, state::Ratio};
 use oraiswap::asset::AssetInfo;

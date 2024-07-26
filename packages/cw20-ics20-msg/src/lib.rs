@@ -7,5 +7,4 @@ pub mod converter;
 pub mod helper;
 pub mod ibc_hooks;
 pub mod msg;
-pub mod receiver;
 pub mod state;
