@@ -30,6 +30,7 @@ import {
   deployOraiswapV3,
   deployOsorEntrypointContract,
   deployToken,
+  deployV2Contracts,
   senderAddress as oraiSenderAddress,
   senderAddress,
 } from "./common";
@@ -91,7 +92,13 @@ describe.only("IBCModuleWithMintBurn", () => {
   let osorEntrypointContract: EntryPointClient;
   let oraidexAdapterContract: OraidexClient;
   let ibcWasmAdapterContract: OraiIbcWasmClient;
+  let factoryContract: OraiswapFactoryClient;
+  let routerContract: OraiswapRouterClient;
+  let usdtToken: OraiswapTokenClient;
+  let oracleContract: OraiswapOracleClient;
   let airiToken: OraiswapTokenClient;
+  let lpId: number;
+
   let packetData = {
     src: {
       port_id: cosmosPort,
@@ -130,9 +137,19 @@ describe.only("IBCModuleWithMintBurn", () => {
 
     oraiswapV3 = await deployOraiswapV3(oraiClient, { protocol_fee: 1000 });
 
-    // TODO: deploy factory address
+    const result = await deployV2Contracts(
+      oraiClient,
+      ics20Contract.contractAddress,
+      initialBalanceAmount,
+      senderAddress
+    );
+    lpId = result.lpCodeId;
+    factoryContract = result.factoryContract;
+    oracleContract = result.oracleContract;
+    routerContract = result.routerContract;
+    usdtToken = result.usdtToken;
     mixedRouterContract = await deployMixedRouterContract(oraiClient, {
-      factory_addr: "factory",
+      factory_addr: factoryContract.contractAddress,
       oraiswap_v3: oraiswapV3.contractAddress,
     });
 
