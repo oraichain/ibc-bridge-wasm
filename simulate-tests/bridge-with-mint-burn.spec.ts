@@ -49,6 +49,7 @@ import {
   OraidexClient,
   OraiIbcWasmClient,
 } from "./contracts-sdk";
+import { buildUniversalSwapMemo } from "@oraichain/oraidex-universal-swap";
 
 let cosmosChain: CWSimulateApp;
 // oraichain support cosmwasm
@@ -552,12 +553,15 @@ describe.only("IBCModuleWithMintBurn", () => {
 
   it.each([
     [
-      parseToIbcWasmMemo("", "", ""),
+      "",
       ibcTransferAmount,
       "empty-memo-should-fallback-to-transfer-to-receiver",
     ],
     [
-      parseToIbcWasmMemo(bobAddress, "", ""),
+      buildUniversalSwapMemo(
+        { minimumReceive: "1000000", recoveryAddr: bobAddress },
+        { returnAmount: "10", routes: [], swapAmount: "100" }
+      ),
       ibcTransferAmount,
       "only-receiver-memo-should-fallback-to-transfer-to-receiver",
     ],

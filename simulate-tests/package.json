@@ -15,6 +15,7 @@
     "@oraichain/oraidex-common": "^1.0.93-beta.2",
     "@oraichain/oraidex-contracts-build": "1.0.34",
     "@oraichain/oraidex-contracts-sdk": "^1.0.46",
+    "@oraichain/oraidex-universal-swap": "../../oraidex-sdk/packages/universal-swap",
     "@types/node": "^20.11.28",
     "bech32": "^1.1.4",
     "dotenv": "^16.4.5",

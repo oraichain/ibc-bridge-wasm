@@ -263,6 +263,7 @@ export interface CwIcs20LatestInterface extends CwIcs20LatestReadOnlyInterface {
     defaultGasLimit,
     defaultTimeout,
     feeReceiver,
+    osorEntrypointContract,
     relayerFee,
     relayerFeeReceiver,
     swapRouterContract,
@@ -273,6 +274,7 @@ export interface CwIcs20LatestInterface extends CwIcs20LatestReadOnlyInterface {
     defaultGasLimit?: number;
     defaultTimeout?: number;
     feeReceiver?: string;
+    osorEntrypointContract?: string;
     relayerFee?: RelayerFee[];
     relayerFeeReceiver?: string;
     swapRouterContract?: string;
@@ -428,6 +430,7 @@ export class CwIcs20LatestClient extends CwIcs20LatestQueryClient implements CwI
     defaultGasLimit,
     defaultTimeout,
     feeReceiver,
+    osorEntrypointContract,
     relayerFee,
     relayerFeeReceiver,
     swapRouterContract,
@@ -438,6 +441,7 @@ export class CwIcs20LatestClient extends CwIcs20LatestQueryClient implements CwI
     defaultGasLimit?: number;
     defaultTimeout?: number;
     feeReceiver?: string;
+    osorEntrypointContract?: string;
     relayerFee?: RelayerFee[];
     relayerFeeReceiver?: string;
     swapRouterContract?: string;
@@ -450,6 +454,7 @@ export class CwIcs20LatestClient extends CwIcs20LatestQueryClient implements CwI
         default_gas_limit: defaultGasLimit,
         default_timeout: defaultTimeout,
         fee_receiver: feeReceiver,
+        osor_entrypoint_contract: osorEntrypointContract,
         relayer_fee: relayerFee,
         relayer_fee_receiver: relayerFeeReceiver,
         swap_router_contract: swapRouterContract,

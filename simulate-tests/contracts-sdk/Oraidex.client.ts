@@ -89,6 +89,17 @@ export interface OraidexInterface extends OraidexReadOnlyInterface {
     minimumReceive: Uint128;
     receiver: Addr;
   }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
+  updateConfig: ({
+    factoryAddr,
+    factoryAddrV2,
+    oraiswapV3,
+    owner
+  }: {
+    factoryAddr?: string;
+    factoryAddrV2?: string;
+    oraiswapV3?: string;
+    owner?: string;
+  }, _fee?: number | StdFee | "auto", _memo?: string, _funds?: Coin[]) => Promise<ExecuteResult>;
 }
 export class OraidexClient extends OraidexQueryClient implements OraidexInterface {
   client: SigningCosmWasmClient;
@@ -104,6 +115,7 @@ export class OraidexClient extends OraidexQueryClient implements OraidexInterfac
     this.executeSwapOperations = this.executeSwapOperations.bind(this);
     this.executeSwapOperation = this.executeSwapOperation.bind(this);
     this.assertMinimumReceiveAndTransfer = this.assertMinimumReceiveAndTransfer.bind(this);
+    this.updateConfig = this.updateConfig.bind(this);
   }
 
   receive = async ({
@@ -171,6 +183,26 @@ export class OraidexClient extends OraidexQueryClient implements OraidexInterfac
         asset_info: assetInfo,
         minimum_receive: minimumReceive,
         receiver
+      }
+    }, _fee, _memo, _funds);
+  };
+  updateConfig = async ({
+    factoryAddr,
+    factoryAddrV2,
+    oraiswapV3,
+    owner
+  }: {
+    factoryAddr?: string;
+    factoryAddrV2?: string;
+    oraiswapV3?: string;
+    owner?: string;
+  }, _fee: number | StdFee | "auto" = "auto", _memo?: string, _funds?: Coin[]): Promise<ExecuteResult> => {
+    return await this.client.execute(this.sender, this.contractAddress, {
+      update_config: {
+        factory_addr: factoryAddr,
+        factory_addr_v2: factoryAddrV2,
+        oraiswap_v3: oraiswapV3,
+        owner
       }
     }, _fee, _memo, _funds);
   };

@@ -27,6 +27,7 @@ export type ExecuteMsg = {
     default_gas_limit?: number | null;
     default_timeout?: number | null;
     fee_receiver?: string | null;
+    osor_entrypoint_contract?: string | null;
     relayer_fee?: RelayerFee[] | null;
     relayer_fee_receiver?: string | null;
     swap_router_contract?: string | null;
@@ -172,6 +173,7 @@ export interface ConfigResponse {
   default_timeout: number;
   fee_denom: string;
   gov_contract: string;
+  osor_entrypoint_contract: string;
   relayer_fee_receiver: Addr;
   relayer_fees: RelayerFeeResponse[];
   swap_router_contract: string;

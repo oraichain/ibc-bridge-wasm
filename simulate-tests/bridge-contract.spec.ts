@@ -50,6 +50,8 @@ import {
   OraiIbcWasmClient,
   OraiswapMixedRouterClient,
 } from "./contracts-sdk";
+import { buildUniversalSwapMemo } from "@oraichain/oraidex-universal-swap";
+import { Memo } from "@oraichain/oraidex-universal-swap/build/proto/universal_swap_memo";
 
 let cosmosChain: CWSimulateApp;
 // oraichain support cosmwasm
@@ -163,6 +165,11 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
     ibcWasmAdapterContract = await deployIbcWasmAdapterContract(oraiClient, {
       osor_entrypoint_contract: osorEntrypointContract.contractAddress,
       ibc_wasm_contract_address: ics20Contract.contractAddress,
+    });
+
+    await ics20Contract.updateConfig({
+      osorEntrypointContract: osorEntrypointContract.contractAddress,
+      swapRouterContract: mixedRouterContract.contractAddress,
     });
 
     // add swap venue for entrypoint to universal swap
@@ -452,7 +459,7 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
     [
       {
         token: {
-          contract_addr: "orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu", // has to hard-code address airi due to jest issue: https://github.com/facebook/jest/issues/6888
+          contract_addr: "orai1e97cak47f36s9e9y6pszhp0z0temzdaz6xfcge", // has to hard-code address airi due to jest issue: https://github.com/facebook/jest/issues/6888
         },
       },
       ibcTransferAmount,
@@ -463,7 +470,7 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
     [
       {
         token: {
-          contract_addr: "orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu", // has to hard-code address airi due to jest issue: https://github.com/facebook/jest/issues/6888
+          contract_addr: "orai1e97cak47f36s9e9y6pszhp0z0temzdaz6xfcge", // has to hard-code address airi due to jest issue: https://github.com/facebook/jest/issues/6888
         },
       },
       "10000000000001",
@@ -594,12 +601,15 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
 
   it.each([
     [
-      parseToIbcWasmMemo("", "", ""),
+      "",
       ibcTransferAmount,
       "empty-memo-should-fallback-to-transfer-to-receiver",
     ],
     [
-      parseToIbcWasmMemo(bobAddress, "", ""),
+      buildUniversalSwapMemo(
+        { minimumReceive: "1000000", recoveryAddr: bobAddress },
+        { returnAmount: "10", routes: [], swapAmount: "100" }
+      ),
       ibcTransferAmount,
       "only-receiver-memo-should-fallback-to-transfer-to-receiver",
     ],
@@ -620,13 +630,17 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
         memo,
       };
       // transfer from cosmos to oraichain, should pass
-      await cosmosChain.ibc.sendPacketReceive({
+      const result = await cosmosChain.ibc.sendPacketReceive({
         packet: {
           data: toBinary(icsPackage),
           ...packetData,
         },
         relayer: relayerAddress,
       });
+      console.dir(
+        result.events.filter((ev) => ev.type === "wasm"),
+        { depth: null }
+      );
       const ibcWasmAiriBalance = await airiToken.balance({
         address: bobAddress,
       });
@@ -937,7 +951,7 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
       ], // hard-coded usdt address
       [
         `${bobAddress}`,
-        "orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu",
+        "orai1e97cak47f36s9e9y6pszhp0z0temzdaz6xfcge",
         bobAddress,
         "Generic error: Destination channel empty in build ibc msg",
       ], // edge case, dest denom is also airi
@@ -989,7 +1003,7 @@ describe.only("test-universal-swap-v3-no-mint-burn", () => {
       expect(
         result.attributes.find((attr) => attr.key === "ibc_error_msg").value
       ).toEqual(
-        'Cannot simulate swap with ops: [OraiSwap { offer_asset_info: Token { contract_addr: Addr("orai18cvw806fj5n7xxz06ak8vjunveeks4zzzn37cu") }, ask_asset_info: NativeToken { denom: "orai" } }, OraiSwap { offer_asset_info: NativeToken { denom: "orai" }, ask_asset_info: NativeToken { denom: "ibc/EB7094899ACFB7A6F2A67DB084DEE2E9A83DEFAA5DEF92D9A9814FFD9FF673FA" } }] with error: "Error parsing into type oraiswap::router::SimulateSwapOperationsResponse: unknown field `ok`, expected `amount`"'
+        'Cannot simulate swap with ops: [OraiSwap { offer_asset_info: Token { contract_addr: Addr("orai1e97cak47f36s9e9y6pszhp0z0temzdaz6xfcge") }, ask_asset_info: NativeToken { denom: "orai" } }, OraiSwap { offer_asset_info: NativeToken { denom: "orai" }, ask_asset_info: NativeToken { denom: "ibc/EB7094899ACFB7A6F2A67DB084DEE2E9A83DEFAA5DEF92D9A9814FFD9FF673FA" } }] with error: "Error parsing into type oraiswap::router::SimulateSwapOperationsResponse: unknown field `ok`, expected `amount`"'
       );
     });
 

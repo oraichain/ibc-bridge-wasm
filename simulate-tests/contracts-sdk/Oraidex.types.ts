@@ -23,6 +23,13 @@ export type ExecuteMsg = {
     minimum_receive: Uint128;
     receiver: Addr;
   };
+} | {
+  update_config: {
+    factory_addr?: string | null;
+    factory_addr_v2?: string | null;
+    oraiswap_v3?: string | null;
+    owner?: string | null;
+  };
 };
 export type QueryMsg = {
   config: {};
