@@ -1534,6 +1534,7 @@ fn test_update_config() {
         fee_receiver: Some("token_fee_receiver".to_string()),
         relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),
         converter_contract: Some("new_converter".to_string()),
+        osor_entrypoint_contract: Some("new_osor_contract".to_string()),
     };
     // unauthorized case
     let unauthorized_info = mock_info(&String::from("somebody"), &[]);
@@ -1560,6 +1561,10 @@ fn test_update_config() {
     assert_eq!(
         config.token_fee_receiver,
         Addr::unchecked("token_fee_receiver")
+    );
+    assert_eq!(
+        config.osor_entrypoint_contract,
+        Addr::unchecked("new_osor_contract")
     );
     assert_eq!(config.token_fees.len(), 2usize);
     assert_eq!(config.token_fees[0].ratio.denominator, 5);

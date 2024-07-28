@@ -59,6 +59,7 @@ pub enum ExecuteMsg {
         fee_receiver: Option<String>,
         relayer_fee_receiver: Option<String>,
         converter_contract: Option<String>,
+        osor_entrypoint_contract: Option<String>,
     },
     // self-call msgs to deal with on_ibc_receive reentrancy error
     IncreaseChannelBalanceIbcReceive {
@@ -190,6 +191,7 @@ pub struct ConfigResponse {
     pub token_fees: Vec<TokenFee>,
     pub relayer_fees: Vec<RelayerFeeResponse>,
     pub converter_contract: String,
+    pub osor_entrypoint_contract: String,
 }
 
 #[cw_serde]

@@ -100,6 +100,7 @@ pub fn execute(
             relayer_fee_receiver,
             relayer_fee,
             converter_contract,
+            osor_entrypoint_contract,
         } => update_config(
             deps,
             info,
@@ -112,6 +113,7 @@ pub fn execute(
             relayer_fee_receiver,
             relayer_fee,
             converter_contract,
+            osor_entrypoint_contract,
         ),
         // self-called msgs for ibc_packet_receive
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
@@ -324,6 +326,7 @@ pub fn update_config(
     relayer_fee_receiver: Option<String>,
     relayer_fee: Option<Vec<RelayerFee>>,
     converter_contract: Option<String>,
+    osor_entrypoint_contract: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
     if let Some(token_fee) = token_fee {
@@ -351,6 +354,9 @@ pub fn update_config(
         }
         if let Some(converter_contract) = converter_contract {
             config.converter_contract = ConverterController(converter_contract);
+        }
+        if let Some(osor_entrypoint_contract) = osor_entrypoint_contract {
+            config.osor_entrypoint_contract = osor_entrypoint_contract;
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -895,6 +901,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
             })
             .collect::<StdResult<_>>()?,
         converter_contract: cfg.converter_contract.addr(),
+        osor_entrypoint_contract: cfg.osor_entrypoint_contract,
     };
     Ok(res)
 }
