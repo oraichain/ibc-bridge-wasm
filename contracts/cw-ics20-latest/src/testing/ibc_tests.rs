@@ -369,8 +369,8 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
             data,
             timeout,
         }) => {
-            let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
-            assert_eq!(timeout, expected_timeout.into());
+            let expected_timeout = DEFAULT_TIMEOUT;
+            assert_eq!(timeout.timestamp().unwrap().nanos(), expected_timeout);
             assert_eq!(channel_id.as_str(), local_channel);
             let msg: Ics20Packet = from_json(&data).unwrap();
             assert_eq!(
@@ -1433,8 +1433,8 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
             data,
             timeout,
         }) => {
-            let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
-            assert_eq!(timeout, expected_timeout.into());
+            let expected_timeout = DEFAULT_TIMEOUT;
+            assert_eq!(timeout.timestamp().unwrap().nanos(), expected_timeout);
             assert_eq!(channel_id.as_str(), local_channel);
             let msg: Ics20Packet = from_json(&data).unwrap();
             assert_eq!(msg.amount, Uint128::new(1234567).sub(fee_amount));
