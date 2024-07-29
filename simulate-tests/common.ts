@@ -18,15 +18,18 @@ import { InstantiateMsg as CwIcs20LatestInstantiateMsg } from "./contracts-sdk/C
 import { InstantiateMsg as OraiSwapTokenInstantiateMsg } from "@oraichain/oraidex-contracts-sdk/build/OraiswapToken.types";
 import {
   EntryPointClient,
+  IbcHooksClient,
   OraidexClient,
   OraiIbcWasmClient,
   OraiswapMixedRouterClient,
 } from "./contracts-sdk";
 import { InstantiateMsg as OraiDexAdapterInstantiateMsg } from "./contracts-sdk/Oraidex.types";
 import { InstantiateMsg as IbcWasmAdapterInstantiateMsg } from "./contracts-sdk/OraiIbcWasm.types";
+import { InstantiateMsg as IbcHooksInstantiateMsg } from "./contracts-sdk/IbcHooks.types";
 import { InstantiateMsg as OsorEntrypointInstantiateMsg } from "./contracts-sdk/EntryPoint.types";
 import { InstantiateMsg as MixedRouterInstantiateMsg } from "./contracts-sdk/OraiswapMixedRouter.types";
 import { InstantiateMsg as OraiSwapV3InstantiateMsg } from "@oraichain/oraidex-contracts-sdk/build/OraiswapV3.types";
+import { Event } from "@cosmjs/stargate";
 
 export const senderAddress = "orai1g4h64yjt0fvzv5v2j8tyfnpe5kmnetejvfgs7g";
 export const AtomDenom =
@@ -191,13 +194,33 @@ export const deployIbcWasmAdapterContract = async (
   return new OraiIbcWasmClient(client, senderAddress, contractAddress);
 };
 
-export const deployOsorEntrypointContract = async (
+export const deployIbcHooksAdapterContract = async (
   client: SimulateCosmWasmClient,
   {
-    ibc_wasm_contract_address,
+    osor_entrypoint_contract,
   }: {
-    ibc_wasm_contract_address: string;
+    osor_entrypoint_contract: string;
   }
+): Promise<IbcHooksClient> => {
+  const { codeId } = await client.upload(
+    senderAddress,
+    readFileSync(process.env.IBC_HOOKS_ADAPTER),
+    "auto"
+  );
+  const { contractAddress } = await client.instantiate(
+    senderAddress,
+    codeId,
+    {
+      entry_point_contract_address: osor_entrypoint_contract,
+    } as IbcHooksInstantiateMsg,
+    "ibc-hooks-adapter",
+    "auto"
+  );
+  return new IbcHooksClient(client, senderAddress, contractAddress);
+};
+
+export const deployOsorEntrypointContract = async (
+  client: SimulateCosmWasmClient
 ): Promise<EntryPointClient> => {
   const { codeId } = await client.upload(
     senderAddress,
@@ -208,7 +231,6 @@ export const deployOsorEntrypointContract = async (
     senderAddress,
     codeId,
     {
-      ibc_wasm_contract_address,
       swap_venues: [],
     } as OsorEntrypointInstantiateMsg,
     "osor-entrypoint",

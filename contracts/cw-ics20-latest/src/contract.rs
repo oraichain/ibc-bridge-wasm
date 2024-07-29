@@ -1,9 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
-    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
-    WasmMsg,
+    from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Timestamp, Uint128, WasmMsg
 };
 use cw2::set_contract_version;
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -550,12 +548,11 @@ pub fn execute_transfer_back_to_remote_chain(
     }
 
     // delta from user is in seconds
-    let timeout_delta = match msg.timeout {
-        Some(t) => t,
-        None => config.default_timeout,
+    let timeout = match msg.timeout {
+        Some(t) => Timestamp::from_nanos(t),
+        None => env.block.time.plus_seconds(config.default_timeout),
     };
-    // timeout is in nanoseconds
-    let timeout = env.block.time.plus_seconds(timeout_delta);
+
     // need to convert decimal of cw20 to remote decimal before transferring
     let amount_remote = convert_local_to_remote(
         fee_data.deducted_amount,

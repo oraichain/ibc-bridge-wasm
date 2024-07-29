@@ -35,6 +35,18 @@ export interface Cw20Coin {
   address: string;
   amount: Uint128;
 }
+export interface IbcInfo {
+  fee?: IbcFee | null;
+  memo: string;
+  receiver: string;
+  recover_address: string;
+  source_channel: string;
+}
+export interface IbcFee {
+  ack_fee: Coin[];
+  recv_fee: Coin[];
+  timeout_fee: Coin[];
+}
 export type SwapOperation = {
   orai_swap: {
     ask_asset_info: AssetInfo;

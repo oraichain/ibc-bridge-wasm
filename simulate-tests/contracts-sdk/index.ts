@@ -2,6 +2,8 @@ export * as CwIcs20LatestTypes from './CwIcs20Latest.types';
 export * from './CwIcs20Latest.client';
 export * as EntryPointTypes from './EntryPoint.types';
 export * from './EntryPoint.client';
+export * as IbcHooksTypes from './IbcHooks.types';
+export * from './IbcHooks.client';
 export * as OraiIbcWasmTypes from './OraiIbcWasm.types';
 export * from './OraiIbcWasm.client';
 export * as OraidexTypes from './Oraidex.types';

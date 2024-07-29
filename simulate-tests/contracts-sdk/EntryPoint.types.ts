@@ -1,4 +1,4 @@
-import {Uint128, Binary, Asset, Addr, Cw20ReceiveMsg, Coin, Cw20Coin, SwapOperation, TransferBackMsg} from "./types";
+import {Uint128, Binary, Asset, Addr, Cw20ReceiveMsg, Coin, Cw20Coin, SwapOperation, IbcInfo, IbcFee, TransferBackMsg} from "./types";
 export interface InstantiateMsg {
   ibc_transfer_contract_address?: string | null;
   ibc_wasm_contract_address?: string | null;
@@ -90,18 +90,6 @@ export interface SwapExactAssetOut {
   operations: SwapOperation[];
   refund_address?: string | null;
   swap_venue_name: string;
-}
-export interface IbcInfo {
-  fee?: IbcFee | null;
-  memo: string;
-  receiver: string;
-  recover_address: string;
-  source_channel: string;
-}
-export interface IbcFee {
-  ack_fee: Coin[];
-  recv_fee: Coin[];
-  timeout_fee: Coin[];
 }
 export interface SwapExactAssetIn {
   operations: SwapOperation[];
