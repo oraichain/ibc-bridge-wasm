@@ -14,7 +14,7 @@ use cw20_ics20_msg::helper::{
     denom_to_asset_info, get_prefix_decode_bech32, parse_asset_info_denom,
 };
 use cw_storage_plus::Map;
-use oraiswap::asset::{Asset, AssetInfo};
+use oraiswap::asset::AssetInfo;
 use oraiswap::router::{RouterController, SwapOperation};
 use skip::entry_point::ExecuteMsg as EntryPointExecuteMsg;
 
@@ -23,7 +23,7 @@ use crate::error::{ContractError, Never};
 use crate::msg::ExecuteMsg;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, undo_reduce_channel_balance, ALLOW_LIST, CHANNEL_INFO,
-    CONFIG, CONVERT_REPLY_ARGS, RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    CONFIG, RELAYER_FEE, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_remote_to_local, Amount};
 use cw20_ics20_msg::msg::FeeData;
@@ -315,6 +315,7 @@ fn do_ibc_packet_receive(
     Err(ContractError::Std(StdError::generic_err("Not supported")))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_ibc_packet_receive_native_remote_chain(
     storage: &mut dyn Storage,
     api: &dyn Api,
@@ -661,7 +662,7 @@ pub fn ibc_packet_timeout(
 
 // update the balance stored on this (channel, denom) index
 fn on_packet_success(_deps: DepsMut, packet: IbcPacket) -> Result<IbcBasicResponse, ContractError> {
-    let msg: Ics20Packet = from_json(&packet.data)?;
+    let msg: Ics20Packet = from_json(packet.data)?;
 
     // similar event messages like ibctransfer module
     let attributes = vec![
@@ -724,7 +725,7 @@ pub fn handle_packet_refund(
     with_mint_burn: bool,
 ) -> Result<SubMsg, ContractError> {
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
-    let pair_mapping = ics20_denoms().load(storage, &packet_denom)?;
+    let pair_mapping = ics20_denoms().load(storage, packet_denom)?;
 
     let local_amount = convert_remote_to_local(
         packet_amount,

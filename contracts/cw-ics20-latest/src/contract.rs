@@ -1,7 +1,9 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Timestamp, Uint128, WasmMsg
+    from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
+    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage,
+    Timestamp, Uint128, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -208,12 +210,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
 ) -> Result<Response, ContractError> {
     is_caller_contract(caller, contract_addr.clone())?;
     // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
-    increase_channel_balance(
-        deps.storage,
-        &dst_channel_id,
-        &ibc_denom,
-        remote_amount.clone(),
-    )?;
+    increase_channel_balance(deps.storage, &dst_channel_id, &ibc_denom, remote_amount)?;
 
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
     let pair_mapping = ics20_denoms()
@@ -312,6 +309,7 @@ pub fn handle_reduce_channel_balance_ibc_receive(
         .add_messages(cosmos_msgs))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_config(
     deps: DepsMut,
     info: MessageInfo,
@@ -608,21 +606,16 @@ pub fn build_burn_cw20_mapping_msg(
     //  burn cw20 token if the mechanism is mint burn
     if is_mint_burn {
         match burn_asset_info {
-            AssetInfo::NativeToken { denom } => {
-                return Err(ContractError::Std(StdError::generic_err(format!(
-                    "Mapping token must be cw20 token. Got {}",
-                    denom
-                ))));
-            }
-            AssetInfo::Token { contract_addr } => {
-                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_addr.to_string(),
-                    msg: to_json_binary(&Cw20ExecuteMsg::Burn {
-                        amount: amount_local,
-                    })?,
-                    funds: vec![],
-                })));
-            }
+            AssetInfo::NativeToken { denom } => Err(ContractError::Std(StdError::generic_err(
+                format!("Mapping token must be cw20 token. Got {}", denom),
+            ))),
+            AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: contract_addr.to_string(),
+                msg: to_json_binary(&Cw20ExecuteMsg::Burn {
+                    amount: amount_local,
+                })?,
+                funds: vec![],
+            }))),
         }
     } else {
         Ok(None)
@@ -637,22 +630,17 @@ pub fn build_mint_cw20_mapping_msg(
 ) -> Result<Option<CosmosMsg>, ContractError> {
     if is_mint_burn {
         match mint_asset_info {
-            AssetInfo::NativeToken { denom } => {
-                return Err(ContractError::Std(StdError::generic_err(format!(
-                    "Mapping token must be cw20 token. Got {}",
-                    denom
-                ))));
-            }
-            AssetInfo::Token { contract_addr } => {
-                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_addr.to_string(),
-                    msg: to_json_binary(&Cw20ExecuteMsg::Mint {
-                        recipient: receiver,
-                        amount: amount_local,
-                    })?,
-                    funds: vec![],
-                })));
-            }
+            AssetInfo::NativeToken { denom } => Err(ContractError::Std(StdError::generic_err(
+                format!("Mapping token must be cw20 token. Got {}", denom),
+            ))),
+            AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: contract_addr.to_string(),
+                msg: to_json_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: receiver,
+                    amount: amount_local,
+                })?,
+                funds: vec![],
+            }))),
         }
     } else {
         Ok(None)
