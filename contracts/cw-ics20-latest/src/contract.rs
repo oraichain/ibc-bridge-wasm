@@ -1,9 +1,9 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
-    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage, Uint128,
-    WasmMsg,
+    from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
+    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage,
+    Timestamp, Uint128, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -17,19 +17,19 @@ use crate::error::ContractError;
 use crate::ibc::{build_ibc_send_packet, parse_voucher_denom, process_deduct_fee};
 use crate::ibc_hooks::ibc_hooks_receive;
 use crate::msg::{
-    AllowedInfo, AllowedResponse, ChannelResponse, ChannelWithKeyResponse, ConfigResponse,
-    DeletePairMsg, ExecuteMsg, InitMsg, ListAllowedResponse, ListChannelsResponse,
-    ListMappingResponse, MigrateMsg, PairQuery, PortResponse, QueryMsg, RelayerFeeResponse,
-    TransferBackMsg, UpdatePairMsg,
+    AllowedResponse, ChannelResponse, ChannelWithKeyResponse, ConfigResponse, ExecuteMsg, InitMsg,
+    ListAllowedResponse, ListChannelsResponse, ListMappingResponse, MigrateMsg, PairQuery,
+    PortResponse, QueryMsg, RelayerFeeResponse,
 };
 use crate::query_helper::get_mappings_from_asset_info;
 use crate::state::{
     get_key_ics20_ibc_denom, ics20_denoms, increase_channel_balance, override_channel_balance,
-    reduce_channel_balance, AllowInfo, Config, MappingMetadata, RelayerFee, ReplyArgs, TokenFee,
-    ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS,
-    SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
+    reduce_channel_balance, Config, ADMIN, ALLOW_LIST, CHANNEL_INFO, CHANNEL_REVERSE_STATE, CONFIG,
+    RELAYER_FEE, REPLY_ARGS, SINGLE_STEP_REPLY_ARGS, TOKEN_FEE,
 };
 use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
+use cw20_ics20_msg::msg::{AllowedInfo, DeletePairMsg, TransferBackMsg, UpdatePairMsg};
+use cw20_ics20_msg::state::{AllowInfo, MappingMetadata, RelayerFee, ReplyArgs, TokenFee};
 use cw_utils::{maybe_addr, nonpayable, one_coin};
 
 // version info for migration info
@@ -54,6 +54,7 @@ pub fn instantiate(
         token_fee_receiver: admin.clone(),
         relayer_fee_receiver: admin,
         converter_contract: ConverterController(msg.converter_contract),
+        osor_entrypoint_contract: msg.osor_entrypoint_contract,
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -92,7 +93,6 @@ pub fn execute(
         ExecuteMsg::UpdateConfig {
             default_timeout,
             default_gas_limit,
-            fee_denom,
             swap_router_contract,
             admin,
             token_fee,
@@ -100,12 +100,12 @@ pub fn execute(
             relayer_fee_receiver,
             relayer_fee,
             converter_contract,
+            osor_entrypoint_contract,
         } => update_config(
             deps,
             info,
             default_timeout,
             default_gas_limit,
-            fee_denom,
             swap_router_contract,
             admin,
             token_fee,
@@ -113,6 +113,7 @@ pub fn execute(
             relayer_fee_receiver,
             relayer_fee,
             converter_contract,
+            osor_entrypoint_contract,
         ),
         // self-called msgs for ibc_packet_receive
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
@@ -156,9 +157,11 @@ pub fn execute(
             outstanding,
             total_sent,
         ),
-        ExecuteMsg::IbcHooksReceive { func, args } => {
-            ibc_hooks_receive(deps, env, info, func, args)
-        }
+        ExecuteMsg::IbcHooksReceive {
+            func,
+            orai_receiver,
+            args,
+        } => ibc_hooks_receive(deps, env, info, func, orai_receiver, args),
     }
 }
 
@@ -207,12 +210,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
 ) -> Result<Response, ContractError> {
     is_caller_contract(caller, contract_addr.clone())?;
     // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
-    increase_channel_balance(
-        deps.storage,
-        &dst_channel_id,
-        &ibc_denom,
-        remote_amount.clone(),
-    )?;
+    increase_channel_balance(deps.storage, &dst_channel_id, &ibc_denom, remote_amount)?;
 
     let mut cosmos_msgs: Vec<CosmosMsg> = vec![];
     let pair_mapping = ics20_denoms()
@@ -311,12 +309,12 @@ pub fn handle_reduce_channel_balance_ibc_receive(
         .add_messages(cosmos_msgs))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_config(
     deps: DepsMut,
     info: MessageInfo,
     default_timeout: Option<u64>,
     default_gas_limit: Option<u64>,
-    fee_denom: Option<String>,
     swap_router_contract: Option<String>,
     admin: Option<String>,
     token_fee: Option<Vec<TokenFee>>,
@@ -324,6 +322,7 @@ pub fn update_config(
     relayer_fee_receiver: Option<String>,
     relayer_fee: Option<Vec<RelayerFee>>,
     converter_contract: Option<String>,
+    osor_entrypoint_contract: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
     if let Some(token_fee) = token_fee {
@@ -340,9 +339,6 @@ pub fn update_config(
         if let Some(default_timeout) = default_timeout {
             config.default_timeout = default_timeout;
         }
-        if let Some(fee_denom) = fee_denom {
-            config.fee_denom = fee_denom;
-        }
         if let Some(swap_router_contract) = swap_router_contract {
             config.swap_router_contract = RouterController(swap_router_contract);
         }
@@ -354,6 +350,9 @@ pub fn update_config(
         }
         if let Some(converter_contract) = converter_contract {
             config.converter_contract = ConverterController(converter_contract);
+        }
+        if let Some(osor_entrypoint_contract) = osor_entrypoint_contract {
+            config.osor_entrypoint_contract = osor_entrypoint_contract;
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -376,7 +375,7 @@ pub fn execute_receive(
     let amount = Amount::cw20(wrapper.amount, info.sender);
     let api = deps.api;
 
-    let msg: TransferBackMsg = from_binary(&wrapper.msg)?;
+    let msg: TransferBackMsg = from_json(&wrapper.msg)?;
     execute_transfer_back_to_remote_chain(
         deps,
         env,
@@ -445,7 +444,7 @@ pub fn execute_receive(
 //     // prepare ibc message
 //     let msg = IbcMsg::SendPacket {
 //         channel_id: msg.channel,
-//         data: to_binary(&packet)?,
+//         data: to_json_binary(&packet)?,
 //         timeout: timeout.into(),
 //     };
 
@@ -547,12 +546,11 @@ pub fn execute_transfer_back_to_remote_chain(
     }
 
     // delta from user is in seconds
-    let timeout_delta = match msg.timeout {
-        Some(t) => t,
-        None => config.default_timeout,
+    let timeout = match msg.timeout {
+        Some(t) => Timestamp::from_nanos(t),
+        None => env.block.time.plus_seconds(config.default_timeout),
     };
-    // timeout is in nanoseconds
-    let timeout = env.block.time.plus_seconds(timeout_delta);
+
     // need to convert decimal of cw20 to remote decimal before transferring
     let amount_remote = convert_local_to_remote(
         fee_data.deducted_amount,
@@ -608,21 +606,16 @@ pub fn build_burn_cw20_mapping_msg(
     //  burn cw20 token if the mechanism is mint burn
     if is_mint_burn {
         match burn_asset_info {
-            AssetInfo::NativeToken { denom } => {
-                return Err(ContractError::Std(StdError::generic_err(format!(
-                    "Mapping token must be cw20 token. Got {}",
-                    denom
-                ))));
-            }
-            AssetInfo::Token { contract_addr } => {
-                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_addr.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Burn {
-                        amount: amount_local,
-                    })?,
-                    funds: vec![],
-                })));
-            }
+            AssetInfo::NativeToken { denom } => Err(ContractError::Std(StdError::generic_err(
+                format!("Mapping token must be cw20 token. Got {}", denom),
+            ))),
+            AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: contract_addr.to_string(),
+                msg: to_json_binary(&Cw20ExecuteMsg::Burn {
+                    amount: amount_local,
+                })?,
+                funds: vec![],
+            }))),
         }
     } else {
         Ok(None)
@@ -637,22 +630,17 @@ pub fn build_mint_cw20_mapping_msg(
 ) -> Result<Option<CosmosMsg>, ContractError> {
     if is_mint_burn {
         match mint_asset_info {
-            AssetInfo::NativeToken { denom } => {
-                return Err(ContractError::Std(StdError::generic_err(format!(
-                    "Mapping token must be cw20 token. Got {}",
-                    denom
-                ))));
-            }
-            AssetInfo::Token { contract_addr } => {
-                return Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_addr.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Mint {
-                        recipient: receiver,
-                        amount: amount_local,
-                    })?,
-                    funds: vec![],
-                })));
-            }
+            AssetInfo::NativeToken { denom } => Err(ContractError::Std(StdError::generic_err(
+                format!("Mapping token must be cw20 token. Got {}", denom),
+            ))),
+            AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: contract_addr.to_string(),
+                msg: to_json_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: receiver,
+                    amount: amount_local,
+                })?,
+                funds: vec![],
+            }))),
         }
     } else {
         Ok(None)
@@ -768,18 +756,9 @@ pub fn execute_delete_mapping_pair(
 #[entry_point]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
     // we don't need to save anything if migrating from the same version
-    CONFIG.save(
-        deps.storage,
-        &Config {
-            default_timeout: msg.default_timeout,
-            default_gas_limit: msg.default_gas_limit,
-            fee_denom: msg.fee_denom,
-            swap_router_contract: RouterController(msg.swap_router_contract),
-            token_fee_receiver: deps.api.addr_validate(&msg.token_fee_receiver)?,
-            relayer_fee_receiver: deps.api.addr_validate(&msg.relayer_fee_receiver)?,
-            converter_contract: ConverterController(msg.converter_contract),
-        },
-    )?;
+    let mut config = CONFIG.load(deps.storage)?;
+    config.osor_entrypoint_contract = msg.osor_entrypoint_contract;
+    CONFIG.save(deps.storage, &config)?;
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
@@ -789,31 +768,31 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Port {} => to_binary(&query_port(deps)?),
-        QueryMsg::ListChannels {} => to_binary(&query_list(deps)?),
-        QueryMsg::Channel { id } => to_binary(&query_channel(deps, id)?),
+        QueryMsg::Port {} => to_json_binary(&query_port(deps)?),
+        QueryMsg::ListChannels {} => to_json_binary(&query_list(deps)?),
+        QueryMsg::Channel { id } => to_json_binary(&query_channel(deps, id)?),
         QueryMsg::ChannelWithKey { channel_id, denom } => {
-            to_binary(&query_channel_with_key(deps, channel_id, denom)?)
+            to_json_binary(&query_channel_with_key(deps, channel_id, denom)?)
         }
-        QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Allowed { contract } => to_binary(&query_allowed(deps, contract)?),
+        QueryMsg::Config {} => to_json_binary(&query_config(deps)?),
+        QueryMsg::Allowed { contract } => to_json_binary(&query_allowed(deps, contract)?),
         QueryMsg::ListAllowed {
             start_after,
             limit,
             order,
-        } => to_binary(&list_allowed(deps, start_after, limit, order)?),
+        } => to_json_binary(&list_allowed(deps, start_after, limit, order)?),
         QueryMsg::PairMappings {
             start_after,
             limit,
             order,
-        } => to_binary(&list_cw20_mapping(deps, start_after, limit, order)?),
-        QueryMsg::PairMapping { key } => to_binary(&get_mapping_from_key(deps, key)?),
+        } => to_json_binary(&list_cw20_mapping(deps, start_after, limit, order)?),
+        QueryMsg::PairMapping { key } => to_json_binary(&get_mapping_from_key(deps, key)?),
         QueryMsg::PairMappingsFromAssetInfo { asset_info } => {
-            to_binary(&get_mappings_from_asset_info(deps.storage, asset_info)?)
+            to_json_binary(&get_mappings_from_asset_info(deps.storage, asset_info)?)
         }
-        QueryMsg::Admin {} => to_binary(&ADMIN.query_admin(deps)?),
+        QueryMsg::Admin {} => to_json_binary(&ADMIN.query_admin(deps)?),
         QueryMsg::GetTransferTokenFee { remote_token_denom } => {
-            to_binary(&TOKEN_FEE.load(deps.storage, &remote_token_denom)?)
+            to_json_binary(&TOKEN_FEE.load(deps.storage, &remote_token_denom)?)
         }
     }
 }
@@ -907,6 +886,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
             })
             .collect::<StdResult<_>>()?,
         converter_contract: cfg.converter_contract.addr(),
+        osor_entrypoint_contract: cfg.osor_entrypoint_contract,
     };
     Ok(res)
 }

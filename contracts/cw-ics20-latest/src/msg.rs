@@ -1,9 +1,10 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{Addr, Binary, IbcEndpoint, SubMsg, Uint128};
+use cosmwasm_std::{Addr, Binary, Uint128};
 use cw20::Cw20ReceiveMsg;
+use cw20_ics20_msg::msg::{AllowedInfo, DeletePairMsg, TransferBackMsg, UpdatePairMsg};
 use oraiswap::asset::AssetInfo;
 
-use crate::state::{ChannelInfo, MappingMetadata, RelayerFee, TokenFee};
+use cw20_ics20_msg::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
 use cw20_ics20_msg::{amount::Amount, ibc_hooks::HookMethods};
 
 #[cw_serde]
@@ -21,6 +22,8 @@ pub struct InitMsg {
     pub swap_router_contract: String,
     /// converter contract for convert token
     pub converter_contract: String,
+    // entrypoint for handling swap and post actions like IBC transfer to remote
+    pub osor_entrypoint_contract: String,
 }
 
 #[cw_serde]
@@ -31,13 +34,7 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
-    pub default_timeout: u64,
-    pub default_gas_limit: Option<u64>,
-    pub fee_denom: String,
-    pub swap_router_contract: String,
-    pub token_fee_receiver: String,
-    pub relayer_fee_receiver: String,
-    pub converter_contract: String,
+    pub osor_entrypoint_contract: String,
 }
 
 #[cw_serde]
@@ -56,13 +53,13 @@ pub enum ExecuteMsg {
         admin: Option<String>,
         default_timeout: Option<u64>,
         default_gas_limit: Option<u64>,
-        fee_denom: Option<String>,
         swap_router_contract: Option<String>,
         token_fee: Option<Vec<TokenFee>>,
         relayer_fee: Option<Vec<RelayerFee>>,
         fee_receiver: Option<String>,
         relayer_fee_receiver: Option<String>,
         converter_contract: Option<String>,
+        osor_entrypoint_contract: Option<String>,
     },
     // self-call msgs to deal with on_ibc_receive reentrancy error
     IncreaseChannelBalanceIbcReceive {
@@ -85,27 +82,9 @@ pub enum ExecuteMsg {
     },
     IbcHooksReceive {
         func: HookMethods,
+        orai_receiver: String,
         args: Binary,
     },
-}
-
-#[cw_serde]
-pub struct UpdatePairMsg {
-    pub local_channel_id: String,
-    /// native denom of the remote chain. Eg: orai
-    pub denom: String,
-    /// asset info of the local chain.
-    pub local_asset_info: AssetInfo,
-    pub remote_decimals: u8,
-    pub local_asset_info_decimals: u8,
-    pub is_mint_burn: Option<bool>,
-}
-
-#[cw_serde]
-pub struct DeletePairMsg {
-    pub local_channel_id: String,
-    /// native denom of the remote chain. Eg: orai
-    pub denom: String,
 }
 
 /// This is the message we accept via Receive
@@ -122,34 +101,6 @@ pub struct DeletePairMsg {
 //     /// metadata of the transfer to suit the new fungible token transfer
 //     pub memo: Option<String>,
 // }
-
-/// This is the message we accept via Receive
-#[cw_serde]
-pub struct TransferBackMsg {
-    /// the local ibc endpoint you want to send tokens back on
-    pub local_channel_id: String,
-    pub remote_address: String,
-    /// remote denom so that we know what denom to filter when we query based on the asset info. Most likely be: oraib0x... or eth0x...
-    pub remote_denom: String,
-    /// How long the packet lives in seconds. If not specified, use default_timeout
-    pub timeout: Option<u64>,
-    /// metadata of the transfer to suit the new fungible token transfer
-    pub memo: Option<String>,
-}
-
-/// This is the message we accept via Receive
-#[cw_serde]
-pub struct TransferBackToRemoteChainMsg {
-    /// The remote chain's ibc information
-    pub ibc_endpoint: IbcEndpoint,
-    /// The remote address to send to.
-    /// Don't use HumanAddress as this will likely have a different Bech32 prefix than we use
-    /// and cannot be validated locally
-    pub remote_address: String,
-    /// How long the packet lives in seconds. If not specified, use default_timeout
-    pub timeout: Option<u64>,
-    pub metadata: Binary,
-}
 
 #[cw_serde]
 #[derive(QueryResponses)]
@@ -192,7 +143,7 @@ pub enum QueryMsg {
     PairMapping { key: String },
     #[returns(Vec<PairQuery>)]
     PairMappingsFromAssetInfo { asset_info: AssetInfo },
-    #[returns(crate::state::Ratio)]
+    #[returns(Ratio)]
     GetTransferTokenFee { remote_token_denom: String },
 }
 
@@ -240,6 +191,7 @@ pub struct ConfigResponse {
     pub token_fees: Vec<TokenFee>,
     pub relayer_fees: Vec<RelayerFeeResponse>,
     pub converter_contract: String,
+    pub osor_entrypoint_contract: String,
 }
 
 #[cw_serde]
@@ -268,24 +220,4 @@ pub struct ListMappingResponse {
 pub struct PairQuery {
     pub key: String,
     pub pair_mapping: MappingMetadata,
-}
-
-#[cw_serde]
-pub struct AllowedInfo {
-    pub contract: String,
-    pub gas_limit: Option<u64>,
-}
-
-#[cw_serde]
-pub struct FeeData {
-    pub deducted_amount: Uint128,
-    pub token_fee: Amount,
-    pub relayer_fee: Amount,
-}
-
-#[cw_serde]
-pub struct FollowUpMsgsData {
-    pub sub_msgs: Vec<SubMsg>,
-    pub follow_up_msg: String,
-    pub is_success: bool,
 }

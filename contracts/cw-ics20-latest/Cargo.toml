@@ -29,6 +29,7 @@ cw-storage-plus = { workspace = true }
 cw-controllers = { workspace = true }
 thiserror = { version = "1.0.23" }
 sha256 = "=1.1.0"
+skip = { workspace = true }
 
 [dev-dependencies]
 cosmwasm-vm = { workspace = true }

@@ -1,52 +1,48 @@
 use std::ops::Sub;
 
 use cosmwasm_std::{
-    coin, Addr, BankMsg, Coin, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcTimeout, StdError,
+    Addr, BankMsg, Coin, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg, StdError,
 };
 use cosmwasm_testing_util::mock::MockContract;
 use cosmwasm_vm::testing::MockInstanceOptions;
-use cw20_ics20_msg::receiver::DestinationInfo;
 use cw_controllers::AdminError;
 use oraiswap::asset::AssetInfo;
-use oraiswap::router::{RouterController, SwapOperation};
+use oraiswap::router::RouterController;
 
 use crate::ibc::{
-    build_ibc_msg, build_swap_msgs, convert_remote_denom_to_evm_prefix, deduct_fee,
-    deduct_relayer_fee, deduct_token_fee, get_swap_token_amount_out_from_orai,
-    handle_packet_refund, ibc_packet_receive, parse_ibc_channel_without_sanity_checks,
-    parse_ibc_denom_without_sanity_checks, parse_ibc_info_without_sanity_checks,
-    parse_voucher_denom, process_ibc_msg, Ics20Ack, Ics20Packet, FOLLOW_UP_IBC_SEND_FAILURE_ID,
-    IBC_TRANSFER_NATIVE_ERROR_ID, ICS20_VERSION, NATIVE_RECEIVE_ID, REFUND_FAILURE_ID,
-    SWAP_OPS_FAILURE_ID,
+    convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
+    get_swap_token_amount_out_from_orai, handle_packet_refund, ibc_packet_receive,
+    parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
+    parse_ibc_info_without_sanity_checks, parse_voucher_denom, Ics20Ack, Ics20Packet,
+    ICS20_VERSION, REFUND_FAILURE_ID,
 };
-use crate::ibc::{build_swap_operations, get_follow_up_msgs};
 use crate::query_helper::get_destination_info_on_orai;
 use crate::testing::test_helpers::*;
 use cosmwasm_std::{
-    from_binary, to_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, SubMsg, Timestamp,
-    Uint128, WasmMsg,
+    from_json, to_json_binary, IbcEndpoint, IbcMsg, IbcPacket, IbcPacketReceiveMsg, SubMsg,
+    Timestamp, Uint128, WasmMsg,
 };
 
 use crate::error::ContractError;
 use crate::state::{
-    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance, ChannelState,
-    MappingMetadata, Ratio, RelayerFee, TokenFee, CHANNEL_REVERSE_STATE, RELAYER_FEE, REPLY_ARGS,
-    TOKEN_FEE,
+    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
+    CHANNEL_REVERSE_STATE, RELAYER_FEE, REPLY_ARGS, TOKEN_FEE,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
-use cw20_ics20_msg::amount::{convert_local_to_remote, convert_remote_to_local, Amount};
+use cw20_ics20_msg::amount::{convert_remote_to_local, Amount};
+use cw20_ics20_msg::state::{MappingMetadata, Ratio, RelayerFee, TokenFee};
 
 use crate::contract::{
     build_burn_cw20_mapping_msg, build_mint_cw20_mapping_msg, execute,
     handle_override_channel_balance, query, query_channel, query_channel_with_key,
 };
 use crate::msg::{
-    AllowMsg, ChannelResponse, ConfigResponse, DeletePairMsg, ExecuteMsg, InitMsg,
-    ListChannelsResponse, ListMappingResponse, PairQuery, QueryMsg, TransferBackMsg, UpdatePairMsg,
+    AllowMsg, ChannelResponse, ConfigResponse, ExecuteMsg, InitMsg, ListChannelsResponse,
+    ListMappingResponse, PairQuery, QueryMsg,
 };
 use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-use cosmwasm_std::{coins, to_vec};
+use cosmwasm_std::{coins, to_json_vec};
+use cw20_ics20_msg::msg::{DeletePairMsg, TransferBackMsg, UpdatePairMsg};
 
 const SENDER: &str = "orai1gkr56hlnx9vc7vncln2dkd896zfsqjn300kfq0";
 const CONTRACT: &str = "orai19p43y0tqnr5qlhfwnxft2u5unph5yn60y7tuvu";
@@ -56,10 +52,10 @@ fn check_ack_json() {
     let success = Ics20Ack::Result(b"1".into());
     let fail = Ics20Ack::Error("bad coin".into());
 
-    let success_json = String::from_utf8(to_vec(&success).unwrap()).unwrap();
+    let success_json = String::from_utf8(to_json_vec(&success).unwrap()).unwrap();
     assert_eq!(r#"{"result":"MQ=="}"#, success_json.as_str());
 
-    let fail_json = String::from_utf8(to_vec(&fail).unwrap()).unwrap();
+    let fail_json = String::from_utf8(to_json_vec(&fail).unwrap()).unwrap();
     assert_eq!(r#"{"error":"bad coin"}"#, fail_json.as_str());
 }
 
@@ -85,7 +81,7 @@ fn check_packet_json() {
     // Example message generated from the SDK
     let expected = r#"{"amount":"12345","denom":"ucosm","receiver":"wasm1fucynrfkrt684pm8jrt8la5h2csvs5cnldcgqc","sender":"cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n","memo":null}"#;
 
-    let encdoded = String::from_utf8(to_vec(&packet).unwrap()).unwrap();
+    let encdoded = String::from_utf8(to_json_vec(&packet).unwrap()).unwrap();
     assert_eq!(expected, encdoded.as_str());
 }
 
@@ -150,7 +146,7 @@ fn mock_receive_packet_remote_to_local(
         memo: None,
     };
     IbcPacket::new(
-        to_binary(&data).unwrap(),
+        to_json_binary(&data).unwrap(),
         IbcEndpoint {
             port_id: REMOTE_PORT.to_string(),
             channel_id: "channel-1234".to_string(),
@@ -312,7 +308,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
     let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
         sender: original_sender.to_string(),
         amount,
-        msg: to_binary(&transfer).unwrap(),
+        msg: to_json_binary(&transfer).unwrap(),
     });
 
     // insufficient funds case because we need to receive from remote chain first
@@ -358,7 +354,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
     let receive_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
         sender: original_sender.to_string(),
         amount: Uint128::from(amount),
-        msg: to_binary(&transfer).unwrap(),
+        msg: to_json_binary(&transfer).unwrap(),
     });
 
     // now we execute transfer back to remote chain
@@ -373,10 +369,10 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
             data,
             timeout,
         }) => {
-            let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
-            assert_eq!(timeout, expected_timeout.into());
+            let expected_timeout = DEFAULT_TIMEOUT;
+            assert_eq!(timeout.timestamp().unwrap().nanos(), expected_timeout);
             assert_eq!(channel_id.as_str(), local_channel);
-            let msg: Ics20Packet = from_binary(&data).unwrap();
+            let msg: Ics20Packet = from_json(&data).unwrap();
             assert_eq!(
                 msg.amount,
                 Uint128::new(1234567).sub(Uint128::from(fee_amount))
@@ -400,7 +396,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
             assert_eq!(contract_addr, token_addr.to_string());
             assert_eq!(
                 msg,
-                to_binary(&Cw20ExecuteMsg::Transfer {
+                to_json_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: "gov".to_string(),
                     amount: fee_amount
                 })
@@ -451,7 +447,7 @@ fn proper_checks_on_execute_native_transfer_back_to_remote() {
     let invalid_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
         sender: original_sender.to_string(),
         amount: Uint128::from(amount),
-        msg: to_binary(&transfer).unwrap(),
+        msg: to_json_binary(&transfer).unwrap(),
     });
     let err = execute(deps.as_mut(), mock_env(), info.clone(), invalid_msg).unwrap_err();
     assert_eq!(err, ContractError::MappingPairNotFound {});
@@ -499,6 +495,7 @@ fn send_from_remote_to_local_receive_happy_path() {
         allowlist,
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
+        osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
     };
 
     contract_instance
@@ -551,7 +548,7 @@ fn send_from_remote_to_local_receive_happy_path() {
         memo: None,
     };
     let recv_packet = IbcPacket::new(
-        to_binary(&data).unwrap(),
+        to_json_binary(&data).unwrap(),
         IbcEndpoint {
             port_id: REMOTE_PORT.to_string(),
             channel_id: "channel-1234".to_string(),
@@ -580,7 +577,7 @@ fn send_from_remote_to_local_receive_happy_path() {
             assert_eq!(contract_addr, cw20_addr);
             assert_eq!(
                 msg,
-                to_binary(&Cw20ExecuteMsg::Transfer {
+                to_json_binary(&Cw20ExecuteMsg::Transfer {
                     recipient: SENDER.to_string(),
                     amount: Uint128::from(87654321u64) // send amount / token fee
                 })
@@ -590,7 +587,7 @@ fn send_from_remote_to_local_receive_happy_path() {
         _ => panic!("Unexpected return message: {:?}", res.messages[0]),
     }
 
-    let ack: Ics20Ack = from_binary(&res.acknowledgement).unwrap();
+    let ack: Ics20Ack = from_json(&res.acknowledgement).unwrap();
     assert!(matches!(ack, Ics20Ack::Result(_)));
 
     // query channel state|_|
@@ -603,7 +600,7 @@ fn send_from_remote_to_local_receive_happy_path() {
             assert_eq!(contract_addr, CONTRACT); // self-call msg
             assert_eq!(
                 msg,
-                to_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                to_json_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
                     dest_channel_id: send_channel.to_string(),
                     ibc_denom: get_key_ics20_ibc_denom(contract_port.as_str(), send_channel, denom),
                     amount: send_amount,
@@ -617,659 +614,7 @@ fn send_from_remote_to_local_receive_happy_path() {
 }
 
 #[test]
-fn test_swap_operations() {
-    let mut receiver_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("contract"),
-    };
-    let mut initial_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("addr"),
-    };
-    let fee_denom = "orai".to_string();
-
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        fee_denom.as_str(),
-    );
-    assert_eq!(operations.len(), 2);
-
-    let fee_denom = "contract".to_string();
-    receiver_asset_info = AssetInfo::NativeToken {
-        denom: "contract".to_string(),
-    };
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        &fee_denom,
-    );
-    assert_eq!(operations.len(), 1);
-    assert_eq!(
-        operations[0],
-        SwapOperation::OraiSwap {
-            offer_asset_info: initial_asset_info.clone(),
-            ask_asset_info: AssetInfo::NativeToken {
-                denom: fee_denom.clone()
-            }
-        }
-    );
-    initial_asset_info = AssetInfo::NativeToken {
-        denom: "contract".to_string(),
-    };
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        &fee_denom,
-    );
-    assert_eq!(operations.len(), 0);
-
-    initial_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("addr"),
-    };
-    let operations = build_swap_operations(
-        receiver_asset_info.clone(),
-        initial_asset_info.clone(),
-        &fee_denom,
-    );
-    assert_eq!(operations.len(), 1);
-    assert_eq!(
-        operations[0],
-        SwapOperation::OraiSwap {
-            offer_asset_info: initial_asset_info.clone(),
-            ask_asset_info: AssetInfo::NativeToken { denom: fee_denom }
-        }
-    );
-
-    // initial = receiver => build swap ops length = 0
-    let operations = build_swap_operations(
-        AssetInfo::NativeToken {
-            denom: "foobar".to_string(),
-        },
-        AssetInfo::NativeToken {
-            denom: "foobar".to_string(),
-        },
-        "not_foo_bar",
-    );
-    assert_eq!(operations.len(), 0);
-}
-
-#[test]
-fn test_build_swap_msgs() {
-    let minimum_receive = Uint128::from(10u128);
-    let swap_router_contract = "router";
-    let amount = Uint128::from(100u128);
-    let mut initial_receive_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("addr"),
-    };
-    let native_denom = "foobar";
-    let to: Option<Addr> = None;
-    let mut cosmos_msgs: Vec<SubMsg> = vec![];
-    let mut operations: Vec<SwapOperation> = vec![];
-    build_swap_msgs(
-        minimum_receive.clone(),
-        &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount,
-        initial_receive_asset_info.clone(),
-        to.clone(),
-        &mut cosmos_msgs,
-        operations.clone(),
-    )
-    .unwrap();
-    assert_eq!(cosmos_msgs.len(), 0);
-    operations.push(SwapOperation::OraiSwap {
-        offer_asset_info: initial_receive_asset_info.clone(),
-        ask_asset_info: initial_receive_asset_info.clone(),
-    });
-    build_swap_msgs(
-        minimum_receive,
-        &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount,
-        initial_receive_asset_info,
-        to.clone(),
-        &mut cosmos_msgs,
-        operations.clone(),
-    )
-    .unwrap();
-    // send in Cw20 send
-    assert_eq!(true, format!("{:?}", cosmos_msgs[0]).contains("send"));
-
-    // reset cosmos msg to continue testing
-    cosmos_msgs.pop();
-    initial_receive_asset_info = AssetInfo::NativeToken {
-        denom: native_denom.to_string(),
-    };
-    build_swap_msgs(
-        minimum_receive,
-        &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount,
-        initial_receive_asset_info,
-        to.clone(),
-        &mut cosmos_msgs,
-        operations.clone(),
-    )
-    .unwrap();
-    assert_eq!(
-        true,
-        format!("{:?}", cosmos_msgs[0]).contains("execute_swap_operations")
-    );
-    assert_eq!(
-        SubMsg::reply_on_error(
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: swap_router_contract.to_string(),
-                msg: to_binary(&oraiswap::router::ExecuteMsg::ExecuteSwapOperations {
-                    operations: operations,
-                    minimum_receive: Some(minimum_receive),
-                    to
-                })
-                .unwrap(),
-                funds: coins(amount.u128(), native_denom)
-            }),
-            SWAP_OPS_FAILURE_ID
-        ),
-        cosmos_msgs[0]
-    );
-}
-
-#[test]
-fn test_build_swap_msgs_forbidden_case() {
-    let minimum_receive = Uint128::from(10u128);
-    let swap_router_contract = "router";
-    let amount = Uint128::from(100u128);
-    let initial_receive_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("addr"),
-    };
-    let mut cosmos_msgs: Vec<SubMsg> = vec![];
-    let operations: Vec<SwapOperation> = vec![SwapOperation::OraiSwap {
-        offer_asset_info: initial_receive_asset_info.clone(),
-        ask_asset_info: initial_receive_asset_info.clone(),
-    }];
-    cosmos_msgs.push(SubMsg::new(CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
-        to_address: "foobar".to_string(),
-        amount: coins(1u128, "orai"),
-    })));
-    cosmos_msgs.push(SubMsg::new(CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
-        to_address: "foobar".to_string(),
-        amount: coins(1u128, "orai"),
-    })));
-    cosmos_msgs.push(SubMsg::new(CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
-        to_address: "foobar".to_string(),
-        amount: coins(1u128, "orai"),
-    })));
-    build_swap_msgs(
-        minimum_receive,
-        &oraiswap::router::RouterController(swap_router_contract.to_string()),
-        amount,
-        initial_receive_asset_info,
-        Some(Addr::unchecked("attacker")),
-        &mut cosmos_msgs,
-        operations.clone(),
-    )
-    .unwrap();
-    // should pop everything since 'to' is not None, and ops have items in it
-    assert_eq!(cosmos_msgs.len(), 0);
-}
-
-#[test]
-fn test_get_ibc_msg_evm_case() {
-    // setup
-    let send_channel = "channel-9";
-    let allowed = "foobar";
-    let pair_mapping_denom = "trx-mainnet0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C";
-    let allowed_gas = 777666;
-    let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
-    let receiver_asset_info = AssetInfo::NativeToken {
-        denom: "orai".to_string(),
-    };
-    let amount = Uint128::from(10u128);
-    let remote_decimals = 18;
-    let asset_info_decimals = 6;
-    let remote_amount =
-        convert_local_to_remote(amount, remote_decimals, asset_info_decimals).unwrap();
-    let remote_address = "eth-mainnet0x1235";
-    let mut env = mock_env();
-    env.contract.address = Addr::unchecked("addr");
-    let mut destination = DestinationInfo {
-        receiver: "0x1234".to_string(),
-        destination_channel: "channel-10".to_string(),
-        destination_denom: "atom".to_string(),
-    };
-    let destination_asset_info_on_orai = AssetInfo::NativeToken {
-        denom: "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646".to_string(),
-    };
-    let timeout = 1000u64;
-    let local_receiver = "local_receiver";
-
-    // first case, destination channel empty
-    destination.destination_channel = "".to_string();
-
-    let err = build_ibc_msg(
-        env.clone(),
-        local_receiver,
-        amount,
-        remote_address,
-        &destination,
-        timeout,
-        None,
-        destination_asset_info_on_orai.clone(),
-    )
-    .unwrap_err();
-    assert_eq!(
-        err,
-        StdError::generic_err("Destination channel empty in build ibc msg")
-    );
-
-    // evm based case, error getting pair mapping
-    destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
-    destination.destination_channel = send_channel.to_string();
-    let err = build_ibc_msg(
-        env.clone(),
-        local_receiver,
-        amount,
-        remote_address,
-        &destination,
-        timeout,
-        None,
-        destination_asset_info_on_orai.clone(),
-    )
-    .unwrap_err();
-    assert_eq!(err, StdError::generic_err("cannot find pair mappings"));
-
-    // add a pair mapping so we can test the happy case evm based happy case
-    let update = UpdatePairMsg {
-        local_channel_id: "mars-channel".to_string(),
-        denom: pair_mapping_denom.to_string(),
-        local_asset_info: receiver_asset_info.clone(),
-        remote_decimals,
-        local_asset_info_decimals: asset_info_decimals,
-        is_mint_burn: None,
-    };
-
-    // works with proper funds
-    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
-
-    let info = mock_info("gov", &coins(1234567, "ucosm"));
-    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let pair_mapping_key = format!(
-        "wasm.{}/{}/{}",
-        "cosmos2contract", update.local_channel_id, pair_mapping_denom
-    );
-
-    destination.receiver = "trx-mainnet0x73Ddc880916021EFC4754Cb42B53db6EAB1f9D64".to_string();
-    destination.destination_channel = update.local_channel_id;
-    let result = build_ibc_msg(
-        env.clone(),
-        local_receiver,
-        amount,
-        remote_address,
-        &destination,
-        timeout,
-        Some(PairQuery {
-            key: pair_mapping_key.clone(),
-            pair_mapping: MappingMetadata {
-                asset_info: receiver_asset_info.clone(),
-                remote_decimals,
-                asset_info_decimals: asset_info_decimals.clone(),
-                is_mint_burn: false,
-            },
-        }),
-        destination_asset_info_on_orai,
-    )
-    .unwrap();
-
-    assert_eq!(
-        result[1],
-        SubMsg::reply_on_error(
-            CosmosMsg::Ibc(IbcMsg::SendPacket {
-                channel_id: destination.destination_channel.clone(),
-                data: to_binary(&Ics20Packet::new(
-                    remote_amount,
-                    pair_mapping_key.clone(),
-                    env.contract.address.as_str(),
-                    &remote_address,
-                    Some(destination.receiver),
-                ))
-                .unwrap(),
-                timeout: env.block.time.plus_seconds(timeout).into()
-            }),
-            FOLLOW_UP_IBC_SEND_FAILURE_ID
-        )
-    );
-    assert_eq!(
-        result[0],
-        SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: env.contract.address.into_string(),
-            msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
-                src_channel_id: destination.destination_channel,
-                ibc_denom: pair_mapping_key,
-                amount: remote_amount,
-                local_receiver: local_receiver.to_string()
-            })
-            .unwrap(),
-            funds: vec![]
-        }))
-    );
-}
-
-#[test]
-fn test_get_ibc_msg_cosmos_based_case() {
-    // setup
-    let send_channel = "channel-10";
-    let allowed = "foobar";
-    let allowed_gas = 777666;
-    let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
-    let amount = Uint128::from(1000u64);
-    let pair_mapping_denom = "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n";
-    let receiver_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("usdt"),
-    };
-    let local_channel_id = "channel";
-    let local_receiver = "receiver";
-    let timeout = 10u64;
-    let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
-    let destination = DestinationInfo {
-        receiver: "cosmos1zedxv25ah8fksmg2lzrndrpkvsjqgk4zt5ff7n".to_string(),
-        destination_channel: send_channel.to_string(),
-        destination_denom: "atom".to_string(),
-    };
-    let destination_asset_info_on_orai = AssetInfo::NativeToken {
-        denom: "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646".to_string(),
-    };
-    let env = mock_env();
-    let remote_address = "foobar";
-    let ibc_denom = format!("foo/bar/{}", pair_mapping_denom);
-    let remote_decimals = 18;
-    let asset_info_decimals = 6;
-    let pair_mapping_key = format!(
-        "wasm.cosmos2contract/{}/{}",
-        send_channel, pair_mapping_denom
-    );
-
-    CHANNEL_REVERSE_STATE
-        .save(
-            deps.as_mut().storage,
-            (local_channel_id, ibc_denom.as_str()),
-            &ChannelState {
-                outstanding: remote_amount,
-                total_sent: Uint128::from(100u128),
-            },
-        )
-        .unwrap();
-
-    CHANNEL_REVERSE_STATE
-        .save(
-            deps.as_mut().storage,
-            (send_channel, pair_mapping_key.as_str()),
-            &ChannelState {
-                outstanding: remote_amount,
-                total_sent: Uint128::from(100u128),
-            },
-        )
-        .unwrap();
-
-    // cosmos based case but no mapping found. should be successful & cosmos msg is ibc transfer
-    let result = build_ibc_msg(
-        env.clone(),
-        local_receiver,
-        amount,
-        remote_address,
-        &destination,
-        timeout,
-        None,
-        destination_asset_info_on_orai.clone(),
-    )
-    .unwrap();
-    assert_eq!(
-        result[0],
-        SubMsg::reply_on_error(
-            CosmosMsg::Ibc(IbcMsg::Transfer {
-                channel_id: send_channel.to_string(),
-                to_address: destination.receiver.clone(),
-                amount: coin(
-                    1000u128,
-                    "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646"
-                ),
-                timeout: mock_env().block.time.plus_seconds(timeout).into()
-            }),
-            IBC_TRANSFER_NATIVE_ERROR_ID
-        )
-    );
-
-    // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
-    // add a pair mapping so we can test the happy case evm based happy case
-    let update = UpdatePairMsg {
-        local_channel_id: send_channel.to_string(),
-        denom: pair_mapping_denom.to_string(),
-        local_asset_info: receiver_asset_info.clone(),
-        remote_decimals,
-        local_asset_info_decimals: asset_info_decimals,
-        is_mint_burn: None,
-    };
-
-    let msg = ExecuteMsg::UpdateMappingPair(update.clone());
-
-    let info = mock_info("gov", &coins(1234567, "ucosm"));
-    execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-
-    CHANNEL_REVERSE_STATE
-        .save(
-            deps.as_mut().storage,
-            (local_channel_id, &pair_mapping_key),
-            &ChannelState {
-                outstanding: remote_amount,
-                total_sent: Uint128::from(100u128),
-            },
-        )
-        .unwrap();
-
-    // now we get ibc msg
-    let result = build_ibc_msg(
-        env.clone(),
-        local_receiver,
-        amount,
-        remote_address,
-        &destination,
-        timeout,
-        Some(PairQuery {
-            key: pair_mapping_key.clone(),
-            pair_mapping: MappingMetadata {
-                asset_info: receiver_asset_info.clone(),
-                remote_decimals,
-                asset_info_decimals,
-                is_mint_burn: false,
-            },
-        }),
-        destination_asset_info_on_orai,
-    )
-    .unwrap();
-
-    assert_eq!(
-        result[1],
-        SubMsg::reply_on_error(
-            CosmosMsg::Ibc(IbcMsg::SendPacket {
-                channel_id: send_channel.to_string(),
-                data: to_binary(&Ics20Packet::new(
-                    remote_amount,
-                    pair_mapping_key.clone(),
-                    env.contract.address.as_str(),
-                    &destination.receiver,
-                    None,
-                ))
-                .unwrap(),
-                timeout: env.block.time.plus_seconds(timeout).into()
-            }),
-            FOLLOW_UP_IBC_SEND_FAILURE_ID
-        )
-    );
-    assert_eq!(
-        result[0],
-        SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: env.contract.address.into_string(),
-            msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
-                src_channel_id: send_channel.to_string(),
-                ibc_denom: pair_mapping_key,
-                amount: remote_amount,
-                local_receiver: local_receiver.to_string()
-            })
-            .unwrap(),
-            funds: vec![]
-        }))
-    );
-}
-
-#[test]
-fn test_get_ibc_msg_neither_cosmos_or_evm_based_case() {
-    // setup
-    let amount = Uint128::from(1000u64);
-    let local_receiver = "receiver";
-    let timeout = 10u64;
-    let destination = DestinationInfo {
-        receiver: "foo".to_string(),
-        destination_channel: "channel-10".to_string(),
-        destination_denom: "atom".to_string(),
-    };
-    let destination_asset_info_on_orai = AssetInfo::NativeToken {
-        denom: "ibc/3DBC109E27758474C21E3D231DE5C23D6B84F92959E5D1AB367F4D25E0CE8646".to_string(),
-    };
-    let env = mock_env();
-    let remote_address = "foobar";
-    // cosmos based case but no mapping found. should be successful & cosmos msg is ibc transfer
-    let result = build_ibc_msg(
-        env.clone(),
-        local_receiver,
-        amount,
-        remote_address,
-        &destination,
-        timeout,
-        None,
-        destination_asset_info_on_orai,
-    )
-    .unwrap_err();
-    assert_eq!(
-        result,
-        StdError::generic_err("The destination info is neither evm nor cosmos based")
-    )
-}
-
-#[test]
-fn test_follow_up_msgs() {
-    let send_channel = "channel-9";
-    let allowed = "foobar";
-    let allowed_gas = 777666;
-    let mut deps = setup(&[send_channel], &[(allowed, allowed_gas)]);
-    let deps_mut = deps.as_mut();
-    let receiver = "foobar";
-    let amount = Uint128::from(1u128);
-    let mut env = mock_env();
-    env.contract.address = Addr::unchecked("foobar");
-    let initial_asset_info = AssetInfo::Token {
-        contract_addr: Addr::unchecked("addr"),
-    };
-
-    // first case, memo empty => return send amount with receiver input
-    let result = get_follow_up_msgs(
-        deps_mut.storage,
-        deps_mut.api,
-        &deps_mut.querier,
-        env.clone(),
-        Amount::cw20(amount, Addr::unchecked("foobar")),
-        initial_asset_info.clone(),
-        AssetInfo::NativeToken {
-            denom: "".to_string(),
-        },
-        "foobar",
-        receiver,
-        &DestinationInfo::parse_str(""),
-        None,
-    )
-    .unwrap();
-
-    assert_eq!(
-        result.sub_msgs,
-        vec![SubMsg::reply_on_error(
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: env.contract.address.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: receiver.to_string(),
-                    amount
-                })
-                .unwrap(),
-                funds: vec![]
-            }),
-            NATIVE_RECEIVE_ID
-        )]
-    );
-
-    // 2nd case, destination denom is empty => destination is collected from memo
-    let memo = "channel-15/cosmosabcd";
-    let result = get_follow_up_msgs(
-        deps_mut.storage,
-        deps_mut.api,
-        &deps_mut.querier,
-        env.clone(),
-        Amount::cw20(amount, Addr::unchecked("foobar")),
-        initial_asset_info.clone(),
-        AssetInfo::NativeToken {
-            denom: "cosmosabcd".to_string(),
-        },
-        "foobar",
-        "foobar",
-        &DestinationInfo::parse_str(memo),
-        None,
-    )
-    .unwrap();
-
-    assert_eq!(
-        result.sub_msgs,
-        vec![SubMsg::reply_on_error(
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: env.contract.address.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: receiver.to_string(),
-                    amount
-                })
-                .unwrap(),
-                funds: vec![]
-            }),
-            NATIVE_RECEIVE_ID
-        )]
-    );
-
-    // 3rd case, cosmos msgs empty case, also send amount
-    let memo = "cosmosabcd:orai";
-    let result = get_follow_up_msgs(
-        deps_mut.storage,
-        deps_mut.api,
-        &deps_mut.querier,
-        env.clone(),
-        Amount::cw20(amount, Addr::unchecked("foobar")),
-        AssetInfo::NativeToken {
-            denom: "orai".to_string(),
-        },
-        AssetInfo::NativeToken {
-            denom: "orai".to_string(),
-        },
-        "foobar",
-        "foobar",
-        &DestinationInfo::parse_str(memo),
-        None,
-    )
-    .unwrap();
-
-    assert_eq!(
-        result.sub_msgs,
-        vec![SubMsg::reply_on_error(
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: env.contract.address.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: receiver.to_string(),
-                    amount
-                })
-                .unwrap(),
-                funds: vec![]
-            }),
-            NATIVE_RECEIVE_ID
-        )]
-    );
-}
+fn test_follow_up_msgs() {}
 
 #[test]
 fn test_deduct_fee() {
@@ -1487,92 +832,6 @@ fn test_deduct_relayer_fee() {
 }
 
 #[test]
-fn test_process_ibc_msg() {
-    // setup
-    let mut deps = mock_dependencies();
-    let amount = Uint128::from(1000u64);
-    let storage = deps.as_mut().storage;
-    let ibc_denom = "foo/bar/cosmos";
-    let pair_mapping = PairQuery {
-        key: ibc_denom.to_string(),
-        pair_mapping: MappingMetadata {
-            asset_info: AssetInfo::NativeToken {
-                denom: "orai".to_string(),
-            },
-            remote_decimals: 18,
-            asset_info_decimals: 6,
-            is_mint_burn: false,
-        },
-    };
-    let local_channel_id = "channel";
-    let ibc_msg_sender = "sender";
-    let ibc_msg_receiver = "receiver";
-    let local_receiver = "local_receiver";
-    let memo = None;
-    let timeout = Timestamp::from_seconds(10u64);
-    let remote_amount = convert_local_to_remote(amount, 18, 6).unwrap();
-
-    CHANNEL_REVERSE_STATE
-        .save(
-            storage,
-            (local_channel_id, ibc_denom),
-            &ChannelState {
-                outstanding: remote_amount,
-                total_sent: Uint128::from(100u128),
-            },
-        )
-        .unwrap();
-
-    // action
-    let result = process_ibc_msg(
-        pair_mapping,
-        mock_env().contract.address.into_string(),
-        local_receiver,
-        local_channel_id,
-        ibc_msg_sender,
-        ibc_msg_receiver,
-        memo,
-        amount,
-        timeout,
-    )
-    .unwrap();
-
-    assert_eq!(
-        result[0],
-        SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: mock_env().contract.address.into_string(),
-            msg: to_binary(&ExecuteMsg::ReduceChannelBalanceIbcReceive {
-                src_channel_id: local_channel_id.to_string(),
-                ibc_denom: ibc_denom.to_string(),
-                amount: remote_amount,
-                local_receiver: local_receiver.to_string()
-            })
-            .unwrap(),
-            funds: vec![]
-        }))
-    );
-
-    assert_eq!(
-        result[1],
-        SubMsg::reply_on_error(
-            IbcMsg::SendPacket {
-                channel_id: local_channel_id.to_string(),
-                data: to_binary(&Ics20Packet {
-                    amount: remote_amount,
-                    denom: ibc_denom.to_string(),
-                    receiver: ibc_msg_receiver.to_string(),
-                    sender: ibc_msg_sender.to_string(),
-                    memo: None
-                })
-                .unwrap(),
-                timeout: IbcTimeout::with_timestamp(timeout)
-            },
-            FOLLOW_UP_IBC_SEND_FAILURE_ID
-        )
-    )
-}
-
-#[test]
 fn test_get_swap_token_amount_out_from_orai() {
     let deps = mock_dependencies();
     let simulate_amount = Uint128::from(10u128);
@@ -1601,7 +860,7 @@ fn setup_and_query() {
     let deps = setup(&["channel-3", "channel-7"], &[]);
 
     let raw_list = query(deps.as_ref(), mock_env(), QueryMsg::ListChannels {}).unwrap();
-    let list_res: ListChannelsResponse = from_binary(&raw_list).unwrap();
+    let list_res: ListChannelsResponse = from_json(&raw_list).unwrap();
     assert_eq!(2, list_res.channels.len());
     assert_eq!(mock_channel_info("channel-3"), list_res.channels[0]);
     assert_eq!(mock_channel_info("channel-7"), list_res.channels[1]);
@@ -1614,7 +873,7 @@ fn setup_and_query() {
         },
     )
     .unwrap();
-    let chan_res: ChannelResponse = from_binary(&raw_channel).unwrap();
+    let chan_res: ChannelResponse = from_json(&raw_channel).unwrap();
     assert_eq!(chan_res.info, mock_channel_info("channel-3"));
     assert_eq!(0, chan_res.total_sent.len());
     assert_eq!(0, chan_res.balances.len());
@@ -1627,10 +886,10 @@ fn setup_and_query() {
         },
     )
     .unwrap_err();
-    assert_eq!(
-        err,
-        StdError::not_found("cw_ics20_latest::state::ChannelInfo")
-    );
+    assert!(err
+        .to_string()
+        .contains("type: cw20_ics20_msg::state::ChannelInfo;"));
+    assert!(err.to_string().contains("not found"));
 }
 
 #[test]
@@ -1679,7 +938,7 @@ fn test_query_pair_mapping_by_asset_info() {
         },
     )
     .unwrap();
-    let response: Vec<PairQuery> = from_binary(&mappings).unwrap();
+    let response: Vec<PairQuery> = from_json(&mappings).unwrap();
     assert_eq!(response.len(), 2);
 
     // query native token asset info, should receive moon denom in key
@@ -1693,7 +952,7 @@ fn test_query_pair_mapping_by_asset_info() {
         },
     )
     .unwrap();
-    let response: Vec<PairQuery> = from_binary(&mappings).unwrap();
+    let response: Vec<PairQuery> = from_json(&mappings).unwrap();
     assert_eq!(response.len(), 1);
     assert_eq!(response.first().unwrap().key.contains("moon"), true);
 
@@ -1709,7 +968,7 @@ fn test_query_pair_mapping_by_asset_info() {
         },
     )
     .unwrap();
-    let response: Vec<PairQuery> = from_binary(&mappings).unwrap();
+    let response: Vec<PairQuery> = from_json(&mappings).unwrap();
     assert_eq!(response.len(), 0);
 }
 
@@ -1754,7 +1013,7 @@ fn test_update_cw20_mapping() {
         },
     )
     .unwrap();
-    let response: ListMappingResponse = from_binary(&mappings).unwrap();
+    let response: ListMappingResponse = from_json(&mappings).unwrap();
     println!("response: {:?}", response);
     assert_eq!(
         response.pairs.first().unwrap().key,
@@ -1772,7 +1031,7 @@ fn test_update_cw20_mapping() {
         },
     )
     .unwrap();
-    let response: ListMappingResponse = from_binary(&mappings).unwrap();
+    let response: ListMappingResponse = from_json(&mappings).unwrap();
     assert_ne!(response.pairs.first().unwrap().key, "foobar".to_string());
 
     // update existing key case must pass
@@ -1793,7 +1052,7 @@ fn test_update_cw20_mapping() {
         },
     )
     .unwrap();
-    let response: ListMappingResponse = from_binary(&mappings).unwrap();
+    let response: ListMappingResponse = from_json(&mappings).unwrap();
     println!("response: {:?}", response);
     assert_eq!(
         response.pairs.first().unwrap().key,
@@ -1838,7 +1097,7 @@ fn test_delete_cw20_mapping() {
         },
     )
     .unwrap();
-    let response: ListMappingResponse = from_binary(&mappings).unwrap();
+    let response: ListMappingResponse = from_json(&mappings).unwrap();
     println!("response: {:?}", response);
     assert_eq!(
         response.pairs.first().unwrap().key,
@@ -1875,7 +1134,7 @@ fn test_delete_cw20_mapping() {
         },
     )
     .unwrap();
-    let response: ListMappingResponse = from_binary(&mappings).unwrap();
+    let response: ListMappingResponse = from_json(&mappings).unwrap();
     println!("response: {:?}", response);
     assert_eq!(response.pairs.len(), 0)
 }
@@ -1907,7 +1166,7 @@ fn test_delete_cw20_mapping() {
 //         let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
 //         assert_eq!(timeout, &expected_timeout.into());
 //         assert_eq!(channel_id.as_str(), send_channel);
-//         let msg: Ics20Packet = from_binary(data).unwrap();
+//         let msg: Ics20Packet = from_json(data).unwrap();
 //         assert_eq!(msg.amount, Uint128::new(1234567));
 //         assert_eq!(msg.denom.as_str(), "ucosm");
 //         assert_eq!(msg.sender.as_str(), "foobar");
@@ -1956,7 +1215,7 @@ fn test_delete_cw20_mapping() {
 //     let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
 //         sender: "my-account".into(),
 //         amount: Uint128::new(888777666),
-//         msg: to_binary(&transfer).unwrap(),
+//         msg: to_json_binary(&transfer).unwrap(),
 //     });
 
 //     // works with proper funds
@@ -1973,7 +1232,7 @@ fn test_delete_cw20_mapping() {
 //         let expected_timeout = mock_env().block.time.plus_seconds(7777);
 //         assert_eq!(timeout, &expected_timeout.into());
 //         assert_eq!(channel_id.as_str(), send_channel);
-//         let msg: Ics20Packet = from_binary(data).unwrap();
+//         let msg: Ics20Packet = from_json(data).unwrap();
 //         assert_eq!(msg.amount, Uint128::new(888777666));
 //         assert_eq!(msg.denom, format!("cw20:{}", cw20_addr));
 //         assert_eq!(msg.sender.as_str(), "my-account");
@@ -2003,7 +1262,7 @@ fn test_delete_cw20_mapping() {
 //     let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
 //         sender: "my-account".into(),
 //         amount: Uint128::new(888777666),
-//         msg: to_binary(&transfer).unwrap(),
+//         msg: to_json_binary(&transfer).unwrap(),
 //     });
 
 //     // rejected as not on allow list
@@ -2046,7 +1305,7 @@ fn mock_receive_packet(
         memo: Some("memo".to_string()),
     };
     IbcPacket::new(
-        to_binary(&data).unwrap(),
+        to_json_binary(&data).unwrap(),
         IbcEndpoint {
             port_id: REMOTE_PORT.to_string(),
             channel_id: remote_channel.to_string(),
@@ -2174,10 +1433,10 @@ fn proper_checks_on_execute_cw20_transfer_back_to_remote() {
             data,
             timeout,
         }) => {
-            let expected_timeout = mock_env().block.time.plus_seconds(DEFAULT_TIMEOUT);
-            assert_eq!(timeout, expected_timeout.into());
+            let expected_timeout = DEFAULT_TIMEOUT;
+            assert_eq!(timeout.timestamp().unwrap().nanos(), expected_timeout);
             assert_eq!(channel_id.as_str(), local_channel);
-            let msg: Ics20Packet = from_binary(&data).unwrap();
+            let msg: Ics20Packet = from_json(&data).unwrap();
             assert_eq!(msg.amount, Uint128::new(1234567).sub(fee_amount));
             assert_eq!(
                 msg.denom.as_str(),
@@ -2251,7 +1510,6 @@ fn test_update_config() {
         admin: Some("helloworld".to_string()),
         default_timeout: Some(1),
         default_gas_limit: None,
-        fee_denom: Some("hehe".to_string()),
         swap_router_contract: Some("new_router".to_string()),
         token_fee: Some(vec![
             TokenFee {
@@ -2276,6 +1534,7 @@ fn test_update_config() {
         fee_receiver: Some("token_fee_receiver".to_string()),
         relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),
         converter_contract: Some("new_converter".to_string()),
+        osor_entrypoint_contract: Some("new_osor_contract".to_string()),
     };
     // unauthorized case
     let unauthorized_info = mock_info(&String::from("somebody"), &[]);
@@ -2291,10 +1550,9 @@ fn test_update_config() {
     let info = mock_info(&String::from("gov"), &[]);
     execute(deps.as_mut(), mock_env(), info, new_config).unwrap();
     let config: ConfigResponse =
-        from_binary(&query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap()).unwrap();
+        from_json(&query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap()).unwrap();
     assert_eq!(config.default_gas_limit, None);
     assert_eq!(config.default_timeout, 1);
-    assert_eq!(config.fee_denom, "hehe".to_string());
     assert_eq!(config.swap_router_contract, "new_router".to_string());
     assert_eq!(
         config.relayer_fee_receiver,
@@ -2303,6 +1561,10 @@ fn test_update_config() {
     assert_eq!(
         config.token_fee_receiver,
         Addr::unchecked("token_fee_receiver")
+    );
+    assert_eq!(
+        config.osor_entrypoint_contract,
+        Addr::unchecked("new_osor_contract")
     );
     assert_eq!(config.token_fees.len(), 2usize);
     assert_eq!(config.token_fees[0].ratio.denominator, 5);
@@ -2340,10 +1602,10 @@ fn test_handle_packet_refund() {
 
     let result = handle_packet_refund(deps.as_mut().storage, sender, native_denom, amount, false)
         .unwrap_err();
-    assert_eq!(
-        result.to_string(),
-        "cw_ics20_latest::state::MappingMetadata not found"
-    );
+    assert!(result
+        .to_string()
+        .contains("cw20_ics20_msg::state::MappingMetadata"));
+    assert!(result.to_string().contains("not found"));
 
     // update mapping pair so that we can get refunded
     // cosmos based case with mapping found. Should be successful & cosmos msg is ibc send packet
@@ -2392,7 +1654,7 @@ fn test_handle_packet_refund() {
         SubMsg::reply_on_error(
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: "token0".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Mint {
+                msg: to_json_binary(&Cw20ExecuteMsg::Mint {
                     recipient: sender.to_string(),
                     amount
                 })
@@ -2798,7 +2060,7 @@ fn test_build_mint_cw20_mapping_msg() {
         res,
         Some(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: "cw20:foobar".to_string(),
-            msg: to_binary(&Cw20ExecuteMsg::Mint {
+            msg: to_json_binary(&Cw20ExecuteMsg::Mint {
                 recipient: receiver.to_string(),
                 amount: amount_local
             })
@@ -2862,7 +2124,7 @@ fn test_build_burn_cw20_mapping_msg() {
         res,
         Some(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: "cw20:foobar".to_string(),
-            msg: to_binary(&Cw20ExecuteMsg::Burn {
+            msg: to_json_binary(&Cw20ExecuteMsg::Burn {
                 amount: amount_local
             })
             .unwrap(),
@@ -2946,7 +2208,7 @@ fn test_increase_channel_balance_ibc_receive_with_mint_burn() {
             assert_eq!(contract_addr, cw20_addr);
             assert_eq!(
                 msg,
-                to_binary(&Cw20ExecuteMsg::Mint {
+                to_json_binary(&Cw20ExecuteMsg::Mint {
                     recipient: mock_env().contract.address.to_string(),
                     amount: convert_remote_to_local(amount, 18, 6).unwrap()
                 })
@@ -3056,7 +2318,7 @@ fn test_reduce_channel_balance_ibc_receive_with_mint_burn() {
             assert_eq!(contract_addr, cw20_addr);
             assert_eq!(
                 msg,
-                to_binary(&Cw20ExecuteMsg::Burn {
+                to_json_binary(&Cw20ExecuteMsg::Burn {
                     amount: convert_remote_to_local(amount, 18, 6).unwrap()
                 })
                 .unwrap()

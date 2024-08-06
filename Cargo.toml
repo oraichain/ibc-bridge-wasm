@@ -4,8 +4,8 @@ members = ["contracts/*", "packages/*"]
 resolver = "2"
 
 [workspace.dependencies]
-cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "24c138c" }
-oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "f2c1cec" }
+cosmwasm-testing-util = { git = "https://github.com/oraichain/cosmwasm-testing-util.git", rev = "33a262f" }
+oraiswap = { git = "https://github.com/oraichain/oraiswap.git", rev = "f4b0cc2f96e87938c6f203ac0a82012bcfe4b17b" }
 cw2 = { version = "1.0.1" }
 cw20 = { version = "1.0.1" }
 cw20-base = { version = "1.0.1" }
@@ -13,10 +13,10 @@ cw-storage-plus = { version = "1.0.1" }
 cw-controllers = { version = "1.0.1" }
 cw-utils = "0.16.0"
 cw20-ics20-msg = { path = "./packages/cw20-ics20-msg" }
-cosmwasm-schema = { version = "1.2.8" }
-cosmwasm-std = { version = "1.2.8", default-features = false }
-cosmwasm-vm = { version = "1.2.8" }
-# osmosis-test-tube = { git = "https://github.com/oraichain/test-tube.git", rev = "354d580" }
+cosmwasm-schema = { version = "1.5.0" }
+cosmwasm-std = { version = "1.5.0", default-features = false }
+cosmwasm-vm = { version = "1.5.0" }
+skip = { git = "https://github.com/oraichain/osor-api-contracts.git", rev = "0655922173b4ac37c5e63f451eb9bc33c7ac8159" }
 
 [profile.release]
 opt-level = 3

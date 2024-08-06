@@ -1,6 +1,6 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    to_binary, Addr, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128,
+    to_json_binary, Addr, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, StdError, StdResult, Uint128,
     WasmMsg,
 };
 use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
@@ -87,11 +87,22 @@ impl Amount {
 
     pub fn send_amount(&self, recipient: String, msg: Option<Binary>) -> CosmosMsg {
         match self.to_owned() {
-            Amount::Native(coin) => BankMsg::Send {
-                to_address: recipient,
-                amount: vec![coin],
+            Amount::Native(coin) => {
+                if let Some(msg) = msg {
+                    WasmMsg::Execute {
+                        contract_addr: recipient,
+                        msg,
+                        funds: vec![coin],
+                    }
+                    .into()
+                } else {
+                    BankMsg::Send {
+                        to_address: recipient,
+                        amount: vec![coin],
+                    }
+                    .into()
+                }
             }
-            .into(),
             Amount::Cw20(coin) => {
                 let msg_cw20 = if let Some(msg) = msg {
                     Cw20ExecuteMsg::Send {
@@ -108,7 +119,7 @@ impl Amount {
 
                 WasmMsg::Execute {
                     contract_addr: coin.address.to_string(),
-                    msg: to_binary(&msg_cw20).unwrap(),
+                    msg: to_json_binary(&msg_cw20).unwrap(),
                     funds: vec![],
                 }
                 .into()

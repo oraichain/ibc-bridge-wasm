@@ -6,4 +6,5 @@ pub mod amount;
 pub mod converter;
 pub mod helper;
 pub mod ibc_hooks;
-pub mod receiver;
+pub mod msg;
+pub mod state;

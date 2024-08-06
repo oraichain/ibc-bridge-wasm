@@ -1,6 +1,6 @@
 use crate::contract::instantiate;
 use crate::ibc::{ibc_channel_connect, ibc_channel_open, ICS20_ORDERING, ICS20_VERSION};
-use crate::state::ChannelInfo;
+use cw20_ics20_msg::state::ChannelInfo;
 
 use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
 
@@ -80,6 +80,7 @@ pub fn setup(
         allowlist,
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
+        osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
     };
     let info = mock_info(&String::from("anyone"), &[]);
     let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();

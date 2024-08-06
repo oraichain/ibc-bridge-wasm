@@ -1,9 +1,11 @@
+import {Uint128, Binary, AssetInfo, Addr, Cw20ReceiveMsg, TransferBackMsg, Coin} from "./types";
 export interface InstantiateMsg {
   allowlist: AllowMsg[];
   converter_contract: string;
   default_gas_limit?: number | null;
   default_timeout: number;
   gov_contract: string;
+  osor_entrypoint_contract: string;
   swap_router_contract: string;
 }
 export interface AllowMsg {
@@ -19,15 +21,13 @@ export type ExecuteMsg = {
 } | {
   delete_mapping_pair: DeletePairMsg;
 } | {
-  allow: AllowMsg;
-} | {
   update_config: {
     admin?: string | null;
     converter_contract?: string | null;
     default_gas_limit?: number | null;
     default_timeout?: number | null;
-    fee_denom?: string | null;
     fee_receiver?: string | null;
+    osor_entrypoint_contract?: string | null;
     relayer_fee?: RelayerFee[] | null;
     relayer_fee_receiver?: string | null;
     swap_router_contract?: string | null;
@@ -58,33 +58,10 @@ export type ExecuteMsg = {
   ibc_hooks_receive: {
     args: Binary;
     func: HookMethods;
+    orai_receiver: string;
   };
 };
-export type Uint128 = string;
-export type Binary = string;
-export type AssetInfo = {
-  token: {
-    contract_addr: Addr;
-  };
-} | {
-  native_token: {
-    denom: string;
-  };
-};
-export type Addr = string;
 export type HookMethods = "universal_swap";
-export interface Cw20ReceiveMsg {
-  amount: Uint128;
-  msg: Binary;
-  sender: string;
-}
-export interface TransferBackMsg {
-  local_channel_id: string;
-  memo?: string | null;
-  remote_address: string;
-  remote_denom: string;
-  timeout?: number | null;
-}
 export interface UpdatePairMsg {
   denom: string;
   is_mint_burn?: boolean | null;
@@ -165,19 +142,15 @@ export interface AllowedResponse {
 export type Amount = {
   native: Coin;
 } | {
-  cw20: Cw20Coin;
+  cw20: Cw20CoinVerified;
 };
 export interface ChannelResponse {
   balances: Amount[];
   info: ChannelInfo;
   total_sent: Amount[];
 }
-export interface Coin {
-  amount: Uint128;
-  denom: string;
-}
-export interface Cw20Coin {
-  address: string;
+export interface Cw20CoinVerified {
+  address: Addr;
   amount: Uint128;
 }
 export interface ChannelInfo {
@@ -200,6 +173,7 @@ export interface ConfigResponse {
   default_timeout: number;
   fee_denom: string;
   gov_contract: string;
+  osor_entrypoint_contract: string;
   relayer_fee_receiver: Addr;
   relayer_fees: RelayerFeeResponse[];
   swap_router_contract: string;
