@@ -50,6 +50,7 @@ pub fn ibc_hooks_universal_swap(
     }
     let sub_msgs = get_follow_up_msgs(
         deps.storage,
+        deps.api,
         orai_receiver,
         Amount::from_parts(parse_asset_info_denom(&to_send.info), to_send.amount),
         Some(args.to_base64()),
