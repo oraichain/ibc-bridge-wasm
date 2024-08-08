@@ -1,20 +1,23 @@
 use std::ops::Sub;
 
 use cosmwasm_std::{
-    Addr, BankMsg, Coin, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg, StdError,
+    wasm_execute, Addr, BankMsg, Coin, CosmosMsg, Decimal, IbcChannelConnectMsg, IbcChannelOpenMsg,
+    StdError,
 };
 use cosmwasm_testing_util::mock::MockContract;
 use cosmwasm_vm::testing::MockInstanceOptions;
+use cw20_ics20_msg::converter::ConverterController;
 use cw_controllers::AdminError;
 use oraiswap::asset::AssetInfo;
 use oraiswap::router::RouterController;
 
 use crate::ibc::{
     convert_remote_denom_to_evm_prefix, deduct_fee, deduct_relayer_fee, deduct_token_fee,
-    get_swap_token_amount_out_from_orai, handle_packet_refund, ibc_packet_receive,
-    parse_ibc_channel_without_sanity_checks, parse_ibc_denom_without_sanity_checks,
-    parse_ibc_info_without_sanity_checks, parse_voucher_denom, Ics20Ack, Ics20Packet,
-    ICS20_VERSION, REFUND_FAILURE_ID,
+    get_follow_up_msgs, get_swap_token_amount_out_from_orai, handle_packet_refund,
+    ibc_packet_receive, parse_ibc_channel_without_sanity_checks,
+    parse_ibc_denom_without_sanity_checks, parse_ibc_info_without_sanity_checks,
+    parse_voucher_denom, Ics20Ack, Ics20Packet, ICS20_VERSION, NATIVE_RECEIVE_ID,
+    REFUND_FAILURE_ID,
 };
 use crate::query_helper::get_destination_info_on_orai;
 use crate::testing::test_helpers::*;
@@ -25,10 +28,10 @@ use cosmwasm_std::{
 
 use crate::error::ContractError;
 use crate::state::{
-    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance,
-    CHANNEL_REVERSE_STATE, RELAYER_FEE, REPLY_ARGS, TOKEN_FEE,
+    get_key_ics20_ibc_denom, increase_channel_balance, reduce_channel_balance, Config,
+    CHANNEL_REVERSE_STATE, CONFIG, RELAYER_FEE, REPLY_ARGS, TOKEN_FEE,
 };
-use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
+use cw20::{Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw20_ics20_msg::amount::{convert_remote_to_local, Amount};
 use cw20_ics20_msg::state::{MappingMetadata, Ratio, RelayerFee, TokenFee};
 
@@ -2337,4 +2340,107 @@ fn test_reduce_channel_balance_ibc_receive_with_mint_burn() {
     assert_eq!(reply_args.channel, local_channel_id);
     assert_eq!(reply_args.denom, ibc_denom_keys);
     assert_eq!(reply_args.local_receiver, local_receiver.to_string());
+}
+
+#[test]
+pub fn test_get_follow_up_msg() {
+    let mut deps = mock_dependencies();
+    let deps_mut = deps.as_mut();
+    CONFIG
+        .save(
+            deps_mut.storage,
+            &Config {
+                default_timeout: 7600,
+                default_gas_limit: None,
+                fee_denom: "orai".to_string(),
+                swap_router_contract: RouterController("router".to_string()),
+                token_fee_receiver: Addr::unchecked("token_fee_receiver"),
+                relayer_fee_receiver: Addr::unchecked("relayer_fee_receiver"),
+                converter_contract: ConverterController("converter".to_string()),
+                osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
+            },
+        )
+        .unwrap();
+
+    let orai_receiver = "orai123".to_string();
+    let to_send = Amount::Cw20(Cw20CoinVerified {
+        address: Addr::unchecked("cw20"),
+        amount: Uint128::new(1000000),
+    });
+
+    // case 1: memo None => send only
+    let msgs = get_follow_up_msgs(
+        deps_mut.storage,
+        deps_mut.api,
+        orai_receiver.clone(),
+        to_send.clone(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        msgs,
+        vec![SubMsg::reply_on_error(
+            wasm_execute(
+                "cw20".to_string(),
+                &Cw20ExecuteMsg::Transfer {
+                    recipient: orai_receiver.clone(),
+                    amount: Uint128::new(1000000)
+                },
+                vec![]
+            )
+            .unwrap(),
+            NATIVE_RECEIVE_ID
+        ),]
+    );
+
+    // case 2: memo empty => send only
+    let msgs = get_follow_up_msgs(
+        deps_mut.storage,
+        deps_mut.api,
+        orai_receiver.clone(),
+        to_send.clone(),
+        Some("".to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        msgs,
+        vec![SubMsg::reply_on_error(
+            wasm_execute(
+                "cw20".to_string(),
+                &Cw20ExecuteMsg::Transfer {
+                    recipient: orai_receiver.clone(),
+                    amount: Uint128::new(1000000)
+                },
+                vec![]
+            )
+            .unwrap(),
+            NATIVE_RECEIVE_ID
+        ),]
+    );
+
+    // case 3: memo is orai_address => send_only
+    let msgs = get_follow_up_msgs(
+        deps_mut.storage,
+        deps_mut.api,
+        orai_receiver.clone(),
+        to_send.clone(),
+        Some(orai_receiver.to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        msgs,
+        vec![SubMsg::reply_on_error(
+            wasm_execute(
+                "cw20".to_string(),
+                &Cw20ExecuteMsg::Transfer {
+                    recipient: orai_receiver.clone(),
+                    amount: Uint128::new(1000000)
+                },
+                vec![]
+            )
+            .unwrap(),
+            NATIVE_RECEIVE_ID
+        ),]
+    );
+    // case 4: call universal swap (todo)
 }

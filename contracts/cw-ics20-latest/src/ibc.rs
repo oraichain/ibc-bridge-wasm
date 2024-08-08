@@ -401,6 +401,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
     let new_deducted_to_send = Amount::from_parts(to_send.denom(), fee_data.deducted_amount);
     let sub_msgs = get_follow_up_msgs(
         storage,
+        api,
         msg.receiver.clone(),
         new_deducted_to_send,
         msg.memo.clone(),
@@ -421,6 +422,7 @@ fn handle_ibc_packet_receive_native_remote_chain(
 
 pub fn get_follow_up_msgs(
     storage: &mut dyn Storage,
+    api: &dyn Api,
     orai_receiver: String,
     to_send: Amount,
     memo: Option<String>,
@@ -430,7 +432,8 @@ pub fn get_follow_up_msgs(
     let send_only_sub_msg =
         SubMsg::reply_on_error(to_send.send_amount(orai_receiver, None), NATIVE_RECEIVE_ID);
     if let Some(memo) = memo {
-        if memo.is_empty() {
+        // Do not call universal swap if the memo is empty or is an address.
+        if memo.is_empty() || api.addr_validate(&memo).is_ok() {
             sub_msgs.push(send_only_sub_msg);
         } else {
             let swap_then_post_action_msg = to_send.send_amount(
