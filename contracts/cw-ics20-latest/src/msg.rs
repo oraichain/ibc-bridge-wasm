@@ -6,6 +6,7 @@ use oraiswap::asset::AssetInfo;
 
 use cw20_ics20_msg::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
 use cw20_ics20_msg::{amount::Amount, ibc_hooks::HookMethods};
+use token_bindings::Metadata;
 
 #[cw_serde]
 pub struct InitMsg {
@@ -24,6 +25,8 @@ pub struct InitMsg {
     pub converter_contract: String,
     // entrypoint for handling swap and post actions like IBC transfer to remote
     pub osor_entrypoint_contract: String,
+    // token factory proxy address
+    pub token_factory_addr: String,
 }
 
 #[cw_serde]
@@ -34,7 +37,22 @@ pub struct AllowMsg {
 
 #[cw_serde]
 pub struct MigrateMsg {
+    pub token_fee_receiver: Addr,
+
+    pub relayer_fee_receiver: Addr,
+    /// Default timeout for ics20 packets, specified in seconds
+    pub default_timeout: u64,
+    /// If set, contracts off the allowlist will run with this gas limit.
+    /// If unset, will refuse to accept any contract off the allow list.
+    pub default_gas_limit: Option<u64>,
+    /// router contract for fee swap
+    pub swap_router_contract: String,
+    /// converter contract for convert token
+    pub converter_contract: String,
+    // entrypoint for handling swap and post actions like IBC transfer to remote
     pub osor_entrypoint_contract: String,
+    // token factory proxy address
+    pub token_factory_addr: Addr,
 }
 
 #[cw_serde]
@@ -60,6 +78,7 @@ pub enum ExecuteMsg {
         relayer_fee_receiver: Option<String>,
         converter_contract: Option<String>,
         osor_entrypoint_contract: Option<String>,
+        token_factory_addr: Option<String>,
     },
     // self-call msgs to deal with on_ibc_receive reentrancy error
     IncreaseChannelBalanceIbcReceive {
@@ -85,6 +104,13 @@ pub enum ExecuteMsg {
         orai_receiver: String,
         args: Binary,
     },
+    RegisterDenom(RegisterDenomMsg),
+}
+
+#[cw_serde]
+pub struct RegisterDenomMsg {
+    pub subdenom: String,
+    pub metadata: Option<Metadata>,
 }
 
 /// This is the message we accept via Receive

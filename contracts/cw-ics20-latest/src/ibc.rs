@@ -2,8 +2,8 @@ use std::ops::Mul;
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    attr, entry_point, from_json, to_json_binary, Api, Binary, CosmosMsg, Decimal, Deps, DepsMut,
-    Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
+    attr, entry_point, from_json, to_json_binary, wasm_execute, Api, Binary, CosmosMsg, Decimal,
+    Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcChannel, IbcChannelCloseMsg,
     IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcOrder, IbcPacket,
     IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, IbcTimeout,
     Order, QuerierWrapper, Reply, Response, StdError, StdResult, Storage, SubMsg, SubMsgResult,
@@ -18,7 +18,7 @@ use oraiswap::asset::AssetInfo;
 use oraiswap::router::{RouterController, SwapOperation};
 use skip::entry_point::ExecuteMsg as EntryPointExecuteMsg;
 
-use crate::contract::build_mint_cw20_mapping_msg;
+use crate::contract::build_mint_mapping_msg;
 use crate::error::{ContractError, Never};
 use crate::msg::ExecuteMsg;
 use crate::state::{
@@ -355,16 +355,19 @@ fn handle_ibc_packet_receive_native_remote_chain(
     );
 
     // increase channel balance submsg. We increase it first before doing other tasks
-    cosmos_msgs.push(CosmosMsg::Wasm(cosmwasm_std::WasmMsg::Execute {
-        contract_addr: env.contract.address.to_string(),
-        msg: to_json_binary(&ExecuteMsg::IncreaseChannelBalanceIbcReceive {
-            dest_channel_id: packet.dest.channel_id.clone(),
-            ibc_denom: ibc_denom.clone(),
-            amount: msg.amount,
-            local_receiver: msg.receiver.clone(),
-        })?,
-        funds: vec![],
-    }));
+    cosmos_msgs.push(
+        wasm_execute(
+            env.contract.address.to_string(),
+            &ExecuteMsg::IncreaseChannelBalanceIbcReceive {
+                dest_channel_id: packet.dest.channel_id.clone(),
+                ibc_denom: ibc_denom.clone(),
+                amount: msg.amount,
+                local_receiver: msg.receiver.clone(),
+            },
+            vec![],
+        )?
+        .into(),
+    );
 
     let fee_data = process_deduct_fee(
         storage,
@@ -729,6 +732,7 @@ pub fn handle_packet_refund(
 ) -> Result<SubMsg, ContractError> {
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
     let pair_mapping = ics20_denoms().load(storage, packet_denom)?;
+    let config = CONFIG.load(storage)?;
 
     let local_amount = convert_remote_to_local(
         packet_amount,
@@ -742,7 +746,8 @@ pub fn handle_packet_refund(
         local_amount,
     )
     .send_amount(packet_sender.to_string(), None);
-    let cosmos_msg = match build_mint_cw20_mapping_msg(
+    let cosmos_msg = match build_mint_mapping_msg(
+        config.token_factory_addr.to_string(),
         pair_mapping.is_mint_burn,
         pair_mapping.asset_info,
         local_amount,

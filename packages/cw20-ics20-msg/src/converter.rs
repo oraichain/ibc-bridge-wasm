@@ -1,5 +1,7 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{to_json_binary, Coin, CosmosMsg, QuerierWrapper, StdResult, Uint128, WasmMsg};
+use cosmwasm_std::{
+    to_json_binary, wasm_execute, Coin, CosmosMsg, QuerierWrapper, StdResult, Uint128,
+};
 use cw20::Cw20ExecuteMsg;
 use oraiswap::{
     asset::{Asset, AssetInfo},
@@ -57,24 +59,26 @@ impl ConverterController {
                         amount: amount * converter_info.token_ratio.ratio,
                     };
 
-                    let msg = match source_info {
-                        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-                            contract_addr: self.addr(),
-                            msg: to_json_binary(&converter::ExecuteMsg::Convert {})?,
-                            funds: vec![Coin {
+                    let msg: CosmosMsg = match source_info {
+                        AssetInfo::NativeToken { denom } => wasm_execute(
+                            self.addr(),
+                            &converter::ExecuteMsg::Convert {},
+                            vec![Coin {
                                 denom: denom.clone(),
                                 amount,
                             }],
-                        }),
-                        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-                            contract_addr: contract_addr.to_string(),
-                            msg: to_json_binary(&Cw20ExecuteMsg::Send {
+                        )?
+                        .into(),
+                        AssetInfo::Token { contract_addr } => wasm_execute(
+                            contract_addr.to_string(),
+                            &Cw20ExecuteMsg::Send {
                                 contract: self.addr(),
                                 amount,
                                 msg: to_json_binary(&converter::Cw20HookMsg::Convert {})?,
-                            })?,
-                            funds: vec![],
-                        }),
+                            },
+                            vec![],
+                        )?
+                        .into(),
                     };
 
                     Ok((Some(msg), return_asset))
@@ -86,24 +90,26 @@ impl ConverterController {
                     };
 
                     let msg = match converter_info.token_ratio.info {
-                        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-                            contract_addr: self.addr(),
-                            msg: to_json_binary(&converter::ExecuteMsg::ConvertReverse {
+                        AssetInfo::NativeToken { denom } => wasm_execute(
+                            self.addr(),
+                            &converter::ExecuteMsg::ConvertReverse {
                                 from_asset: source_info.to_owned(),
-                            })?,
-                            funds: vec![Coin { denom, amount }],
-                        }),
-                        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-                            contract_addr: contract_addr.to_string(),
-                            msg: to_json_binary(&Cw20ExecuteMsg::Send {
+                            },
+                            vec![Coin { denom, amount }],
+                        )?
+                        .into(),
+                        AssetInfo::Token { contract_addr } => wasm_execute(
+                            contract_addr.to_string(),
+                            &Cw20ExecuteMsg::Send {
                                 contract: self.addr(),
                                 amount,
                                 msg: to_json_binary(&converter::Cw20HookMsg::ConvertReverse {
                                     from: source_info.to_owned(),
                                 })?,
-                            })?,
-                            funds: vec![],
-                        }),
+                            },
+                            vec![],
+                        )?
+                        .into(),
                     };
 
                     Ok((Some(msg), return_asset))

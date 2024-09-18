@@ -365,9 +365,9 @@ dependencies = [
  "cw-multi-test 1.2.0",
  "cw20 1.1.2",
  "cw20-base",
- "token-bindings",
+ "token-bindings 0.11.0 (git+https://github.com/oraichain/token-bindings.git?rev=7861576)",
  "token-bindings-test",
- "tokenfactory",
+ "tokenfactory 0.11.0 (git+https://github.com/oraichain/token-bindings.git?rev=7861576)",
 ]
 
 [[package]]
@@ -605,6 +605,8 @@ dependencies = [
  "sha256",
  "skip",
  "thiserror",
+ "token-bindings 0.11.0 (git+https://github.com/oraichain/token-bindings.git?rev=9796c74)",
+ "tokenfactory 0.11.0 (git+https://github.com/oraichain/token-bindings.git?rev=9796c74)",
 ]
 
 [[package]]
@@ -2364,6 +2366,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "token-bindings"
+version = "0.11.0"
+source = "git+https://github.com/oraichain/token-bindings.git?rev=9796c74#9796c7480ee2955a508e84be54421fc231b74ee8"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "schemars",
+ "serde",
+]
+
+[[package]]
 name = "token-bindings-test"
 version = "0.11.0"
 source = "git+https://github.com/oraichain/token-bindings.git?rev=7861576#78615761c7c0eb8ff8ebe64e26f70d20fec5b4e2"
@@ -2376,7 +2389,7 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
- "token-bindings",
+ "token-bindings 0.11.0 (git+https://github.com/oraichain/token-bindings.git?rev=7861576)",
 ]
 
 [[package]]
@@ -2392,7 +2405,23 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror",
- "token-bindings",
+ "token-bindings 0.11.0 (git+https://github.com/oraichain/token-bindings.git?rev=7861576)",
+]
+
+[[package]]
+name = "tokenfactory"
+version = "0.11.0"
+source = "git+https://github.com/oraichain/token-bindings.git?rev=9796c74#9796c7480ee2955a508e84be54421fc231b74ee8"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw-storage-plus 1.2.0",
+ "cw2 1.1.2",
+ "schemars",
+ "serde",
+ "thiserror",
+ "token-bindings 0.11.0 (git+https://github.com/oraichain/token-bindings.git?rev=9796c74)",
 ]
 
 [[package]]
