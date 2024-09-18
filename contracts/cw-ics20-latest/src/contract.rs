@@ -3,7 +3,7 @@ use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_json, to_json_binary, wasm_execute, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env,
     IbcEndpoint, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult,
-    Storage, Timestamp, Uint128, WasmMsg,
+    Storage, Timestamp, Uint128,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -646,22 +646,28 @@ pub fn build_burn_mapping_msg(
     //  burn cw20 token if the mechanism is mint burn
     if is_mint_burn {
         match burn_asset_info {
-            AssetInfo::NativeToken { denom } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: token_factory,
-                msg: to_json_binary(&tokenfactory::msg::ExecuteMsg::BurnTokens {
-                    denom: denom.to_owned(),
-                    amount: amount_local,
-                    burn_from_address: from_address,
-                })?,
-                funds: vec![],
-            }))),
-            AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: contract_addr.to_string(),
-                msg: to_json_binary(&Cw20ExecuteMsg::Burn {
-                    amount: amount_local,
-                })?,
-                funds: vec![],
-            }))),
+            AssetInfo::NativeToken { denom } => Ok(Some(
+                wasm_execute(
+                    token_factory,
+                    &tokenfactory::msg::ExecuteMsg::BurnTokens {
+                        denom: denom.to_owned(),
+                        amount: amount_local,
+                        burn_from_address: from_address,
+                    },
+                    vec![],
+                )?
+                .into(),
+            )),
+            AssetInfo::Token { contract_addr } => Ok(Some(
+                wasm_execute(
+                    contract_addr.to_string(),
+                    &Cw20ExecuteMsg::Burn {
+                        amount: amount_local,
+                    },
+                    vec![],
+                )?
+                .into(),
+            )),
         }
     } else {
         Ok(None)
@@ -677,23 +683,29 @@ pub fn build_mint_mapping_msg(
 ) -> Result<Option<CosmosMsg>, ContractError> {
     if is_mint_burn {
         match mint_asset_info {
-            AssetInfo::NativeToken { denom } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: token_factory,
-                msg: to_json_binary(&tokenfactory::msg::ExecuteMsg::MintTokens {
-                    denom: denom.to_owned(),
-                    amount: amount_local,
-                    mint_to_address: receiver,
-                })?,
-                funds: vec![],
-            }))),
-            AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: contract_addr.to_string(),
-                msg: to_json_binary(&Cw20ExecuteMsg::Mint {
-                    recipient: receiver,
-                    amount: amount_local,
-                })?,
-                funds: vec![],
-            }))),
+            AssetInfo::NativeToken { denom } => Ok(Some(
+                wasm_execute(
+                    token_factory,
+                    &tokenfactory::msg::ExecuteMsg::MintTokens {
+                        denom: denom.to_owned(),
+                        amount: amount_local,
+                        mint_to_address: receiver,
+                    },
+                    vec![],
+                )?
+                .into(),
+            )),
+            AssetInfo::Token { contract_addr } => Ok(Some(
+                wasm_execute(
+                    contract_addr.to_string(),
+                    &Cw20ExecuteMsg::Mint {
+                        recipient: receiver,
+                        amount: amount_local,
+                    },
+                    vec![],
+                )?
+                .into(),
+            )),
         }
     } else {
         Ok(None)
