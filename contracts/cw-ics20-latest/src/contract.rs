@@ -1,9 +1,9 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, IbcEndpoint,
-    IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult, Storage,
-    Timestamp, Uint128, WasmMsg,
+    from_json, to_json_binary, wasm_execute, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env,
+    IbcEndpoint, IbcQuery, MessageInfo, Order, PortIdResponse, Response, StdError, StdResult,
+    Storage, Timestamp, Uint128, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -19,7 +19,7 @@ use crate::ibc_hooks::ibc_hooks_receive;
 use crate::msg::{
     AllowedResponse, ChannelResponse, ChannelWithKeyResponse, ConfigResponse, ExecuteMsg, InitMsg,
     ListAllowedResponse, ListChannelsResponse, ListMappingResponse, MigrateMsg, PairQuery,
-    PortResponse, QueryMsg, RelayerFeeResponse,
+    PortResponse, QueryMsg, RegisterDenomMsg, RelayerFeeResponse,
 };
 use crate::query_helper::get_mappings_from_asset_info;
 use crate::state::{
@@ -165,6 +165,7 @@ pub fn execute(
             orai_receiver,
             args,
         } => ibc_hooks_receive(deps, env, info, func, orai_receiver, args),
+        ExecuteMsg::RegisterDenom(msg) => register_denom(deps, info, msg),
     }
 }
 
@@ -175,6 +176,29 @@ pub fn is_caller_contract(caller: Addr, contract_addr: Addr) -> StdResult<()> {
         ));
     }
     Ok(())
+}
+
+pub fn register_denom(
+    deps: DepsMut,
+    info: MessageInfo,
+    msg: RegisterDenomMsg,
+) -> Result<Response, ContractError> {
+    ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
+
+    let config = CONFIG.load(deps.storage)?;
+
+    let create_denom_msg = wasm_execute(
+        config.token_factory_addr,
+        &tokenfactory::msg::ExecuteMsg::CreateDenom {
+            subdenom: msg.subdenom,
+            metadata: msg.metadata,
+        },
+        info.funds,
+    )?;
+
+    Ok(Response::new()
+        .add_attribute("action", "register_denom")
+        .add_message(create_denom_msg))
 }
 
 pub fn handle_override_channel_balance(

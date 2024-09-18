@@ -6,6 +6,7 @@ use oraiswap::asset::AssetInfo;
 
 use cw20_ics20_msg::state::{ChannelInfo, MappingMetadata, Ratio, RelayerFee, TokenFee};
 use cw20_ics20_msg::{amount::Amount, ibc_hooks::HookMethods};
+use token_bindings::Metadata;
 
 #[cw_serde]
 pub struct InitMsg {
@@ -88,6 +89,13 @@ pub enum ExecuteMsg {
         orai_receiver: String,
         args: Binary,
     },
+    RegisterDenom(RegisterDenomMsg),
+}
+
+#[cw_serde]
+pub struct RegisterDenomMsg {
+    pub subdenom: String,
+    pub metadata: Option<Metadata>,
 }
 
 /// This is the message we accept via Receive
