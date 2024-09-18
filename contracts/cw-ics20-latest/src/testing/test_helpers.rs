@@ -81,6 +81,7 @@ pub fn setup(
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
         osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
+        token_factory_addr: "token_factory_addr".to_string(),
     };
     let info = mock_info(&String::from("anyone"), &[]);
     let res = instantiate(deps.as_mut(), mock_env(), info, instantiate_msg).unwrap();

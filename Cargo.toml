@@ -17,6 +17,8 @@ cosmwasm-schema = { version = "1.5.0" }
 cosmwasm-std = { version = "1.5.0", default-features = false }
 cosmwasm-vm = { version = "1.5.0" }
 skip = { git = "https://github.com/oraichain/osor-api-contracts.git", rev = "0655922173b4ac37c5e63f451eb9bc33c7ac8159" }
+tokenfactory = { git = "https://github.com/oraichain/token-bindings.git", rev = "9796c74" }
+token-bindings = { git = "https://github.com/oraichain/token-bindings.git", rev = "9796c74" }
 
 [profile.release]
 opt-level = 3

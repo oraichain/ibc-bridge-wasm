@@ -24,6 +24,8 @@ pub struct InitMsg {
     pub converter_contract: String,
     // entrypoint for handling swap and post actions like IBC transfer to remote
     pub osor_entrypoint_contract: String,
+    // token factory proxy address
+    pub token_factory_addr: String,
 }
 
 #[cw_serde]
@@ -60,6 +62,7 @@ pub enum ExecuteMsg {
         relayer_fee_receiver: Option<String>,
         converter_contract: Option<String>,
         osor_entrypoint_contract: Option<String>,
+        token_factory_addr: Option<String>,
     },
     // self-call msgs to deal with on_ibc_receive reentrancy error
     IncreaseChannelBalanceIbcReceive {

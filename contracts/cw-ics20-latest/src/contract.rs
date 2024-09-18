@@ -55,6 +55,7 @@ pub fn instantiate(
         relayer_fee_receiver: admin,
         converter_contract: ConverterController(msg.converter_contract),
         osor_entrypoint_contract: msg.osor_entrypoint_contract,
+        token_factory_addr: deps.api.addr_validate(&msg.token_factory_addr)?,
     };
     CONFIG.save(deps.storage, &cfg)?;
 
@@ -101,6 +102,7 @@ pub fn execute(
             relayer_fee,
             converter_contract,
             osor_entrypoint_contract,
+            token_factory_addr,
         } => update_config(
             deps,
             info,
@@ -114,6 +116,7 @@ pub fn execute(
             relayer_fee,
             converter_contract,
             osor_entrypoint_contract,
+            token_factory_addr,
         ),
         // self-called msgs for ibc_packet_receive
         ExecuteMsg::IncreaseChannelBalanceIbcReceive {
@@ -208,6 +211,7 @@ pub fn handle_increase_channel_balance_ibc_receive(
     remote_amount: Uint128,
     local_receiver: String,
 ) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
     is_caller_contract(caller, contract_addr.clone())?;
     // will have to increase balance here because if this tx fails then it will be reverted, and the balance on the remote chain will also be reverted
     increase_channel_balance(deps.storage, &dst_channel_id, &ibc_denom, remote_amount)?;
@@ -222,7 +226,8 @@ pub fn handle_increase_channel_balance_ibc_receive(
         pair_mapping.remote_decimals,
         pair_mapping.asset_info_decimals,
     )?;
-    let mint_msg = build_mint_cw20_mapping_msg(
+    let mint_msg = build_mint_mapping_msg(
+        config.token_factory_addr.to_string(),
         pair_mapping.is_mint_burn,
         pair_mapping.asset_info,
         mint_amount,
@@ -261,7 +266,8 @@ pub fn handle_reduce_channel_balance_ibc_receive(
     remote_amount: Uint128,
     local_receiver: String,
 ) -> Result<Response, ContractError> {
-    is_caller_contract(caller, contract_addr)?;
+    let config = CONFIG.load(storage)?;
+    is_caller_contract(caller, contract_addr.clone())?;
     // because we are transferring back, we reduce the channel's balance
     reduce_channel_balance(storage, src_channel_id.as_str(), &ibc_denom, remote_amount)
         .map_err(|err| StdError::generic_err(err.to_string()))?;
@@ -289,10 +295,12 @@ pub fn handle_reduce_channel_balance_ibc_receive(
         pair_mapping.remote_decimals,
         pair_mapping.asset_info_decimals,
     )?;
-    let burn_msg = build_burn_cw20_mapping_msg(
+    let burn_msg = build_burn_mapping_msg(
+        config.token_factory_addr.to_string(),
         pair_mapping.is_mint_burn,
         pair_mapping.asset_info,
         burn_amount,
+        contract_addr.to_string(),
     )?;
     if let Some(burn_msg) = burn_msg {
         cosmos_msgs.push(burn_msg);
@@ -323,6 +331,7 @@ pub fn update_config(
     relayer_fee: Option<Vec<RelayerFee>>,
     converter_contract: Option<String>,
     osor_entrypoint_contract: Option<String>,
+    token_factory_addr: Option<String>,
 ) -> Result<Response, ContractError> {
     ADMIN.assert_admin(deps.as_ref(), &info.sender)?;
     if let Some(token_fee) = token_fee {
@@ -353,6 +362,9 @@ pub fn update_config(
         }
         if let Some(osor_entrypoint_contract) = osor_entrypoint_contract {
             config.osor_entrypoint_contract = osor_entrypoint_contract;
+        }
+        if let Some(token_factory_addr) = token_factory_addr {
+            config.token_factory_addr = deps.api.addr_validate(&token_factory_addr)?;
         }
         config.default_gas_limit = default_gas_limit;
         Ok(config)
@@ -579,10 +591,12 @@ pub fn execute_transfer_back_to_remote_chain(
     )?;
 
     // build burn msg if the mechanism is mint/burn
-    let burn_msg = build_burn_cw20_mapping_msg(
+    let burn_msg = build_burn_mapping_msg(
+        config.token_factory_addr.to_string(),
         mapping.pair_mapping.is_mint_burn,
         mapping.pair_mapping.asset_info,
         fee_data.deducted_amount,
+        env.contract.address.to_string(),
     )?;
     if let Some(burn_msg) = burn_msg {
         cosmos_msgs.push(burn_msg);
@@ -598,17 +612,25 @@ pub fn execute_transfer_back_to_remote_chain(
         ]))
 }
 
-pub fn build_burn_cw20_mapping_msg(
+pub fn build_burn_mapping_msg(
+    token_factory: String,
     is_mint_burn: bool,
     burn_asset_info: AssetInfo,
     amount_local: Uint128,
+    from_address: String,
 ) -> Result<Option<CosmosMsg>, ContractError> {
     //  burn cw20 token if the mechanism is mint burn
     if is_mint_burn {
         match burn_asset_info {
-            AssetInfo::NativeToken { denom } => Err(ContractError::Std(StdError::generic_err(
-                format!("Mapping token must be cw20 token. Got {}", denom),
-            ))),
+            AssetInfo::NativeToken { denom } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: token_factory,
+                msg: to_json_binary(&tokenfactory::msg::ExecuteMsg::BurnTokens {
+                    denom: denom.to_owned(),
+                    amount: amount_local,
+                    burn_from_address: from_address,
+                })?,
+                funds: vec![],
+            }))),
             AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: contract_addr.to_string(),
                 msg: to_json_binary(&Cw20ExecuteMsg::Burn {
@@ -622,7 +644,8 @@ pub fn build_burn_cw20_mapping_msg(
     }
 }
 
-pub fn build_mint_cw20_mapping_msg(
+pub fn build_mint_mapping_msg(
+    token_factory: String,
     is_mint_burn: bool,
     mint_asset_info: AssetInfo,
     amount_local: Uint128,
@@ -630,9 +653,15 @@ pub fn build_mint_cw20_mapping_msg(
 ) -> Result<Option<CosmosMsg>, ContractError> {
     if is_mint_burn {
         match mint_asset_info {
-            AssetInfo::NativeToken { denom } => Err(ContractError::Std(StdError::generic_err(
-                format!("Mapping token must be cw20 token. Got {}", denom),
-            ))),
+            AssetInfo::NativeToken { denom } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: token_factory,
+                msg: to_json_binary(&tokenfactory::msg::ExecuteMsg::MintTokens {
+                    denom: denom.to_owned(),
+                    amount: amount_local,
+                    mint_to_address: receiver,
+                })?,
+                funds: vec![],
+            }))),
             AssetInfo::Token { contract_addr } => Ok(Some(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: contract_addr.to_string(),
                 msg: to_json_binary(&Cw20ExecuteMsg::Mint {

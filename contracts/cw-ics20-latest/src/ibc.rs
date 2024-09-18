@@ -18,7 +18,7 @@ use oraiswap::asset::AssetInfo;
 use oraiswap::router::{RouterController, SwapOperation};
 use skip::entry_point::ExecuteMsg as EntryPointExecuteMsg;
 
-use crate::contract::build_mint_cw20_mapping_msg;
+use crate::contract::build_mint_mapping_msg;
 use crate::error::{ContractError, Never};
 use crate::msg::ExecuteMsg;
 use crate::state::{
@@ -729,6 +729,7 @@ pub fn handle_packet_refund(
 ) -> Result<SubMsg, ContractError> {
     // get ibc denom mapping to get cw20 denom & from decimals in case of packet failure, we can refund the corresponding user & amount
     let pair_mapping = ics20_denoms().load(storage, packet_denom)?;
+    let config = CONFIG.load(storage)?;
 
     let local_amount = convert_remote_to_local(
         packet_amount,
@@ -742,7 +743,8 @@ pub fn handle_packet_refund(
         local_amount,
     )
     .send_amount(packet_sender.to_string(), None);
-    let cosmos_msg = match build_mint_cw20_mapping_msg(
+    let cosmos_msg = match build_mint_mapping_msg(
+        config.token_factory_addr.to_string(),
         pair_mapping.is_mint_burn,
         pair_mapping.asset_info,
         local_amount,

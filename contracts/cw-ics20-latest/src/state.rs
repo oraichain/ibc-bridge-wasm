@@ -95,8 +95,8 @@ pub struct Config {
     pub token_fee_receiver: Addr,
     pub relayer_fee_receiver: Addr,
     pub converter_contract: ConverterController,
-    #[serde(default)]
     pub osor_entrypoint_contract: String,
+    pub token_factory_addr: Addr,
 }
 
 pub fn increase_channel_balance(

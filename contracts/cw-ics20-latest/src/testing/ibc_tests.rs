@@ -36,8 +36,8 @@ use cw20_ics20_msg::amount::{convert_remote_to_local, Amount};
 use cw20_ics20_msg::state::{MappingMetadata, Ratio, RelayerFee, TokenFee};
 
 use crate::contract::{
-    build_burn_cw20_mapping_msg, build_mint_cw20_mapping_msg, execute,
-    handle_override_channel_balance, query, query_channel, query_channel_with_key,
+    build_burn_mapping_msg, build_mint_mapping_msg, execute, handle_override_channel_balance,
+    query, query_channel, query_channel_with_key,
 };
 use crate::msg::{
     AllowMsg, ChannelResponse, ConfigResponse, ExecuteMsg, InitMsg, ListChannelsResponse,
@@ -499,6 +499,8 @@ fn send_from_remote_to_local_receive_happy_path() {
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
         osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
+        token_factory_addr: "orai17hyr3eg92fv34fdnkend48scu32hn26gqxw3hnwkfy904lk9r09qqzty42"
+            .to_string(),
     };
 
     contract_instance
@@ -1538,6 +1540,7 @@ fn test_update_config() {
         relayer_fee_receiver: Some("relayer_fee_receiver".to_string()),
         converter_contract: Some("new_converter".to_string()),
         osor_entrypoint_contract: Some("new_osor_contract".to_string()),
+        token_factory_addr: Some("new_token_factory_addr".to_string()),
     };
     // unauthorized case
     let unauthorized_info = mock_info(&String::from("somebody"), &[]);
@@ -2002,13 +2005,14 @@ fn test_get_destination_info_on_orai() {
 }
 
 #[test]
-fn test_build_mint_cw20_mapping_msg() {
+fn test_build_mint_mapping_msg() {
     let mut deps = setup(&["channel-3", "channel-7"], &[]);
     let ibc_denom = "cosmos";
     let local_channel_id = "channel-3";
     let asset_info = AssetInfo::Token {
         contract_addr: Addr::unchecked("cw20:foobar".to_string()),
     };
+    let token_factory = "token_factory".to_string();
 
     let amount_local = Uint128::from(10000u128);
     let receiver = "receiver";
@@ -2025,7 +2029,8 @@ fn test_build_mint_cw20_mapping_msg() {
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let res = build_mint_cw20_mapping_msg(
+    let res = build_mint_mapping_msg(
+        token_factory.clone(),
         false,
         asset_info.clone(),
         amount_local,
@@ -2034,7 +2039,8 @@ fn test_build_mint_cw20_mapping_msg() {
     assert_eq!(res, Ok(None));
 
     // case 2: on mappinglist, is mint burn but asset info is native
-    let err = build_mint_cw20_mapping_msg(
+    let res = build_mint_mapping_msg(
+        token_factory.clone(),
         true,
         AssetInfo::NativeToken {
             denom: "orai".to_string(),
@@ -2043,13 +2049,19 @@ fn test_build_mint_cw20_mapping_msg() {
         amount_local,
         receiver.to_string(),
     )
-    .unwrap_err();
+    .unwrap();
     assert_eq!(
-        err,
-        ContractError::Std(StdError::generic_err(format!(
-            "Mapping token must be cw20 token. Got {}",
-            "orai"
-        )))
+        res,
+        Some(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: token_factory.clone(),
+            msg: to_json_binary(&tokenfactory::msg::ExecuteMsg::MintTokens {
+                denom: "orai".to_string(),
+                amount: Uint128::from(10000u128),
+                mint_to_address: receiver.to_string(),
+            })
+            .unwrap(),
+            funds: vec![],
+        }))
     );
 
     // case 3: got mint msg
@@ -2057,8 +2069,14 @@ fn test_build_mint_cw20_mapping_msg() {
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let res =
-        build_mint_cw20_mapping_msg(true, asset_info, amount_local, receiver.to_string()).unwrap();
+    let res = build_mint_mapping_msg(
+        token_factory.clone(),
+        true,
+        asset_info,
+        amount_local,
+        receiver.to_string(),
+    )
+    .unwrap();
     assert_eq!(
         res,
         Some(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -2074,13 +2092,16 @@ fn test_build_mint_cw20_mapping_msg() {
 }
 
 #[test]
-fn test_build_burn_cw20_mapping_msg() {
+fn test_build_burn_mapping_msg() {
     let mut deps = setup(&["channel-3", "channel-7"], &[]);
     let ibc_denom = "cosmos";
     let local_channel_id = "channel-3";
     let asset_info = AssetInfo::Token {
         contract_addr: Addr::unchecked("cw20:foobar".to_string()),
     };
+
+    let token_factory = "token_factory".to_string();
+    let contract_addr = "contract_addr".to_string();
 
     let amount_local = Uint128::from(10000u128);
 
@@ -2096,25 +2117,39 @@ fn test_build_burn_cw20_mapping_msg() {
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let res = build_burn_cw20_mapping_msg(false, asset_info.clone(), amount_local);
+    let res = build_burn_mapping_msg(
+        token_factory.clone(),
+        false,
+        asset_info.clone(),
+        amount_local,
+        contract_addr.clone(),
+    );
     assert_eq!(res, Ok(None));
 
     // case 2: on mappinglist, is mint burn but asset info is native
-    let err = build_burn_cw20_mapping_msg(
+    let res = build_burn_mapping_msg(
+        token_factory.clone(),
         true,
         AssetInfo::NativeToken {
             denom: "orai".to_string(),
         }
         .clone(),
         amount_local,
+        contract_addr.clone(),
     )
-    .unwrap_err();
+    .unwrap();
     assert_eq!(
-        err,
-        ContractError::Std(StdError::generic_err(format!(
-            "Mapping token must be cw20 token. Got {}",
-            "orai"
-        )))
+        res,
+        Some(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: token_factory.clone(),
+            msg: to_json_binary(&tokenfactory::msg::ExecuteMsg::BurnTokens {
+                denom: "orai".to_string(),
+                amount: amount_local,
+                burn_from_address: contract_addr.clone(),
+            })
+            .unwrap(),
+            funds: vec![]
+        })),
     );
 
     // case 3: got mint msg
@@ -2122,7 +2157,14 @@ fn test_build_burn_cw20_mapping_msg() {
     let msg = ExecuteMsg::UpdateMappingPair(update.clone());
     let info = mock_info("gov", &coins(1234567, "ucosm"));
     execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
-    let res = build_burn_cw20_mapping_msg(true, asset_info.clone(), amount_local).unwrap();
+    let res = build_burn_mapping_msg(
+        token_factory.clone(),
+        true,
+        asset_info.clone(),
+        amount_local,
+        contract_addr.clone(),
+    )
+    .unwrap();
     assert_eq!(
         res,
         Some(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -2358,6 +2400,7 @@ pub fn test_get_follow_up_msg() {
                 relayer_fee_receiver: Addr::unchecked("relayer_fee_receiver"),
                 converter_contract: ConverterController("converter".to_string()),
                 osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
+                token_factory_addr: Addr::unchecked("token_factory_addr"),
             },
         )
         .unwrap();

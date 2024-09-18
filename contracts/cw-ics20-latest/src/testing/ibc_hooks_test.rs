@@ -53,6 +53,8 @@ fn test_ibc_hooks_receive() {
         swap_router_contract: "router".to_string(),
         converter_contract: "converter".to_string(),
         osor_entrypoint_contract: "osor_entrypoint_contract".to_string(),
+        token_factory_addr: "orai17hyr3eg92fv34fdnkend48scu32hn26gqxw3hnwkfy904lk9r09qqzty42"
+            .to_string(),
     };
 
     contract_instance
